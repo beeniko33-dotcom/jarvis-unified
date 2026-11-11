@@ -8,15 +8,15 @@ Honest tracking only. No marketing claims.
 |-------|------|--------|
 | **0** | Skeleton | Placeholder / incomplete ideas |
 | **1** | Foundation | Clean structure, secrets hygiene, single config, runnable entry point |
-| **2** | Operational tooling | Status API, passing CI, config checks, working paper broker and risk-gated execution |
+| **2** | Operational tooling | Status API, **passing CI**, config checks, working paper broker and risk-gated execution |
 | **3** | Paper-validated | Sustained paper trading with measured signal quality and auditable results |
 | **4** | Production | Hardened deployment, monitoring, operational risk controls, formal approvals and independently reviewed release gates |
 
 ## Current status — November 2026
 
-**Level 1 — Foundation implementation in progress.** The repository now contains the initial broker-neutral models, in-memory paper broker, common broker contract, central risk engine, execution gate, localhost read-only status API, paper-only configuration, entry point, unit tests, and a GitHub Actions workflow.
+**Level 1 — Foundation.** Models, in-memory paper broker, risk gate, execution service, localhost status API, paper-only config, tests, CI workflow, and `scripts/diagnose.py` are present.
 
-This is not yet Level 2: GitHub has not returned a passing CI status for the current commits, the tests have not yet been independently observed passing in Actions, and several production-critical behaviors remain unimplemented.
+This is **not** Level 2 until a green GitHub Actions run on `main` is observed. See `docs/DIAGNOSTIC.md` for the full audit.
 
 ## Implemented foundation
 
@@ -26,17 +26,18 @@ This is not yet Level 2: GitHub has not returned a passing CI status for the cur
 - [x] Central risk gate with hard limits and default-engaged kill switch
 - [x] Execution service that checks risk before submitting to a broker
 - [x] Localhost-only read-only status endpoints
-- [x] Basic unit tests and CI workflow definition
+- [x] Unit tests (config, risk, paper, execution, status)
+- [x] CI workflow (unittest + `main.py --check` + diagnose)
 - [x] Single `main.py` entry point with configuration check and status server
+- [x] Local diagnostic script (`python scripts/diagnose.py`)
 
 ## Remaining before Level 2
 
 - [ ] Observe a successful GitHub Actions run on the current default branch
-- [ ] Run and verify the test suite on a clean environment
-- [ ] Add status API integration tests and operational error handling
-- [ ] Add paper broker valuation, fees/slippage model, and persistent trade/audit ledger
-- [ ] Add safe dashboard status skeleton
-- [ ] Review risk edge cases, order reconciliation, and concurrent execution
+- [ ] Run `python scripts/diagnose.py` on a clean Python 3.11 environment
+- [ ] Paper broker mark-to-market equity, fees/slippage model, persistent trade/audit ledger
+- [ ] Risk edge cases, order reconciliation, concurrent execution review
+- [ ] Safe dashboard status skeleton (optional for Level 2 minimum)
 
 ## Path to Level 3
 
