@@ -14,6 +14,14 @@ class ExecutionServiceTests(unittest.TestCase):
     def test_kill_switch_blocks_broker_submission(self):
         with self.assertRaises(PermissionError): self.service.submit(self.order)
         self.assertEqual(self.broker.get_account().open_positions, 0)
+    def test_close_position_remains_available_while_kill_switch_is_engaged(self):
+        self.risk.release_kill_switch(explicit_operator_action=True)
+        self.service.submit(self.order)
+        self.risk.engage_kill_switch()
+        result = self.service.close_position("EURUSD", Decimal("11"))
+        self.assertEqual(result.status, "filled")
+        self.assertEqual(self.broker.get_account().open_positions, 0)
+
     def test_approved_order_reaches_paper_broker(self):
         self.risk.release_kill_switch(explicit_operator_action=True)
         result = self.service.submit(self.order)
