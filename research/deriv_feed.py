@@ -1,10 +1,10 @@
 """Read-only Deriv public WebSocket tick collector for EUR/USD.
 
 Trust model: the public endpoint is pinned by hostname and uses TLS certificate and
-hostname verification. Deriv's public tick messages are not documented as individually
-signed. The verifier therefore binds stored fields to the exact raw WSS message and
-requires the verified TLS transport marker. This is transport-authenticated provenance,
-not a Deriv digital signature or non-repudiation.
+hostname verification in the collector. Deriv's public tick messages are not documented
+as individually signed. A caller-supplied TLS marker and a raw-message hash do not attest
+which socket delivered the message. The collector therefore stores ticks as unverified
+candidates only; it does not grant provider-verification evidence credit.
 """
 from __future__ import annotations
 
@@ -84,14 +84,14 @@ def build_tick_observation(
         "provider_event_id": f"{symbol}:{epoch}:{quote}",
         "collector_received_at": received_at.astimezone(timezone.utc).isoformat(),
         "transport_endpoint": DERIV_PUBLIC_WS,
-        "transport_security": "tls_verified" if tls_verified else "unverified",
+        "transport_security_claim": "tls_verified" if tls_verified else "unverified",
         "raw_message": raw_message,
         "raw_message_sha256": raw_digest,
     }
 
 
-def verify_deriv_observation(item: dict) -> bool:
-    """Verify TLS-transport marker and exact raw-payload/normalized-field binding."""
+def validate_deriv_observation_binding(item: dict) -> bool:
+    """Validate payload consistency only; this does not authenticate the provider or socket."""
     try:
         if (
             item.get("provider") != PROVIDER
@@ -99,7 +99,6 @@ def verify_deriv_observation(item: dict) -> bool:
             or item.get("source") != SOURCE
             or item.get("interval") != INTERVAL
             or item.get("transport_endpoint") != DERIV_PUBLIC_WS
-            or item.get("transport_security") != "tls_verified"
         ):
             return False
         raw = item["raw_message"]
@@ -144,7 +143,6 @@ def collect(duration_seconds: int, database: Path, timeout: int = 20) -> dict:
         interval=INTERVAL,
         strategy_id=STRATEGY_ID,
         strategy_version=STRATEGY_VERSION,
-        provenance_verifier=verify_deriv_observation,
     )
     inserted = duplicates = 0
     try:
