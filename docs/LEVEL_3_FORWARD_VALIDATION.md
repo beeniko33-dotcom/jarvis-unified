@@ -11,8 +11,12 @@ instrument, provider, source, interval, strategy ID/version and positive price.
 The collector generates its own UTC ingestion timestamp and rejects observations older
 than ten minutes or more than one minute in the future. This prevents a batch of old
 historical rows from being imported later and counted as fresh forward evidence.
-Duplicate instrument/interval/timestamp rows are ignored. SQLite uses WAL and FULL
-synchronous mode; records are SHA-256 hash chained.
+Duplicate instrument/interval/timestamp rows are ignored. Reports also fail closed with
+`BLOCKED_STALE` when the newest verified observation is older than the configured ten-minute
+freshness limit (or exceeds the allowed future tolerance); a historic 30-day streak cannot
+remain green after collection stops. SQLite uses WAL and FULL synchronous mode; records are
+SHA-256 hash chained. Appends acquire `BEGIN IMMEDIATE` before reading the previous hash and
+writing the next row, serializing chain-tail selection across concurrent SQLite writers.
 
 **Freshness is not authenticity.** The default CLI has no provider-specific verifier.
 It can retain fresh observations as unverified candidates, but those candidates do not
