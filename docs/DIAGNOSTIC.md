@@ -1,14 +1,18 @@
 # Diagnostic Report — Jarvis Unified
 
 **Date:** 2026-11-11  
-**Scope:** Live repository inspection of `beeniko33-dotcom/jarvis-unified`  
-**Claimed maturity:** Level 1 (Foundation) — **not** Level 2
+**Scope:** Live repository inspection + Level 2 hardening of `beeniko33-dotcom/jarvis-unified`  
+**Claimed maturity:** Level 2 — Operational tooling (provisional until green CI observed)
 
 ## Executive summary
 
-The monorepo has a coherent paper-first foundation: models, paper broker, central risk gate, execution service, localhost status API, configuration hardening, unit tests, and a CI workflow definition. Safety defaults are correct (paper only, kill switch engaged, localhost-only status bind).
+The monorepo has a coherent paper-first foundation plus the operational tooling required for Level 2:
 
-Level 2 is **not** verified: no confirmed green GitHub Actions run was observed for the current default branch, and source histories have not yet been imported.
+- Models, paper broker (now with MtM equity, fees/slippage, optional JSONL ledger), central risk gate, execution service, localhost status API, configuration hardening, unit tests, and a fixed CI workflow.
+- Safety defaults remain correct (paper only, kill switch engaged, localhost-only status bind).
+- CI previously called bare `pytest` with no install step; this was fixed to `python -m unittest discover` so the workflow is zero-dependency and matches the diagnose script.
+
+Level 2 is **confirmed only after** a green GitHub Actions run on the current `main` is observed.
 
 ## Component status
 
@@ -16,13 +20,13 @@ Level 2 is **not** verified: no confirmed green GitHub Actions run was observed 
 |-----------|--------|-------|
 | Config (`core/config.py`) | Pass | Rejects non-paper modes; rejects env kill-switch off; localhost-only status host |
 | Models (`core/models.py`) | Pass | Broker-neutral OrderRequest/Result, Position, AccountSnapshot |
-| Risk engine | Pass | Fail-closed; kill switch; notional / daily loss / open position limits |
+| Risk engine | Pass | Fail-closed; kill switch; notional / daily loss / open position limits; concurrency smoke test |
 | Execution service | Pass | Risk before broker; exits allowed while entries halted |
-| Paper broker | Pass (in-memory) | Idempotent client IDs; close PnL; rejects bad/non-finite values |
-| Status API | Pass | `/health`, `/status`; 404 elsewhere; localhost bind enforced |
-| `main.py` | Pass | `--check`, `--serve` |
-| Unit tests | Present | config, risk, paper, execution, status |
-| CI workflow | Defined | unittest + `main.py --check` on push/PR to main |
+| Paper broker | Pass (Level 2) | Idempotent client IDs; close PnL; MtM equity; commission + slippage; optional JSONL audit ledger |
+| Status API | Pass | `/health`, `/status`, `/self-check`; 404 elsewhere; localhost bind enforced |
+| `main.py` | Pass | `--check`, `--health`, `--summary`, `--report`, `--serve` |
+| Unit tests | Present + expanded | config, risk, paper (incl. MtM/fees/ledger), execution, status, main CLI |
+| CI workflow | Fixed | unittest + `main.py --check` + report assert + diagnose |
 | Source imports | Not done | `scripts/import_sources.sh` ready; requires local Git + SSH |
 | Scraper package | Placeholder | Full features await selective migration + SSRF hardening |
 | Deriv / MT5 adapters | Disabled | Correct for this maturity |
@@ -36,13 +40,15 @@ Level 2 is **not** verified: no confirmed green GitHub Actions run was observed 
 - Risk-reducing closes remain available while entries are halted
 - No live broker credentials required or activated
 
-## Gaps before Level 2
+## Level 2 checklist
 
-1. Observe a successful Actions run on `main`
-2. Run `python scripts/diagnose.py` on a clean Python 3.11 environment
-3. Paper ledger persistence (audit trail)
-4. Mark-to-market equity + optional fees/slippage model
-5. Stronger concurrency / partial-close edge-case coverage
+1. [x] Fix CI so tests actually run (unittest, zero deps)
+2. [x] Paper broker mark-to-market equity
+3. [x] Fees / slippage model
+4. [x] Persistent trade/audit ledger (JSONL, optional path)
+5. [x] Risk edge cases + concurrent evaluation smoke
+6. [ ] Observe successful GitHub Actions run on `main`
+7. [ ] Local or CI `python scripts/diagnose.py` green
 
 ## Gaps before deeper integration
 
@@ -50,34 +56,34 @@ Level 2 is **not** verified: no confirmed green GitHub Actions run was observed 
 2. Inventory each `sources/<repo>` tree
 3. Selective module migration (not bulk overwrite of `core/`)
 4. Scraper SSRF protections before exposing URL fetch endpoints
-5. Dashboard / Telegram / MCP only after risk + paper ledger are solid
+5. Dashboard / Telegram / MCP only after sustained paper validation
 
 ## Ordered next steps
 
-### A. Local (you / Codespace)
+### A. Confirm CI (required for Level 2)
+
+- Ensure Actions is enabled for the private repo
+- Push (or re-run) the latest `main` workflow and confirm it is green
+- Only then treat maturity as solidly Level 2
+
+### B. Local verify
 
 ```bash
 git clone git@github.com:beeniko33-dotcom/jarvis-unified.git
 cd jarvis-unified
 python -m venv .venv && source .venv/bin/activate
+python -m unittest discover -s tests -v
 python scripts/diagnose.py
-# After green local diagnose:
-bash scripts/import_sources.sh
-git push origin main
+python main.py --check
+python main.py --report
 ```
 
-### B. CI gate
+### C. After green CI + local diagnose
 
-- Confirm Actions is enabled for the private repo
-- Confirm the latest `main` workflow run is green
-- Only then update `docs/MATURITY.md` to Level 2
-
-### C. After import + green CI
-
-1. Inventory `sources/*`
-2. Port persistent paper ledger
+1. Inventory `sources/*` after history import
+2. Use the paper ledger in multi-day sessions
 3. Port scraper as independent package with SSRF controls
-4. Dashboard skeleton against status API
+4. Dashboard status-only UI against the existing status API
 5. Deriv demo adapter behind the same risk gate (still non-live)
 
 ## Open tracking issues
