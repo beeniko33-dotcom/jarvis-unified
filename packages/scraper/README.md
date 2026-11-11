@@ -2,6 +2,18 @@
 
 This directory is reserved for the history-preserving import of the complete legitimate `advanced-scraper` codebase. Do not replace it with a reduced toy scraper. Preserve supported CLI workflows, parsers, crawl scheduling, storage backends, content extraction, media metadata, normalization, and plugin interfaces after an inventory and compatibility pass.
 
+## Current foundation (pre-import)
+
+`safe_fetch.py` provides an SSRF-hardened HTTP(S) fetch primitive:
+
+- Scheme allowlist: `http`, `https` only
+- Blocks loopback, private, link-local, multicast, reserved, and cloud-metadata ranges
+- DNS resolution validation + redirect revalidation
+- Timeouts, max response size, max redirects
+- No shell, no local module execution, no credentialed URLs
+
+Use this module as the only network entry point when exposing any remote fetch API later.
+
 ## Security contract for network fetching
 
 - Support broad public-web crawling and extraction, subject to site terms, robots policy where applicable, and configured rate limits.

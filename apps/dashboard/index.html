@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jarvis Unified — Status</title>
+  <style>
+    :root { color-scheme: dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+    body { margin: 0; background: #0b1020; color: #e8eefc; }
+    main { max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+    .sub { color: #9bb0d0; margin-bottom: 1.5rem; }
+    .card { background: #141b2f; border: 1px solid #243056; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+    .row { display: flex; justify-content: space-between; gap: 1rem; padding: 0.35rem 0; border-bottom: 1px solid #1c2644; }
+    .row:last-child { border-bottom: 0; }
+    .label { color: #9bb0d0; }
+    .ok { color: #5ddea6; }
+    .warn { color: #f0c14a; }
+    .err { color: #ff7b7b; }
+    button { background: #2a cod 4a; color: #e8eefc; border: 1px solid #3a4f7a; border-radius: 8px; padding: 0.5rem 0.9rem; cursor: pointer; }
+    button:hover { background: #354e78; }
+    code { font-size: 0.85rem; color: #b7c8e8; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Jarvis Unified</h1>
+    <p class="sub">Read-only status dashboard · paper-first · localhost API</p>
+
+    <div class="card">
+      <div class="row"><span class="label">API base</span><code id="apiBase">http://127.0.0.1:8787</code></div>
+      <div class="row"><span class="label">Health</span><span id="health">—</span></div>
+      <div class="row"><span class="label">Mode</span><span id="mode">—</span></div>
+      <div class="row"><span class="label">Broker</span><span id="broker">—</span></div>
+      <div class="row"><span class="label">Kill switch</span><span id="kill">—</span></div>
+      <div class="row"><span class="label">Balance</span><span id="balance">—</span></div>
+      <div class="row"><span class="label">Equity</span><span id="equity">—</span></div>
+      <div class="row"><span class="label">Open positions</span><span id="positions">—</span></div>
+    </div>
+
+    <button id="refresh" type="button">Refresh</button>
+    <p class="sub" style="margin-top:1rem">Start the API with <code>python main.py --serve</code>. This page never places orders.</p>
+  </main>
+  <script>
+    const base = localStorage.getItem('jarvisApiBase') || 'http://127.0.0.1:8787';
+    document.getElementById('apiBase').textContent = base;
+
+    async function load() {
+      const healthEl = document.getElementById('health');
+      try {
+        const h = await fetch(base + '/health').then(r => r.json());
+        healthEl.textContent = h.ok ? 'ok' : 'degraded';
+        healthEl.className = h.ok ? 'ok' : 'warn';
+      } catch (e) {
+        healthEl.textContent = 'unreachable';
+        healthEl.className = 'err';
+        return;
+      }
+      try {
+        const s = await fetch(base + '/status').then(r => r.json());
+        document.getElementById('mode').textContent = s.mode || '—';
+        document.getElementById('broker').textContent = s.broker || '—';
+        const kill = document.getElementById('kill');
+        kill.textContent = String(s.kill_switch);
+        kill.className = s.kill_switch ? 'warn' : 'ok';
+        const acct = s.account || {};
+        document.getElementById('balance').textContent = acct.balance ?? '—';
+        document.getElementById('equity').textContent = acct.equity ?? '—';
+        document.getElementById('positions').textContent = (s.positions || []).length;
+      } catch (e) {
+        document.getElementById('mode').textContent = 'error';
+      }
+    }
+    document.getElementById('refresh').addEventListener('click', load);
+    load();
+    setInterval(load, 5000);
+  </script>
+</body>
+</html>

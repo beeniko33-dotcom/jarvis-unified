@@ -1,3 +1,5 @@
-# Dashboard
+# Dashboard (status-only)
 
-Reserved for the web dashboard migration. The initial UI must display paper/demo mode, kill-switch state, risk limits, and clear non-live labeling.
+Static read-only status page. Open `index.html` in a browser while `python main.py --serve` is running on localhost.
+
+No order placement UI. No remote API keys. Future Next.js port from `jarvistrader` can replace this skeleton after paper validation.
