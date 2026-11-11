@@ -3,59 +3,55 @@
 ## High-level design
 
 ```
-                    +-------------------+
-                    |   Interfaces      |
-                    | Telegram / Web /  |
-                    | Mobile / MCP      |
-                    +---------+---------+
-                              |
-                    +---------v---------+
-                    |   Core Services   |
-                    | Status API        |
-                    | Orchestrator      |
-                    +---------+---------+
-                              |
-          +-------------------+-------------------+
-          |                   |                   |
-+---------v--------+  +-------v--------+  +-------v--------+
-|   Brain / AI     |  |   Signals      |  |   Risk Engine  |
-| Agents + Memory  |  | Generators     |  | Hard limits    |
-+---------+--------+  +-------+--------+  +-------+--------+
-          |                   |                   |
-          +-------------------+-------------------+
-                              |
-                    +---------v---------+
-                    |  Broker Adapters  |
-                    | Paper / Deriv /   |
-                    | MT5 / Future      |
-                    +-------------------+
-
-                    +-------------------+
-                    | packages/scraper  |  (independent)
-                    +-------------------+
+Interfaces (web / Telegram / mobile / MCP)
+                 |
+       Local Status & Control APIs
+                 |
+       Core Orchestration Services
+       |       |        |       |
+     Brain   Signals   Risk   Portfolio
+                         |
+                 Execution Service
+                         |
+             Broker-neutral contract
+             /        |         \
+          Paper     Deriv demo  MT5 demo
+                         (future)
+                 
+       Independent packages/scraper
+       (research input; not an execution dependency)
 ```
 
-## Key design decisions
+## Enforced boundaries
 
-### 1. Broker adapters
-Strategies and the brain never talk to a broker directly. They call a common interface. This allows:
-- Paper mode as the safe default
-- Easy addition of new brokers later
-- Consistent risk enforcement
+1. **Broker-neutral models:** strategies use shared order, position, account, and result types.
+2. **Single execution gate:** new orders flow through `core.execution.ExecutionService`, which calls the central risk engine before reaching an adapter.
+3. **Risk-reducing exits:** closing an existing position remains available while the entry kill switch is engaged. The paper adapter calculates the exact opposite-side quantity.
+4. **Fail-closed startup:** only paper mode is accepted. The kill switch is engaged by default and cannot be disabled by environment configuration. Status binds to localhost only.
+5. **Independent scraper:** scraper functionality is migrated as a separately configured package and must not gain arbitrary remote code execution.
 
-### 2. Central risk authority
-All order requests pass through the risk engine. Even AI recommendations are filtered. Hard limits cannot be overridden by strategies.
+## Current implementation
 
-### 3. Independent scraper package
-The scraper lives under `packages/scraper` and retains its own configuration, scheduling, storage, and extensibility. It can feed the signal engine but is not required for core trading operation.
+- Broker contract: `brokers/base.py`
+- Paper simulation: `brokers/paper/`
+- Shared models: `core/models.py`
+- Risk gate: `core/risk/`
+- Execution gate: `core/execution.py`
+- Runtime config: `core/config.py`
+- Read-only status endpoints: `apps/api/status.py`
+- Entrypoint: `main.py`
 
-### 4. Paper-first execution
-`JARVIS_MODE=paper` is the default. Enabling any live or demo broker requires explicit configuration and (later) an unlock mechanism.
+## Known limitations
 
-## Next implementation steps
+The current paper broker is in-memory only. It does not persist orders, model margin or fees, calculate mark-to-market equity, simulate slippage, or reconcile external broker state. Risk controls do not yet include portfolio correlation, leverage, drawdown, stale-price, or daily-reset policy. The status API is read-only and intended for localhost development.
 
-1. Define the common broker interface
-2. Implement PaperBroker fully
-3. Port risk rules from the Deriv system
-4. Bring over status API patterns from ecosystem
-5. Add minimal main.py entry point
+No Deriv or MT5 adapter is implemented. No live execution mode exists.
+
+## Next phases
+
+1. Validate the current test suite in GitHub Actions and fix any failures.
+2. Add persistent paper ledger, valuation, fees/slippage model, and status API integration tests.
+3. Import all seven source repositories with original Git histories using a verified history-preserving migration process; retain the source repositories unchanged.
+4. Inventory scraper capabilities and dependencies, then migrate all legitimate CLI/crawl/extraction features; add DNS/IP/redirect SSRF protections and resource budgets to remote fetch APIs.
+5. Build dashboard status-only UI, then add demo broker adapters behind the same execution gate.
+6. Run sustained paper validation before considering any higher maturity level.
