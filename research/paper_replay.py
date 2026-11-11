@@ -100,7 +100,7 @@ class PaperReplay:
                     (symbol,bar.timestamp,str(bar.close),source_sha256)).rowcount
                 if not inserted: continue
                 closes.append(bar.close)
-                if len(closes)<self.slow: continue
+                if len(closes)<=self.slow: continue
                 fast_now=sum(closes[-self.fast:],Decimal(0))/self.fast
                 slow_now=sum(closes[-self.slow:],Decimal(0))/self.slow
                 fast_prev=sum(closes[-self.fast-1:-1],Decimal(0))/self.fast
@@ -108,6 +108,12 @@ class PaperReplay:
                 up=fast_prev<=slow_prev and fast_now>slow_now
                 down=fast_prev>=slow_prev and fast_now<slow_now
                 cash,equity,realized,peak,day,day_start=self._account()
+                # Mark all open symbols to their latest observed close before risk checks.
+                market_value=Decimal("0")
+                for held_symbol, qty_s in self.db.execute("SELECT symbol,quantity FROM positions").fetchall():
+                    latest=self.db.execute("SELECT close FROM bars WHERE symbol=? ORDER BY ts DESC LIMIT 1",(held_symbol,)).fetchone()
+                    if latest: market_value += Decimal(qty_s) * Decimal(latest[0])
+                equity=cash+market_value
                 current_day=bar.timestamp[:10]
                 if day!=current_day: day,day_start=current_day,equity
                 pos=self.db.execute("SELECT quantity,entry_price,entry_fee FROM positions WHERE symbol=?",(symbol,)).fetchone()
@@ -135,7 +141,10 @@ class PaperReplay:
                             "reason":"sma_cross_up","quantity":str(qty),"price":str(fill),"notional":str(notional),"fee":str(fee),
                             "risk_fraction":str(self.risk_fraction)})
                     else: self._event(bar.timestamp,symbol,"risk_reject",{"reason":"daily_loss_limit" if not allowed else "insufficient_equity"})
-                market_value=sum(Decimal(q)*Decimal(p) for q,p in self.db.execute("SELECT quantity,entry_price FROM positions").fetchall())
+                market_value=Decimal("0")
+                for held_symbol, qty_s in self.db.execute("SELECT symbol,quantity FROM positions").fetchall():
+                    latest=self.db.execute("SELECT close FROM bars WHERE symbol=? ORDER BY ts DESC LIMIT 1",(held_symbol,)).fetchone()
+                    if latest: market_value += Decimal(qty_s) * Decimal(latest[0])
                 equity=cash+market_value
                 peak=max(peak,equity)
                 self._save(cash,equity,realized,peak,day,day_start)
