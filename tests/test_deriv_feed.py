@@ -1,10 +1,12 @@
 import json
+import tempfile
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
 
 from research.deriv_feed import (
     DERIV_PUBLIC_WS, build_tick_observation, resolve_eurusd_symbol,
-    verify_deriv_observation,
+    validate_deriv_observation_binding,
 )
 
 
@@ -38,27 +40,44 @@ class DerivFeedTests(unittest.TestCase):
                 {"symbol": "EURUSD", "display_name": "EUR/USD"},
             ])
 
-    def test_binds_tls_transport_and_raw_tick_to_observation(self):
-        self.assertTrue(verify_deriv_observation(self.item))
+    def test_validates_payload_binding_without_claiming_transport_authenticity(self):
+        self.assertTrue(validate_deriv_observation_binding(self.item))
         self.assertEqual(self.item["transport_endpoint"], DERIV_PUBLIC_WS)
         self.assertEqual(self.item["provider"], "Deriv")
         self.assertEqual(self.item["instrument"], "EURUSD")
 
-    def test_rejects_unverified_transport(self):
-        item = dict(self.item, transport_security="unverified")
-        self.assertFalse(verify_deriv_observation(item))
+    def test_caller_supplied_tls_claim_is_not_an_authenticator(self):
+        item = dict(self.item, transport_security_claim="tls_verified")
+        self.assertTrue(validate_deriv_observation_binding(item))
+        epoch = 1794400000
+        with tempfile.TemporaryDirectory() as directory:
+            from research.forward_validation import ForwardEvidenceStore
+            store = ForwardEvidenceStore(
+                Path(directory) / "candidate.sqlite3",
+                instrument="EURUSD", provider="Deriv", interval="tick",
+                strategy_id="sma-crossover-long", strategy_version="1.0.0",
+                clock=lambda: datetime.fromtimestamp(epoch + 1, timezone.utc),
+            )
+            try:
+                store.ingest(item)
+                report = store.report(1)
+                self.assertEqual(report["verified_observation_count"], 0)
+                self.assertEqual(report["unverified_candidate_count"], 1)
+                self.assertEqual(report["level_3_forward_evidence_gate"], "BLOCKED_PROVENANCE")
+            finally:
+                store.close()
 
     def test_rejects_raw_payload_tampering(self):
         item = dict(self.item, raw_message=self.raw.replace("1.08525", "1.99999"))
-        self.assertFalse(verify_deriv_observation(item))
+        self.assertFalse(validate_deriv_observation_binding(item))
 
     def test_rejects_normalized_price_tampering(self):
         item = dict(self.item, price="1.99999")
-        self.assertFalse(verify_deriv_observation(item))
+        self.assertFalse(validate_deriv_observation_binding(item))
 
     def test_rejects_wrong_symbol(self):
         item = dict(self.item, deriv_symbol="frxGBPUSD")
-        self.assertFalse(verify_deriv_observation(item))
+        self.assertFalse(validate_deriv_observation_binding(item))
 
     def test_rejects_non_tick_payload(self):
         raw = json.dumps({"msg_type": "history", "tick": {"symbol": "frxEURUSD"}})
