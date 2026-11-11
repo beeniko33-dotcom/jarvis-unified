@@ -1,0 +1,5 @@
+# Source repository imports
+
+The `sources/<repository>` directories are reserved for full-history Git subtree imports of the seven original repositories. The source repositories remain unchanged. Run `scripts/import_sources.sh` from a clean local clone with GitHub SSH access and `git subtree` installed. The script intentionally does not use `--squash`, so each source's commit ancestry is retained. It refuses to run with a dirty worktree and skips any prefix that already exists; review partial imports manually before rerunning.
+
+These imported trees are source archives for traceability and capability inventory. Runtime modules are migrated selectively into `core/`, `brokers/`, `apps/`, and `packages/` after tests and security review; do not import secrets or blindly enable every route.
