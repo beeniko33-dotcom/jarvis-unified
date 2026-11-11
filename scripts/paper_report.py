@@ -19,7 +19,7 @@ def load_rows(path: Path) -> list[dict]:
                 row = json.loads(line)
             except json.JSONDecodeError as exc:
                 raise ValueError(f"invalid JSON on line {line_no}: {exc}") from exc
-            required = {"ts", "status", "realized_pnl", "equity", "balance", "open_positions"}
+            required = {"ts", "status", "realized_pnl", "commission_paid", "equity", "balance", "open_positions"}
             missing = required.difference(row)
             if missing:
                 raise ValueError(
@@ -31,6 +31,7 @@ def load_rows(path: Path) -> list[dict]:
                 Decimal(str(row["realized_pnl"]))
                 Decimal(str(row["equity"]))
                 Decimal(str(row["balance"]))
+                Decimal(str(row["commission_paid"]))
             except (TypeError, ValueError, InvalidOperation) as exc:
                 raise ValueError(f"invalid audit values on line {line_no}") from exc
             rows.append(row)
@@ -80,7 +81,9 @@ def summarize(rows: list[dict]) -> dict:
         "losses": len(losses),
         "win_rate": str(Decimal(len(wins)) / len(realized_deltas)) if realized_deltas else None,
         "expectancy_per_realized_event": str(avg),
-        "total_realized_pnl": str(total_realized),
+        "total_realized_pnl_before_commission": str(total_realized),
+        "total_commission_paid": str(rows[-1]["commission_paid"]),
+        "net_realized_pnl_after_commission": str(total_realized - Decimal(str(rows[-1]["commission_paid"]))),
         "gross_profit": str(gross_profit),
         "gross_loss": str(gross_loss),
         "profit_factor": profit_factor,
