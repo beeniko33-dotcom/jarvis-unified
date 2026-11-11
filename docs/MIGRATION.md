@@ -1,16 +1,16 @@
 # Migration Map — Source of Truth
 
-This document records the origin of capabilities and the import strategy for the seven original repositories.
+This document records the seven source repositories and migration strategy.
 
-| Capability | Primary Source Repository | Notes |
-|------------|---------------------------|-------|
-| Core bot structure, status server, mobile stubs | `jarvis-trader-ecosystem` | Security PR #1 reviewed and merged; originals remain available |
-| Deriv execution engine, risk rules, Docker/Caddy, MCP | `jarvis-ai-trading-system` | Demo adapter must be rebuilt behind the new risk gate |
-| Signal bot logic | `jarvis-trader` | RSI correction PR remains draft pending author readiness |
-| Next.js dashboard | `jarvistrader` | Environment-file cleanup/build PR remains draft |
-| Research / signal concepts | `quantum-peak-pro` | Inventory before porting; do not assume production maturity |
-| Multi-agent brain, memory, TTS ideas | `jarvis-ai` | CI repair PR remains draft despite passing PR checks |
-| Full scraper toolkit | `advanced-scraper` | Full legitimate feature set to be preserved; API SSRF issue blocks PR #3 |
+| Capability | Primary source repository | Status |
+|---|---|---|
+| Core bot structure, status server, mobile stubs | `jarvis-trader-ecosystem` | Foundation migrated; history import pending |
+| Deriv execution engine, risk rules, Docker/Caddy, MCP | `jarvis-ai-trading-system` | Demo adapter must be rebuilt behind central risk gate |
+| Signal bot logic | `jarvis-trader` | Inventory and regression migration pending |
+| Next.js dashboard | `jarvistrader` | Existing dashboard is a status-only skeleton; frontend migration pending |
+| Research / signal concepts | `quantum-peak-pro` | Inventory before porting |
+| Multi-agent brain, memory, TTS ideas | `jarvis-ai` | Inventory and dependency/security review pending |
+| Full scraper toolkit | `advanced-scraper` | Source inventory completed; safe capability migration and history import pending |
 
 ## Source repositories and branches
 
@@ -24,15 +24,19 @@ This document records the origin of capabilities and the import strategy for the
 
 ## Migration strategy
 
-1. Keep all seven original repositories intact; no archive or delete operations are part of this migration.
-2. Use `scripts/import_sources.sh` to import each source under `sources/<repository>` with `git subtree add` and **without** `--squash`. This preserves original commit ancestry in the unified repository.
-3. Verify each imported subtree by inspecting `git log --graph --all` and comparing the source branch head with the imported ancestry.
-4. Inventory each source tree and selectively migrate modules into the target runtime. Resolve naming/dependency conflicts deliberately; do not blindly copy over the new core.
-5. Preserve the scraper CLI, crawlers, parsers, extractors, scheduling, storage, media metadata, and extension points. Secure remote URL fetching against SSRF, DNS rebinding, unsafe redirects, and resource exhaustion without imposing arbitrary reductions on legitimate extraction features.
-6. Record source commit SHAs, imported paths, and test results in this document.
+1. Keep all seven original repositories intact; no archive or delete operations are part of migration.
+2. Use `scripts/import_sources.sh` on a clean local clone with GitHub SSH access. It uses `git subtree add` without `--squash`, preserving source ancestry.
+3. Verify imported source heads and ancestry with `git log --graph --all`.
+4. Inventory dependencies, interfaces and tests before selective migration into the unified runtime.
+5. Preserve all legitimate scraper capabilities. See `docs/SCRAPER_CAPABILITY_AUDIT.md` for the source audit and safe migration boundary.
+6. Record source commit SHAs, imported paths, and regression results here.
 
-## Pull-request audit
+## Important scraper source audit
 
-Eight open PRs were reviewed. The Telegram access-control PR in `jarvis-trader-ecosystem` (#1) had a successful CI run and was merged. Several other PRs have passing CI but remain drafts, so they were not merged without their author marking them ready. The scraper API PR (#3) remains blocked by missing SSRF protections. The documentation-only scraper PR (#2) also remains draft.
+The original `advanced-scraper` includes ordinary web scraping and reporting, but also an unauthenticated API bound to `0.0.0.0` that dispatches module IDs through an interactive subprocess. Its advertised modules include credential/OTP brute force, exploit probes, port/subdomain scanning, TCP flooding, email/SMS bombing, reverse-shell and persistence functions; its CLI also includes invasive people-search/PII aggregation.
 
-The seven original repositories remain available. A PR merge updates its source repository but does not replace or delete that repository.
+Do not migrate or expose that API as-is. Preserve public-web crawling, parsing, authorized page extraction, image-result discovery, export, reporting and orchestration. Unsafe attack, flooding, persistence, arbitrary-command and invasive personal-data functions are not part of the remotely exposed Jarvis scraper.
+
+## Import limitation
+
+The history-preserving import script requires a clean local Git clone and SSH access to all seven source repositories. GitHub API edits cannot execute that local Git operation or verify subtree ancestry. Run it locally after the current branch is merged, then submit the import and regression evidence for review.
