@@ -1,6 +1,7 @@
 """Jarvis Unified entrypoint. Paper mode only at this maturity level."""
 from __future__ import annotations
 import argparse
+import json
 from dataclasses import asdict
 from typing import Sequence
 
@@ -22,9 +23,21 @@ def build_runtime(settings: Settings):
     return broker, risk
 
 
+def build_status_payload(broker, settings, risk) -> dict:
+    account = broker.get_account()
+    return {
+        "mode": settings.mode,
+        "broker": "paper",
+        "kill_switch": risk.halted,
+        "account": asdict(account),
+        "positions": [asdict(p) for p in broker.get_positions()],
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Jarvis Unified — paper-first trading infrastructure")
     parser.add_argument("--check", action="store_true", help="validate configuration and initialize paper runtime")
+    parser.add_argument("--status", action="store_true", help="print a JSON status snapshot without starting the API")
     parser.add_argument("--serve", action="store_true", help="start localhost read-only status API")
     parser.add_argument("--host", help="bind address for status API; must remain localhost-only")
     parser.add_argument("--port", type=int, help="port for status API")
@@ -40,18 +53,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.check:
         print("Configuration valid; paper broker initialized; kill_switch=" + str(risk.halted))
         return
+    if args.status:
+        print(json.dumps(build_status_payload(broker, settings, risk), default=str))
+        return
     if args.serve:
         from apps.api.status import serve
 
         def status():
-            account = broker.get_account()
-            return {
-                "mode": settings.mode,
-                "broker": "paper",
-                "kill_switch": risk.halted,
-                "account": asdict(account),
-                "positions": [asdict(p) for p in broker.get_positions()],
-            }
+            return build_status_payload(broker, settings, risk)
 
         try:
             serve(host, port, status)
