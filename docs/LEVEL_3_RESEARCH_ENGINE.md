@@ -4,7 +4,7 @@ This milestone adds a deterministic, restart-safe historical-data research harne
 
 ## Input contract
 
-Provide a CSV with timestamp,symbol,open,high,low,close,volume. Timestamps must be ISO-8601 with an explicit timezone. Use a trusted data provider and preserve its licensing, timezone, instrument, candle interval, and adjustment metadata alongside the source file. The replay stores the SHA-256 of the exact CSV bytes.
+Provide a single-symbol CSV with timestamp,symbol,open,high,low,close,volume. The initial engine deliberately rejects multi-symbol input so its account and daily-risk accounting cannot silently mix unsynchronized markets. Timestamps must be ISO-8601 with an explicit timezone. Use a trusted data provider and preserve its licensing, timezone, instrument, candle interval, and adjustment metadata alongside the source file. The replay stores the SHA-256 of the exact CSV bytes.
 
 ## Strategy
 
