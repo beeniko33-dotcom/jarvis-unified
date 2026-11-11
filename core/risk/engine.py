@@ -1,9 +1,12 @@
-"""Central, fail-closed risk gate. Every order must pass this layer."""
+"""Central, fail-closed risk gate. Every new order must pass this layer."""
 from __future__ import annotations
+
 from dataclasses import dataclass
 from decimal import Decimal
 from threading import RLock
-from core.models import OrderRequest
+
+from core.models import OrderRequest, Side
+
 
 @dataclass(frozen=True)
 class RiskLimits:
@@ -12,37 +15,72 @@ class RiskLimits:
     max_open_positions: int = 2
     kill_switch: bool = True
 
+
 @dataclass(frozen=True)
 class RiskDecision:
     allowed: bool
     reason: str
 
+
 class RiskEngine:
     def __init__(self, limits: RiskLimits) -> None:
-        if limits.max_stake_per_trade <= 0 or limits.max_daily_loss <= 0 or limits.max_open_positions < 1:
-            raise ValueError("risk limits must be positive")
+        if (
+            not limits.max_stake_per_trade.is_finite()
+            or not limits.max_daily_loss.is_finite()
+            or limits.max_stake_per_trade <= 0
+            or limits.max_daily_loss <= 0
+            or limits.max_open_positions < 1
+        ):
+            raise ValueError("risk limits must be finite and positive")
         self.limits = limits
         self._halted = limits.kill_switch
         self._lock = RLock()
 
     @property
     def halted(self) -> bool:
-        with self._lock: return self._halted
+        with self._lock:
+            return self._halted
 
     def engage_kill_switch(self) -> None:
-        with self._lock: self._halted = True
+        with self._lock:
+            self._halted = True
 
     def release_kill_switch(self, *, explicit_operator_action: bool = False) -> None:
-        if not explicit_operator_action: raise PermissionError("explicit operator action required")
-        with self._lock: self._halted = False
-
-    def evaluate(self, order: OrderRequest, *, daily_realized_pnl: Decimal, open_positions: int) -> RiskDecision:
+        if not explicit_operator_action:
+            raise PermissionError("explicit operator action required")
         with self._lock:
-            if self._halted: return RiskDecision(False, "kill switch is engaged")
-            if not order.symbol.strip(): return RiskDecision(False, "symbol is required")
-            if order.quantity <= 0 or order.price <= 0: return RiskDecision(False, "quantity and price must be positive")
+            self._halted = False
+
+    def evaluate(
+        self,
+        order: OrderRequest,
+        *,
+        daily_realized_pnl: Decimal,
+        open_positions: int,
+    ) -> RiskDecision:
+        with self._lock:
+            if self._halted:
+                return RiskDecision(False, "kill switch is engaged")
+            if not order.symbol.strip():
+                return RiskDecision(False, "symbol is required")
+            if not isinstance(order.side, Side):
+                return RiskDecision(False, "unsupported order side")
+            if (
+                not order.quantity.is_finite()
+                or not order.price.is_finite()
+                or order.quantity <= 0
+                or order.price <= 0
+            ):
+                return RiskDecision(False, "quantity and price must be finite and positive")
+            if not daily_realized_pnl.is_finite():
+                return RiskDecision(False, "daily PnL is invalid")
+            if open_positions < 0:
+                return RiskDecision(False, "open position count is invalid")
             notional = order.quantity * order.price
-            if notional > self.limits.max_stake_per_trade: return RiskDecision(False, "per-trade notional exceeds hard limit")
-            if daily_realized_pnl <= -self.limits.max_daily_loss: return RiskDecision(False, "daily loss limit reached")
-            if open_positions >= self.limits.max_open_positions: return RiskDecision(False, "maximum open positions reached")
+            if notional > self.limits.max_stake_per_trade:
+                return RiskDecision(False, "per-trade notional exceeds hard limit")
+            if daily_realized_pnl <= -self.limits.max_daily_loss:
+                return RiskDecision(False, "daily loss limit reached")
+            if open_positions >= self.limits.max_open_positions:
+                return RiskDecision(False, "maximum open positions reached")
             return RiskDecision(True, "approved")
