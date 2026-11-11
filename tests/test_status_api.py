@@ -41,6 +41,14 @@ class StatusApiTests(unittest.TestCase):
             urlopen(self.base + "/execute", timeout=2)
         self.assertEqual(error.exception.code, 404)
 
+    def test_self_check_endpoint(self):
+        with urlopen(self.base + "/self-check", timeout=2) as response:
+            payload = json.loads(response.read())
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload["ok"], True)
+            self.assertEqual(payload["status"], "healthy")
+            self.assertEqual(payload["mode"], "paper")
+
     def test_serve_reports_port_in_use(self):
         occupied = ThreadingHTTPServer(("127.0.0.1", 0), StatusHandler)
         port = occupied.server_port
