@@ -79,7 +79,8 @@ def main() -> int:
     # Close if any open
     for pos in broker.get_positions():
         try:
-            result = exec_svc.close_position(pos.symbol, pos.average_price)
+            exit_prices = {"EURUSD": Decimal("1.12"), "GBPUSD": Decimal("1.24")}
+            result = exec_svc.close_position(pos.symbol, exit_prices[pos.symbol])
             record("close", symbol=result.symbol, fill=str(result.fill_price))
         except Exception as exc:  # noqa: BLE001
             record("close_error", symbol=pos.symbol, reason=str(exc))
