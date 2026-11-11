@@ -1,0 +1,46 @@
+import json
+import threading
+import unittest
+from http.server import ThreadingHTTPServer
+from urllib.error import HTTPError
+from urllib.request import urlopen
+
+from apps.api.status import StatusHandler
+
+
+class StatusApiTests(unittest.TestCase):
+    def setUp(self):
+        handler = type(
+            "TestStatusHandler",
+            (StatusHandler,),
+            {"status_provider": staticmethod(lambda: {"mode": "paper", "kill_switch": True})},
+        )
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+
+    def test_health_endpoint(self):
+        with urlopen(self.base + "/health", timeout=2) as response:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.loads(response.read()), {"ok": True})
+
+    def test_status_endpoint(self):
+        with urlopen(self.base + "/status", timeout=2) as response:
+            payload = json.loads(response.read())
+            self.assertEqual(payload["mode"], "paper")
+            self.assertTrue(payload["kill_switch"])
+
+    def test_unknown_route_is_not_found(self):
+        with self.assertRaises(HTTPError) as error:
+            urlopen(self.base + "/execute", timeout=2)
+        self.assertEqual(error.exception.code, 404)
+
+
+if __name__ == "__main__":
+    unittest.main()
