@@ -35,6 +35,8 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual(self.broker.get_account().open_positions, 1)
 
     def test_unrealized_loss_blocks_new_entry(self):
+        self.risk = RiskEngine(RiskLimits(Decimal("5"), Decimal("0.5"), 2, True))
+        self.service = ExecutionService(self.broker, self.risk)
         self.risk.release_kill_switch(explicit_operator_action=True)
         self.service.submit(self.order)
         self.broker.set_last_price("EURUSD", Decimal("0.01"))
