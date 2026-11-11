@@ -61,6 +61,26 @@ jarvis-unified/
 └── main.py
 ```
 
+## Quick CLI Reference
+
+Use the project entry point directly from the repo root:
+
+```bash
+python main.py --check
+python main.py --health
+python main.py --summary
+python main.py --report
+python main.py --serve --host localhost --port 9002
+```
+
+These commands are intentionally safe and paper-first:
+
+- `--check` validates config and initializes the paper broker.
+- `--health` returns a minimal `{"ok": true}` payload for health checks.
+- `--summary` prints a compact runtime snapshot.
+- `--report` exposes a single JSON payload containing version, runtime, and account data.
+- `--serve` starts the localhost-only status API for operational monitoring.
+
 ## Documentation
 
 | Document | Purpose |
