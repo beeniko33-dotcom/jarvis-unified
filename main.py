@@ -59,6 +59,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--health", action="store_true", help="print a minimal JSON health payload")
     parser.add_argument("--summary", action="store_true", help="print a concise JSON summary snapshot")
     parser.add_argument("--status", action="store_true", help="print a JSON status snapshot without starting the API")
+    parser.add_argument("--version", action="store_true", help="print the application version")
     parser.add_argument("--serve", action="store_true", help="start localhost read-only status API")
     parser.add_argument("--host", help="bind address for status API; must remain localhost-only")
     parser.add_argument("--port", type=int, help="port for status API")
@@ -74,6 +75,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.check:
         print_banner()
         print("Configuration valid; paper broker initialized; kill_switch=" + str(risk.halted))
+        return
+    if args.version:
+        print("Jarvis Unified 0.2.0")
         return
     if args.health:
         print(json.dumps({"ok": True}))

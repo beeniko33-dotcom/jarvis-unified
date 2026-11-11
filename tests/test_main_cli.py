@@ -59,6 +59,15 @@ class MainCliTests(unittest.TestCase):
         self.assertEqual(payload["broker"], "paper")
         self.assertEqual(payload["open_positions"], 0)
 
+    def test_version_prints_release_string(self):
+        buffer = io.StringIO()
+        with patch.dict(os.environ, {}, clear=True):
+            with redirect_stdout(buffer):
+                main(["--version"])
+
+        self.assertIn("Jarvis Unified", buffer.getvalue().strip())
+        self.assertIn("0.2.0", buffer.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
