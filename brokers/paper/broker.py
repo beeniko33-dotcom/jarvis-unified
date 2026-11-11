@@ -18,7 +18,9 @@ class PaperBroker:
 
     def place_order(self, order: OrderRequest) -> OrderResult:
         if not order.symbol.strip(): raise ValueError("symbol is required")
-        if order.quantity <= 0 or order.price <= 0: raise ValueError("quantity and price must be positive")
+        if not isinstance(order.side, Side): raise ValueError("unsupported order side")
+        if not order.quantity.is_finite() or not order.price.is_finite() or order.quantity <= 0 or order.price <= 0:
+            raise ValueError("quantity and price must be finite and positive")
         if not order.client_order_id.strip(): raise ValueError("client_order_id is required")
         with self._lock:
             if order.client_order_id in self._client_ids:
@@ -58,6 +60,9 @@ class PaperBroker:
             return AccountSnapshot(self._balance, self._balance, self._realized_pnl, len(self._positions))
 
     def close_position(self, symbol: str, price: float | Decimal) -> OrderResult:
+        price = Decimal(str(price))
+        if not price.is_finite() or price <= 0:
+            raise ValueError("close price must be finite and positive")
         with self._lock:
             pos = self._positions.get(symbol)
             if not pos: raise ValueError(f"no open position for {symbol}")
