@@ -32,3 +32,8 @@ These are descriptive event-level metrics. Partial closes are separate realized 
 6. Keep the kill switch and live broker adapters locked throughout validation.
 
 A short deterministic sample is a smoke test, not sustained validation. No profit is guaranteed. A green CI run proves software checks, not trading performance.
+
+
+## Research replay engine
+
+See `docs/LEVEL_3_RESEARCH_ENGINE.md` for the historical-data replay workflow, CSV contract, strategy version, SQLite durability and event-chain checks. This supplements, but does not replace, the 30-day forward paper-validation requirements.
