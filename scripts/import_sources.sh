@@ -7,11 +7,6 @@ OWNER="beeniko33-dotcom"
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
-if ! git subtree -h >/dev/null 2>&1; then
-  echo "ERROR: git subtree is required. Install/enable the git-subtree command." >&2
-  exit 1
-fi
-
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "ERROR: working tree must be clean before importing source history." >&2
   exit 1
