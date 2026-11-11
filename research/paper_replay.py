@@ -49,6 +49,7 @@ def load_bars(path: Path):
     bars.sort(key=lambda b:(b.symbol,b.timestamp))
     if not bars: raise ValueError("CSV contains no bars")
     if len({(b.symbol,b.timestamp) for b in bars}) != len(bars): raise ValueError("duplicate symbol/timestamp bars")
+    if len({b.symbol for b in bars}) != 1: raise ValueError("this initial replay engine supports one symbol per database")
     return bars,digest
 
 class PaperReplay:
@@ -94,7 +95,10 @@ class PaperReplay:
         grouped={}
         for bar in bars: grouped.setdefault(bar.symbol,[]).append(bar)
         for symbol,series in grouped.items():
-            closes=[]
+            # Warm up from durable prior bars so incremental imports preserve SMA state.
+            prior=self.db.execute("SELECT close FROM bars WHERE symbol=? ORDER BY ts DESC LIMIT ?",
+                                  (symbol,self.slow+1)).fetchall()
+            closes=[Decimal(row[0]) for row in reversed(prior)]
             for bar in series:
                 inserted=self.db.execute("INSERT OR IGNORE INTO bars VALUES(?,?,?,?)",
                     (symbol,bar.timestamp,str(bar.close),source_sha256)).rowcount
@@ -131,7 +135,8 @@ class PaperReplay:
                         "reason":"sma_cross_down","quantity":str(qty),"price":str(fill),"fee":str(fee),"realized_net_pnl":str(pnl)})
                 elif not pos and up and equity>0:
                     allowed=max(Decimal(0),day_start-equity)<day_start*self.max_daily_loss_fraction
-                    notional=min(cash,equity*self.risk_fraction)
+                    fee_rate=self.fee_bps/Decimal(10000)
+                    notional=min(cash/(Decimal(1)+fee_rate),equity*self.risk_fraction)
                     if allowed and notional>0:
                         fill=bar.close*(1+self.slippage_bps/Decimal(10000))
                         qty=notional/fill; fee=notional*self.fee_bps/Decimal(10000)
@@ -161,10 +166,18 @@ class PaperReplay:
         cash,equity,realized,peak,day,day_start=self._account()
         count=lambda kind:self.db.execute("SELECT COUNT(*) FROM events WHERE kind=?",(kind,)).fetchone()[0]
         positions=self.db.execute("SELECT symbol,quantity,entry_price FROM positions ORDER BY symbol").fetchall()
+        outcomes=[Decimal(row[0]) for row in self.db.execute(
+            "SELECT json_extract(payload,'$.realized_net_pnl') FROM events WHERE kind='exit_fill'").fetchall()]
+        wins=[v for v in outcomes if v>0]; losses=[v for v in outcomes if v<0]
+        gross_win=sum(wins,Decimal(0)); gross_loss=-sum(losses,Decimal(0))
         return {"strategy_id":self.STRATEGY_ID,"strategy_version":self.STRATEGY_VERSION,
             "bars_processed":self.db.execute("SELECT COUNT(*) FROM bars").fetchone()[0],
             "distinct_utc_days":self.db.execute("SELECT COUNT(DISTINCT substr(ts,1,10)) FROM bars").fetchone()[0],
             "entries":count("entry_fill"),"exits":count("exit_fill"),"risk_rejections":count("risk_reject"),
+            "wins":len(wins),"losses":len(losses),
+            "win_rate":str(Decimal(len(wins))/len(outcomes)) if outcomes else None,
+            "expectancy_per_exit":str(sum(outcomes,Decimal(0))/len(outcomes)) if outcomes else None,
+            "profit_factor":str(gross_win/gross_loss) if gross_loss else None,
             "realized_net_pnl":str(realized),"cash":str(cash),"equity":str(equity),"peak_equity":str(peak),
             "open_positions":[{"symbol":s,"quantity":q,"entry_price":p} for s,q,p in positions],
             "event_count":self.db.execute("SELECT COUNT(*) FROM events").fetchone()[0],
