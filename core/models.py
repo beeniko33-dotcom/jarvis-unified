@@ -43,3 +43,4 @@ class AccountSnapshot:
     equity: Decimal
     realized_pnl: Decimal
     open_positions: int
+    commission_paid: Decimal = Decimal("0")
