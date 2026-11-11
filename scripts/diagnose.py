@@ -38,14 +38,22 @@ def check_structure() -> bool:
         "core/models.py",
         "core/execution.py",
         "core/risk/engine.py",
+        "core/portfolio/tracker.py",
+        "core/signals/base.py",
         "brokers/base.py",
         "brokers/paper/broker.py",
+        "brokers/deriv/adapter.py",
+        "brokers/mt5/adapter.py",
         "apps/api/status.py",
+        "apps/dashboard/index.html",
+        "packages/scraper/safe_fetch.py",
+        "scripts/paper_session.py",
         "tests/test_config.py",
         "tests/test_risk_engine.py",
         "tests/test_paper_broker.py",
         "tests/test_execution.py",
         "tests/test_status_api.py",
+        "tests/test_safe_fetch.py",
         ".github/workflows/ci.yml",
         "scripts/import_sources.sh",
         "docs/MATURITY.md",
@@ -73,8 +81,13 @@ def check_imports() -> bool:
         "core.models",
         "core.execution",
         "core.risk",
+        "core.portfolio",
+        "core.signals",
         "brokers.paper",
+        "brokers.deriv",
+        "brokers.mt5",
         "apps.api.status",
+        "packages.scraper",
     ]
     all_ok = True
     for name in modules:
@@ -132,6 +145,17 @@ def check_config_and_risk() -> bool:
             fail("kill switch did not block order")
             return False
         ok("kill switch blocks new entries by default")
+
+        from brokers.deriv import DerivBroker
+        from brokers.mt5 import MT5Broker
+
+        for cls, name in ((DerivBroker, "Deriv"), (MT5Broker, "MT5")):
+            try:
+                cls()
+                fail(f"{name} adapter constructed (should be disabled)")
+                return False
+            except RuntimeError:
+                ok(f"{name} adapter construction blocked")
         return True
     finally:
         for key, value in previous.items():
@@ -154,7 +178,6 @@ def check_tests() -> bool:
         print(result.stdout)
         print(result.stderr)
         return False
-    # Count test results roughly from output
     lines = [line for line in result.stderr.splitlines() if " ... ok" in line or " ... FAIL" in line]
     ok(f"unittest discover passed ({len(lines)} cases reported)")
     return True
@@ -192,6 +215,7 @@ def main() -> int:
         print("  Foundation checks passed locally.")
         print("  Level 2 still requires a green GitHub Actions run on main.")
         print("  History import still requires: bash scripts/import_sources.sh")
+        print("  Paper session (Level 3 prep): python scripts/paper_session.py --allow-entries")
         return 0
     print("  One or more checks failed. Fix before claiming Level 2.")
     return 1

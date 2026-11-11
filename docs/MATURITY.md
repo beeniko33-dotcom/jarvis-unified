@@ -14,49 +14,49 @@ Honest tracking only. No marketing claims.
 
 ## Current status — November 2026
 
-**Level 2 — Operational tooling** (target after green CI on this commit).
+**Level 2 — Operational tooling** (provisional until a green GitHub Actions run is observed).
 
-Foundation from Level 1 remains intact. Additional Level 2 work delivered:
+Delivered beyond the Level 1 foundation:
 
-- CI workflow switched from bare `pytest` (not installed) to zero-dependency `unittest`
-- Paper broker now supports mark-to-market equity, commission + slippage model, and optional JSONL audit ledger
-- Expanded unit tests for MtM, fees/slippage, ledger, partial close, risk edge cases, and concurrent risk evaluation
-- Diagnose script, status API, execution gate, and safety defaults unchanged and still enforced
+- CI workflow hardened (unittest, workflow_dispatch, permissions, block scalars)
+- Paper broker: MtM equity, fees/slippage, JSONL audit ledger, idempotent client IDs
+- Portfolio tracker, SignalIntent contract
+- Deriv/MT5 adapters present but **construction raises** (cannot be used)
+- SSRF-safe fetch primitive under `packages/scraper`
+- Status-only dashboard HTML
+- Paper session runner (`scripts/paper_session.py`) for Level 3 prep
+- Expanded unit tests
 
-**Confirm Level 2 only after the GitHub Actions run on `main` is green.** Until that run is observed, treat the claim as provisional.
+**Confirm Level 2 only after the GitHub Actions run on `main` is green.**
 
-## Implemented foundation + Level 2 tooling
+## Checklist
 
-- [x] Unified paper-only configuration and environment template
-- [x] Common broker contract and shared order/account models
-- [x] In-memory PaperBroker with simulated fills, realized PnL, **MtM equity**, **fees/slippage**, **audit ledger**
-- [x] Central risk gate with hard limits and default-engaged kill switch
-- [x] Execution service that checks risk before submitting to a broker
-- [x] Localhost-only read-only status endpoints
-- [x] Unit tests (config, risk, paper, execution, status, main CLI) + concurrency smoke
-- [x] CI workflow (unittest + `main.py --check` + report assert + diagnose)
-- [x] Single `main.py` entry point with configuration check and status server
-- [x] Local diagnostic script (`python scripts/diagnose.py`)
+### Level 2
+- [x] Paper-only config + kill switch defaults
+- [x] Risk-gated execution
+- [x] Paper broker with MtM / fees / ledger
+- [x] Localhost status API + status dashboard skeleton
+- [x] Unit tests + diagnose script
+- [x] CI workflow definition (verify green run)
+- [ ] Observe successful Actions run on `main`
 
-## Remaining before solid Level 2 confirmation
+### Level 3 prep (started)
+- [x] Paper session runner with audit events
+- [x] SignalIntent contract (no direct broker access)
+- [ ] Sustained multi-day paper logs with measured metrics
+- [ ] Signal quality baseline definition
 
-- [ ] Observe a successful GitHub Actions run on the current default branch
-- [ ] Run `python scripts/diagnose.py` on a clean Python 3.11 environment (local or CI)
-
-## Path to Level 3
-
-- [ ] Sustained paper trading over a meaningful period with timestamped logs
-- [ ] Signal quality metrics measured against a defined baseline
-- [ ] Drawdown, slippage, fees, rejected orders, and execution failures recorded
-- [ ] Risk rules proven under paper conditions; no unverified profit claims
-- [ ] Persistent paper ledger used in real multi-day sessions
+### Migration
+- [ ] History-preserving import via `scripts/import_sources.sh` (requires local Git + SSH)
+- [ ] Source inventory under `sources/*`
+- [x] SSRF-safe fetch foundation before exposing scraper network APIs
+- [x] Disabled Deriv/MT5 skeletons behind explicit unlock policy
 
 ## Path to Level 4
 
-- [ ] Production-grade deployment and secret management
-- [ ] Monitoring, alerting, backups, incident response and recovery
-- [ ] Independent security review and dependency scanning
-- [ ] Explicit human approval process for any future live-mode unlock
-- [ ] Broker-specific reconciliation and operational controls
+- Production deployment, secrets, monitoring, incident response
+- Independent security review
+- Human approval gate for any live-mode unlock
+- Broker reconciliation
 
-No repository on this account is being represented as Level 4. Live trading remains locked.
+Live trading remains locked.
