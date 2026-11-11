@@ -17,6 +17,15 @@ class PaperBrokerTests(unittest.TestCase):
         self.broker.place_order(self.order(Side.SELL, "1", "12", "b"))
         self.assertEqual(self.broker.get_account().realized_pnl, Decimal("2"))
         self.assertEqual(self.broker.get_account().open_positions, 0)
+    def test_rejects_conflicting_client_order_id(self):
+        self.broker.place_order(self.order())
+        with self.assertRaises(ValueError):
+            self.broker.place_order(self.order(qty="2", cid="a"))
+
+    def test_rejects_non_finite_price(self):
+        with self.assertRaises(ValueError):
+            self.broker.place_order(self.order(price="NaN"))
+
     def test_rejects_invalid_order(self):
         with self.assertRaises(ValueError): self.broker.place_order(self.order(qty="0"))
 
