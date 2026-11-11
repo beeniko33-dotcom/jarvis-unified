@@ -19,6 +19,15 @@ class PaperReplayTests(unittest.TestCase):
             count=first["event_count"]; second=engine.replay(bars,digest); self.assertEqual(second["event_count"],count); engine.close()
             reopened=PaperReplay(db,fast=2,slow=3); self.assertEqual(reopened.report()["event_count"],count)
             self.assertTrue(reopened.verify_chain()); reopened.close()
+    def test_incremental_import_uses_persisted_sma_warmup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source=self.make_csv(tmp); bars,digest=load_bars(source)
+            engine=PaperReplay(Path(tmp)/"incremental.sqlite3",fast=2,slow=3)
+            engine.replay(bars[:5],digest)
+            result=engine.replay(bars[5:],digest)
+            self.assertGreater(result["entries"],0)
+            self.assertTrue(result["event_chain_valid"])
+            engine.close()
     def test_rejects_timezone_naive_data(self):
         with tempfile.TemporaryDirectory() as tmp:
             p=Path(tmp)/"bad.csv"; p.write_text("timestamp,symbol,open,high,low,close,volume\n2026-01-01,TEST,1,2,0.5,1,10\n")
