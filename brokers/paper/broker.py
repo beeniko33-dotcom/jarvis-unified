@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -24,7 +23,7 @@ class PaperBroker:
     - Configurable commission (per-side) and slippage (bps)
     - Optional JSONL audit ledger for filled orders
     - Thread-safe via RLock
-    - Idempotent client_order_id handling
+    - Idempotent client_order_id handling (compares original request)
     """
 
     def __init__(
@@ -48,6 +47,8 @@ class PaperBroker:
         self._positions: dict[str, Position] = {}
         self._orders: dict[str, OrderResult] = {}
         self._client_ids: dict[str, OrderResult] = {}
+        # original request fingerprint for idempotency: (symbol, side, qty, raw_price)
+        self._client_requests: dict[str, tuple[str, Side, Decimal, Decimal]] = {}
         self._last_prices: dict[str, Decimal] = {}
         self._commission_per_side = Decimal(commission_per_side)
         self._slippage_bps = Decimal(slippage_bps)
@@ -65,7 +66,9 @@ class PaperBroker:
             return price * (Decimal("1") + factor)
         return price * (Decimal("1") - factor)
 
-    def _append_ledger(self, result: OrderResult, raw_price: Decimal, fill_price: Decimal, commission: Decimal) -> None:
+    def _append_ledger(
+        self, result: OrderResult, raw_price: Decimal, fill_price: Decimal, commission: Decimal
+    ) -> None:
         if self._ledger_path is None:
             return
         record = {
@@ -114,15 +117,9 @@ class PaperBroker:
         with self._lock:
             if order.client_order_id in self._client_ids:
                 prior = self._client_ids[order.client_order_id]
-                same_request = (
-                    prior.symbol == symbol
-                    and prior.side == order.side
-                    and prior.quantity == order.quantity
-                    and prior.fill_price == order.price  # note: compared to requested price for idempotency
-                )
-                # Re-check against requested price; slippage makes fill different, so use original request price for match
+                fingerprint = self._client_requests[order.client_order_id]
+                same_request = fingerprint == (symbol, order.side, order.quantity, order.price)
                 if not same_request:
-                    # More robust: store original request price? For Level 2 we keep simple: reject conflict.
                     raise ValueError("client_order_id was already used for a different order")
                 return prior
 
@@ -158,7 +155,9 @@ class PaperBroker:
             elif current:
                 # Adding to existing position
                 total = abs(current.quantity) + order.quantity
-                avg = (abs(current.quantity) * current.average_price + order.quantity * fill_price) / total
+                avg = (
+                    abs(current.quantity) * current.average_price + order.quantity * fill_price
+                ) / total
                 self._positions[symbol] = Position(
                     symbol, current.quantity + signed, avg, current.opened_at
                 )
@@ -183,6 +182,12 @@ class PaperBroker:
             )
             self._orders[result.order_id] = result
             self._client_ids[order.client_order_id] = result
+            self._client_requests[order.client_order_id] = (
+                symbol,
+                order.side,
+                order.quantity,
+                order.price,
+            )
             self._append_ledger(result, raw_price, fill_price, commission)
             return result
 
