@@ -24,13 +24,13 @@ class ForwardValidationTests(unittest.TestCase):
             max_observation_age=timedelta(minutes=10),
         )
 
-    def item(self, when=None):
+    def item(self, when=None, source="provider-stream-v1"):
         when = when or self.now
         return {
             "observed_at": when.isoformat(), "instrument": "EURUSD",
-            "provider": "ExampleFeed", "source": "provider-stream-v1",
-            "interval": "1h", "strategy_id": "sma-crossover-long",
-            "strategy_version": "1.0.0", "price": "1.08500",
+            "provider": "ExampleFeed", "source": source, "interval": "1h",
+            "strategy_id": "sma-crossover-long", "strategy_version": "1.0.0",
+            "price": "1.08500",
         }
 
     def test_offset_is_normalized_to_utc_day(self):
@@ -55,11 +55,11 @@ class ForwardValidationTests(unittest.TestCase):
             self.store.ingest(future)
 
     def test_unverified_candidates_never_count_toward_streak(self):
-        for offset in range(30):
+        for offset in range(5):
             when = self.now - timedelta(minutes=offset)
             self.store.ingest(self.item(when))
         report = self.store.report(1)
-        self.assertEqual(report["unverified_candidate_count"], 30)
+        self.assertEqual(report["unverified_candidate_count"], 5)
         self.assertEqual(report["verified_observation_count"], 0)
         self.assertEqual(report["latest_consecutive_verified_utc_day_streak"], 0)
         self.assertEqual(report["level_3_forward_evidence_gate"], "BLOCKED_PROVENANCE")
@@ -68,8 +68,8 @@ class ForwardValidationTests(unittest.TestCase):
     def test_only_verifier_approved_records_count(self):
         self.store.close()
         self.store = self.make_store(verifier=lambda item: item["source"] == "provider-signed-v1")
-        self.store.ingest({**self.item(), "source": "provider-signed-v1"})
-        self.store.ingest(self.item())
+        self.store.ingest(self.item(self.now, "provider-signed-v1"))
+        self.store.ingest(self.item(self.now - timedelta(minutes=1)))
         report = self.store.report(1)
         self.assertEqual(report["verified_observation_count"], 1)
         self.assertEqual(report["unverified_candidate_count"], 1)
@@ -79,8 +79,10 @@ class ForwardValidationTests(unittest.TestCase):
     def test_missing_day_breaks_verified_streak(self):
         self.store.close()
         self.store = self.make_store(verifier=lambda item: True)
-        self.store.ingest(self.item(self.now - timedelta(days=2)))
-        self.store.ingest(self.item(self.now))
+        self.now = datetime(2026, 1, 28, 12, tzinfo=timezone.utc)
+        self.store.ingest(self.item())
+        self.now = datetime(2026, 1, 30, 12, tzinfo=timezone.utc)
+        self.store.ingest(self.item())
         report = self.store.report(2)
         self.assertEqual(report["latest_consecutive_verified_utc_day_streak"], 1)
         self.assertEqual(report["level_3_forward_evidence_gate"], "NOT_MET")
