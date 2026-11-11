@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, deriv-eurusd-readonly-feed]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -25,6 +25,9 @@ jobs:
 
       - name: Run unit test suite
         run: python -m unittest discover -s tests -v
+
+      - name: Test Deriv read-only market-data collector
+        run: python -m unittest discover -s tests -p 'test_deriv_feed.py' -v
 
       - name: Test durable paper research replay
         run: python -m unittest discover -s tests -p 'test_paper_replay.py' -v
