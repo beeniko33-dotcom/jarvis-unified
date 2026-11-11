@@ -34,6 +34,19 @@ def build_status_payload(broker, settings, risk) -> dict:
     }
 
 
+def build_summary_payload(broker, settings, risk) -> dict:
+    status = build_status_payload(broker, settings, risk)
+    return {
+        "ok": True,
+        "mode": status["mode"],
+        "broker": status["broker"],
+        "kill_switch": status["kill_switch"],
+        "open_positions": len(status["positions"]),
+        "balance": status["account"]["balance"],
+        "equity": status["account"]["equity"],
+    }
+
+
 def print_banner() -> None:
     print("Jarvis Unified")
     print("Paper-first broker-agnostic trading runtime")
@@ -44,6 +57,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Jarvis Unified — paper-first trading infrastructure")
     parser.add_argument("--check", action="store_true", help="validate configuration and initialize paper runtime")
     parser.add_argument("--health", action="store_true", help="print a minimal JSON health payload")
+    parser.add_argument("--summary", action="store_true", help="print a concise JSON summary snapshot")
     parser.add_argument("--status", action="store_true", help="print a JSON status snapshot without starting the API")
     parser.add_argument("--serve", action="store_true", help="start localhost read-only status API")
     parser.add_argument("--host", help="bind address for status API; must remain localhost-only")
@@ -63,6 +77,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         return
     if args.health:
         print(json.dumps({"ok": True}))
+        return
+    if args.summary:
+        print(json.dumps(build_summary_payload(broker, settings, risk), default=str))
         return
     if args.status:
         print_banner()

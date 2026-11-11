@@ -48,6 +48,17 @@ class MainCliTests(unittest.TestCase):
         payload = json.loads(buffer.getvalue().strip().splitlines()[-1])
         self.assertEqual(payload, {"ok": True})
 
+    def test_summary_prints_compact_snapshot(self):
+        buffer = io.StringIO()
+        with patch.dict(os.environ, {}, clear=True):
+            with redirect_stdout(buffer):
+                main(["--summary"])
+
+        payload = json.loads(buffer.getvalue())
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["broker"], "paper")
+        self.assertEqual(payload["open_positions"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
