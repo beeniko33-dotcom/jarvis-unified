@@ -48,6 +48,9 @@ def check_structure() -> bool:
         "apps/dashboard/index.html",
         "packages/scraper/safe_fetch.py",
         "scripts/paper_session.py",
+        "scripts/paper_report.py",
+        "tests/test_paper_report.py",
+        "docs/LEVEL_3_RUNBOOK.md",
         "tests/test_config.py",
         "tests/test_risk_engine.py",
         "tests/test_paper_broker.py",
@@ -216,6 +219,7 @@ def main() -> int:
         print("  Level 2 still requires a green GitHub Actions run on main.")
         print("  History import still requires: bash scripts/import_sources.sh")
         print("  Paper session (Level 3 prep): python scripts/paper_session.py --allow-entries")
+        print("  Paper metrics: python scripts/paper_report.py var/paper_ledger.jsonl --min-days 30")
         return 0
     print("  One or more checks failed. Fix before claiming Level 2.")
     return 1
