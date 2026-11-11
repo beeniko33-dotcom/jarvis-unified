@@ -1,8 +1,12 @@
 """The only supported path from strategy orders to a broker adapter."""
 from __future__ import annotations
+
+from decimal import Decimal
+
+from brokers.base import Broker
 from core.models import OrderRequest, OrderResult
 from core.risk import RiskEngine
-from brokers.base import Broker
+
 
 class ExecutionService:
     def __init__(self, broker: Broker, risk: RiskEngine) -> None:
@@ -10,8 +14,22 @@ class ExecutionService:
         self.risk = risk
 
     def submit(self, order: OrderRequest) -> OrderResult:
+        """Submit a new or increasing order only after the central risk gate approves it."""
         account = self.broker.get_account()
-        decision = self.risk.evaluate(order, daily_realized_pnl=account.realized_pnl, open_positions=account.open_positions)
+        decision = self.risk.evaluate(
+            order,
+            daily_realized_pnl=account.realized_pnl,
+            open_positions=account.open_positions,
+        )
         if not decision.allowed:
             raise PermissionError(f"order rejected by risk engine: {decision.reason}")
         return self.broker.place_order(order)
+
+    def close_position(self, symbol: str, price: Decimal) -> OrderResult:
+        """Close an existing paper position; risk stops new entries, not risk-reducing exits."""
+        if not price.is_finite() or price <= 0:
+            raise ValueError("close price must be a finite positive value")
+        positions = {position.symbol: position for position in self.broker.get_positions()}
+        if symbol not in positions:
+            raise ValueError(f"no open position for {symbol}")
+        return self.broker.close_position(symbol, price)
