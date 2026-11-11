@@ -31,7 +31,9 @@ class MainCliTests(unittest.TestCase):
             with redirect_stdout(buffer):
                 main(["--status"])
 
-        payload = json.loads(buffer.getvalue())
+        output = buffer.getvalue().splitlines()
+        self.assertIn("Jarvis Unified", output[0])
+        payload = json.loads(output[-1])
         self.assertEqual(payload["mode"], "paper")
         self.assertEqual(payload["broker"], "paper")
         self.assertTrue(payload["kill_switch"])

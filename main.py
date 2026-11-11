@@ -34,6 +34,12 @@ def build_status_payload(broker, settings, risk) -> dict:
     }
 
 
+def print_banner() -> None:
+    print("Jarvis Unified")
+    print("Paper-first broker-agnostic trading runtime")
+    print("Status: safe / read-only / localhost-only")
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Jarvis Unified — paper-first trading infrastructure")
     parser.add_argument("--check", action="store_true", help="validate configuration and initialize paper runtime")
@@ -51,12 +57,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         raise ValueError("Status API may only bind to localhost until authentication and TLS are configured")
 
     if args.check:
+        print_banner()
         print("Configuration valid; paper broker initialized; kill_switch=" + str(risk.halted))
         return
     if args.status:
+        print_banner()
         print(json.dumps(build_status_payload(broker, settings, risk), default=str))
         return
     if args.serve:
+        print_banner()
         from apps.api.status import serve
 
         def status():
