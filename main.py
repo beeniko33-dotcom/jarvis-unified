@@ -9,6 +9,8 @@ from core.config import Settings
 from core.risk import RiskEngine, RiskLimits
 from brokers.paper import PaperBroker
 
+APP_VERSION = "0.2.0"
+
 
 def build_runtime(settings: Settings):
     broker = PaperBroker(settings.starting_balance)
@@ -60,6 +62,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--summary", action="store_true", help="print a concise JSON summary snapshot")
     parser.add_argument("--status", action="store_true", help="print a JSON status snapshot without starting the API")
     parser.add_argument("--version", action="store_true", help="print the application version")
+    parser.add_argument("--report", action="store_true", help="print a combined version + health + summary snapshot")
     parser.add_argument("--serve", action="store_true", help="start localhost read-only status API")
     parser.add_argument("--host", help="bind address for status API; must remain localhost-only")
     parser.add_argument("--port", type=int, help="port for status API")
@@ -77,13 +80,19 @@ def main(argv: Sequence[str] | None = None) -> None:
         print("Configuration valid; paper broker initialized; kill_switch=" + str(risk.halted))
         return
     if args.version:
-        print("Jarvis Unified 0.2.0")
+        print(f"Jarvis Unified {APP_VERSION}")
         return
     if args.health:
         print(json.dumps({"ok": True}))
         return
     if args.summary:
         print(json.dumps(build_summary_payload(broker, settings, risk), default=str))
+        return
+    if args.report:
+        report = build_summary_payload(broker, settings, risk)
+        report["version"] = APP_VERSION
+        report["ok"] = True
+        print(json.dumps(report, default=str))
         return
     if args.status:
         print_banner()

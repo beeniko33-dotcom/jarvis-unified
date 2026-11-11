@@ -68,6 +68,18 @@ class MainCliTests(unittest.TestCase):
         self.assertIn("Jarvis Unified", buffer.getvalue().strip())
         self.assertIn("0.2.0", buffer.getvalue())
 
+    def test_report_prints_combined_snapshot(self):
+        buffer = io.StringIO()
+        with patch.dict(os.environ, {}, clear=True):
+            with redirect_stdout(buffer):
+                main(["--report"])
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(payload["ok"], True)
+        self.assertEqual(payload["version"], "0.2.0")
+        self.assertEqual(payload["mode"], "paper")
+        self.assertEqual(payload["broker"], "paper")
+
 
 if __name__ == "__main__":
     unittest.main()
