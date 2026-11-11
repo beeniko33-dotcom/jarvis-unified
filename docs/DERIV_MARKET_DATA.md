@@ -41,7 +41,9 @@ run does not establish 30 days; no observation is backfilled. Missed UTC days br
 
 ## Evidence classification
 
-- Genuine newly received Deriv public ticks can be recorded as forward market-data observations.
+- Newly received Deriv public ticks can be recorded as unverified forward market-data candidates.
+- These candidates receive no provider-verification evidence credit until a trusted connection
+  attestation or independently auditable provenance mechanism is implemented.
 - They are not trade fills or strategy PnL. A separate paper strategy/execution ledger is
   required for entries, exits, fees, slippage, open positions and performance statistics.
 - Historical replay, CI fixtures, deterministic smoke tests, and synthetic/demo messages do
