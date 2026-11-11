@@ -82,6 +82,10 @@ class PaperBroker:
             "fill_price": str(fill_price),
             "commission": str(commission),
             "status": result.status,
+            "balance": str(self._balance),
+            "equity": str(self.get_account().equity),
+            "realized_pnl": str(self._realized_pnl),
+            "open_positions": len(self._positions),
         }
         with self._ledger_path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record) + "\n")
