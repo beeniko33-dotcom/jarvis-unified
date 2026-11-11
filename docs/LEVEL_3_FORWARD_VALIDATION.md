@@ -1,49 +1,53 @@
 # Level 3 forward-validation evidence collector
 
-This is a paper-evidence ingestion and audit tool. It does not connect to a market-data provider,
-place orders, create signals, or enable any broker. A separate operator-controlled collector
-must obtain observations from a licensed/authorized provider and write JSONL records.
+This is a conservative evidence-ingestion and audit tool. It does not fetch market data,
+place orders, create signals, or enable any broker.
 
-## Evidence contract
+## Evidence contract and limitations
 
-Each line in the input JSONL must contain:
+Each JSONL observation must contain an ISO-8601 timestamp with an explicit offset,
+instrument, provider, source, interval, strategy ID/version and positive price.
 
-- `observed_at`: ISO-8601 timestamp with explicit timezone/offset
-- `instrument`, `provider`, `source`, `interval`
-- `strategy_id`, `strategy_version`
-- `price`: positive decimal
+The collector generates its own UTC ingestion timestamp and rejects observations older
+than ten minutes or more than one minute in the future. This prevents a batch of old
+historical rows from being imported later and counted as fresh forward evidence.
+Duplicate instrument/interval/timestamp rows are ignored. SQLite uses WAL and FULL
+synchronous mode; records are SHA-256 hash chained.
 
-The database is bound to one explicit instrument, provider, interval and strategy version.
-Timestamps are normalized to UTC. Duplicate instrument/interval/timestamp records are ignored.
-Records are append-only and SHA-256 hash chained. SQLite WAL and FULL synchronous mode are used.
-Back up the database and original provider payloads together; retain provider licensing and
-collection logs outside this database.
+**Freshness is not authenticity.** The default CLI has no provider-specific verifier.
+It can retain fresh observations as unverified candidates, but those candidates do not
+contribute to the verified UTC-day streak and the gate reports BLOCKED_PROVENANCE.
+A provider-specific verifier must independently validate the provider's signed payload,
+signature or equivalent authenticated source evidence before any row can be marked
+verified. The generic CLI intentionally does not provide or simulate such a verifier.
+A test callback demonstrates the interface only; it is not production provider verification.
+
+Do not set a JSON field to claim verification. Verification is determined only by the
+trusted verifier callback configured by an operator-controlled integration. Keep original
+provider payloads, signatures, provider event IDs, collection logs and licensing evidence
+outside the database and retain them with backups. A hash chain proves stored-record
+integrity, not the truth or origin of market data.
 
 ## Run
 
-```bash
-python -m research.forward_validation observations.jsonl \
-  --db var/forward_validation.sqlite3 \
-  --instrument EURUSD --provider YOUR_PROVIDER --interval 1h \
-  --strategy-id sma-crossover-long --strategy-version 1.0.0 \
+\`\`\`bash
+python -m research.forward_validation observations.jsonl \\
+  --db var/forward_validation.sqlite3 \\
+  --instrument EURUSD --provider YOUR_PROVIDER --interval 1h \\
+  --strategy-id sma-crossover-long --strategy-version 1.0.0 \\
   --required-days 30
-```
+\`\`\`
 
-The command exits non-zero until the latest observation day has a 30-day uninterrupted UTC
-calendar-day streak. A day counts only when at least one observation exists for that day.
-Missing days reset the latest streak. The tool does not infer observations, backfill gaps,
-or count historical CSV replay, synthetic fixtures, CI sessions, or simulated trades as forward
-evidence. Run it repeatedly against newly collected JSONL records and retain each original file.
-
-A passing coverage gate is necessary but not sufficient for Level 3 certification. Independent
-review, complete fill/cost/position reconciliation, spread-aware execution, instrument contract
-specifications, portfolio risk limits, out-of-sample evaluation and failure/recovery tests remain
-required. The report deliberately keeps `level_3_certification=false`.
+The default CLI will report BLOCKED_PROVENANCE until a provider-specific verifier is
+implemented and independently reviewed. A coverage pass is necessary but not sufficient
+for Level 3 certification. Independent review, complete fill/cost/position reconciliation,
+spread-aware execution, instrument contract specifications, portfolio risk limits,
+out-of-sample evaluation and failure/recovery tests remain required.
 
 ## Operational safety
 
-- Use a durable local or managed persistent volume; never use ephemeral CI `/tmp` storage.
-- Configure exactly one instrument/provider/interval/strategy version per database.
+- Use a durable local or managed persistent volume; never use ephemeral CI storage.
+- Use one instrument/provider/interval/strategy version per database.
 - Keep the kill switch engaged and Deriv/MT5/wallet/live adapters disabled.
 - Never put API keys or credentials in JSONL, SQLite metadata, source control or CI logs.
-- Do not treat this collector as a live data feed; it only audits records supplied to it.
+- Historical replay, CI fixtures, synthetic/demo data and simulated trades never count.
