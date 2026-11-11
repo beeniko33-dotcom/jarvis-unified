@@ -40,9 +40,12 @@ class ForwardValidationTests(unittest.TestCase):
         self.assertEqual(item["utc_day"], "2026-01-30")
         self.assertTrue(item["observed_at"].endswith("+00:00"))
 
-    def test_naive_timestamp_rejected(self):
+    def test_naive_and_malformed_timestamps_rejected(self):
         bad = self.item()
         bad["observed_at"] = "2026-01-30T12:00:00"
+        with self.assertRaises(ValueError):
+            self.store.ingest(bad)
+        bad["observed_at"] = None
         with self.assertRaises(ValueError):
             self.store.ingest(bad)
 
