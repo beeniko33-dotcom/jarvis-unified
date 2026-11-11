@@ -34,5 +34,10 @@ jobs:
           python main.py --report > /tmp/jarvis-report.json
           python -c "import json; from pathlib import Path; p=json.loads(Path('/tmp/jarvis-report.json').read_text()); assert p['ok'] is True; assert p['mode']=='paper'; assert p['broker']=='paper'; print('report ok')"
 
+      - name: Exercise deterministic paper session and ledger report
+        run: |
+          python scripts/paper_session.py --allow-entries --ledger /tmp/jarvis-paper-ledger.jsonl
+          python scripts/paper_report.py /tmp/jarvis-paper-ledger.jsonl --min-days 1
+
       - name: Run foundation diagnostic
         run: python scripts/diagnose.py
