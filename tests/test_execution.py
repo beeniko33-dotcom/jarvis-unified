@@ -1,0 +1,23 @@
+from decimal import Decimal
+import unittest
+from brokers.paper import PaperBroker
+from core.execution import ExecutionService
+from core.models import OrderRequest, Side
+from core.risk import RiskEngine, RiskLimits
+
+class ExecutionServiceTests(unittest.TestCase):
+    def setUp(self):
+        self.broker = PaperBroker(Decimal("1000"))
+        self.risk = RiskEngine(RiskLimits(Decimal("5"), Decimal("10"), 2, True))
+        self.service = ExecutionService(self.broker, self.risk)
+        self.order = OrderRequest("EURUSD", Side.BUY, Decimal("0.1"), Decimal("10"), "order-1")
+    def test_kill_switch_blocks_broker_submission(self):
+        with self.assertRaises(PermissionError): self.service.submit(self.order)
+        self.assertEqual(self.broker.get_account().open_positions, 0)
+    def test_approved_order_reaches_paper_broker(self):
+        self.risk.release_kill_switch(explicit_operator_action=True)
+        result = self.service.submit(self.order)
+        self.assertEqual(result.status, "filled")
+        self.assertEqual(self.broker.get_account().open_positions, 1)
+
+if __name__ == "__main__": unittest.main()
