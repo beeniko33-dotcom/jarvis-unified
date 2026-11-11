@@ -7,10 +7,22 @@ OWNER="beeniko33-dotcom"
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
-if [[ -n "$(git status --porcelain)" ]]; then
-  echo "ERROR: working tree must be clean before importing source history." >&2
+if python - <<'PY'
+import sys
+from pathlib import Path
+from core.import_sources import repo_has_tracked_changes
+
+if repo_has_tracked_changes(Path.cwd()):
+    print("ERROR: working tree contains tracked changes; clean the repo before importing source history.", file=sys.stderr)
+    raise SystemExit(1)
+PY
+then
+  :
+else
   exit 1
 fi
+
+echo "Proceeding with source import; untracked generated files are ignored."
 
 # Repository name | default branch
 SOURCES=(
