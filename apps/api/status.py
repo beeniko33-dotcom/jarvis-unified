@@ -1,0 +1,21 @@
+"""Minimal localhost-only read-only status API using the Python standard library."""
+from __future__ import annotations
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+from typing import Callable
+
+class StatusHandler(BaseHTTPRequestHandler):
+    status_provider: Callable[[], dict] = lambda: {}
+    def do_GET(self) -> None:
+        if self.path not in {"/health", "/status"}:
+            self.send_error(404); return
+        payload = {"ok": True} if self.path == "/health" else self.status_provider()
+        body = json.dumps(payload, default=str).encode()
+        self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(body))); self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body)
+    def log_message(self, fmt: str, *args: object) -> None:
+        return
+
+def serve(host: str, port: int, status_provider: Callable[[], dict]) -> None:
+    if host not in {"127.0.0.1", "localhost"}: raise ValueError("Status API may only bind to localhost")
+    handler = type("BoundStatusHandler", (StatusHandler,), {"status_provider": staticmethod(status_provider)})
+    ThreadingHTTPServer((host, port), handler).serve_forever()
