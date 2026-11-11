@@ -27,6 +27,7 @@ This branch adds Level 3 measurement infrastructure. It does not yet qualify as 
 - Deriv/MT5 adapters disabled at construction
 - SSRF-safe scraper fetch foundation
 - Deterministic paper session runner and paper-ledger analytics report
+- Historical OHLCV replay engine with versioned SMA strategy, source SHA-256 provenance, durable SQLite state and hash-chained event records (on the research branch)
 
 ## Level 3 evidence gates
 
