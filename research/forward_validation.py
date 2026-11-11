@@ -26,6 +26,8 @@ def utc_now() -> datetime:
 
 
 def normalize_timestamp(value: str) -> tuple[str, str, datetime]:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("observed_at must be a non-empty ISO-8601 string")
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except (TypeError, ValueError) as exc:
