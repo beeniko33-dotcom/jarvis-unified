@@ -57,11 +57,13 @@ class RiskEngine:
         *,
         daily_realized_pnl: Decimal,
         open_positions: int,
+        unrealized_pnl: Decimal = Decimal("0"),
+        commission_paid: Decimal = Decimal("0"),
     ) -> RiskDecision:
         with self._lock:
             if self._halted:
                 return RiskDecision(False, "kill switch is engaged")
-            if not order.symbol.strip():
+            if not isinstance(order.symbol, str) or not order.symbol.strip():
                 return RiskDecision(False, "symbol is required")
             if not isinstance(order.side, Side):
                 return RiskDecision(False, "unsupported order side")
@@ -72,15 +74,19 @@ class RiskEngine:
                 or order.price <= 0
             ):
                 return RiskDecision(False, "quantity and price must be finite and positive")
-            if not daily_realized_pnl.is_finite():
-                return RiskDecision(False, "daily PnL is invalid")
-            if open_positions < 0:
+            pnl_values = (daily_realized_pnl, unrealized_pnl, commission_paid)
+            if any(not value.is_finite() for value in pnl_values):
+                return RiskDecision(False, "P&L and commission inputs must be finite")
+            if commission_paid < 0:
+                return RiskDecision(False, "commission input cannot be negative")
+            if not isinstance(open_positions, int) or open_positions < 0:
                 return RiskDecision(False, "open position count is invalid")
             notional = order.quantity * order.price
             if notional > self.limits.max_stake_per_trade:
                 return RiskDecision(False, "per-trade notional exceeds hard limit")
-            if daily_realized_pnl <= -self.limits.max_daily_loss:
-                return RiskDecision(False, "daily loss limit reached")
+            net_marked_pnl = daily_realized_pnl + unrealized_pnl - commission_paid
+            if net_marked_pnl <= -self.limits.max_daily_loss:
+                return RiskDecision(False, "net realized/unrealized loss limit reached")
             if open_positions >= self.limits.max_open_positions:
                 return RiskDecision(False, "maximum open positions reached")
             return RiskDecision(True, "approved")
