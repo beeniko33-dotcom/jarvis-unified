@@ -17,7 +17,7 @@ This repository consolidates:
 1. **Paper-first** — Live trading is disabled by default and requires explicit validation.
 2. **Risk is king** — No strategy, AI recommendation, or signal can bypass the central risk engine.
 3. **Broker-agnostic** — Strategies talk to a common interface. Deriv, MT5, Paper (and future brokers) are adapters.
-4. **Preserve capability** — The scraper remains a fully functional, independently configurable module.
+4. **Preserve capability** — The full legitimate scraper feature set is a migration requirement; its original repository remains intact until the history-preserving import and regression checks are complete.
 5. **No secrets in git** — All credentials live in `.env` (never committed).
 
 ## Current Status
