@@ -27,6 +27,28 @@ class RiskEngineTests(unittest.TestCase):
             self.risk.evaluate(self.order, daily_realized_pnl=Decimal("-10"), open_positions=0).allowed
         )
 
+    def test_unrealized_loss_counts_toward_limit(self):
+        decision = self.risk.evaluate(
+            self.order, daily_realized_pnl=Decimal("-2"),
+            unrealized_pnl=Decimal("-8"), open_positions=0,
+        )
+        self.assertFalse(decision.allowed)
+        self.assertIn("loss limit", decision.reason)
+
+    def test_commissions_count_toward_limit(self):
+        decision = self.risk.evaluate(
+            self.order, daily_realized_pnl=Decimal("-9.5"),
+            commission_paid=Decimal("0.5"), open_positions=0,
+        )
+        self.assertFalse(decision.allowed)
+
+    def test_rejects_non_finite_pnl(self):
+        decision = self.risk.evaluate(
+            self.order, daily_realized_pnl=Decimal("0"),
+            unrealized_pnl=Decimal("NaN"), open_positions=0,
+        )
+        self.assertFalse(decision.allowed)
+
     def test_max_open_positions(self):
         self.assertFalse(
             self.risk.evaluate(self.order, daily_realized_pnl=Decimal("0"), open_positions=2).allowed
