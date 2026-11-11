@@ -24,7 +24,16 @@ class PaperBroker:
         if not order.client_order_id.strip(): raise ValueError("client_order_id is required")
         with self._lock:
             if order.client_order_id in self._client_ids:
-                return self._client_ids[order.client_order_id]
+                prior = self._client_ids[order.client_order_id]
+                same_request = (
+                    prior.symbol == order.symbol
+                    and prior.side == order.side
+                    and prior.quantity == order.quantity
+                    and prior.fill_price == order.price
+                )
+                if not same_request:
+                    raise ValueError("client_order_id was already used for a different order")
+                return prior
             current = self._positions.get(order.symbol)
             signed = order.quantity if order.side == Side.BUY else -order.quantity
             if current and current.quantity * signed < 0:
