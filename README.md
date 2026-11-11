@@ -22,70 +22,32 @@ This repository consolidates:
 
 ## Current Status
 
-**Maturity Level: 2 — Operational tooling** (provisional until a green GitHub Actions run on `main` is observed)
+**Maturity Level: 2 — Operational tooling (CONFIRMED)**
 
-- Paper broker with mark-to-market equity, fees/slippage, and optional JSONL audit ledger
+- Green CI on `main`
+- Paper broker with mark-to-market equity, fees/slippage, and JSONL audit ledger
 - Central risk gate + risk-gated execution
-- Localhost-only status API
-- Zero-dependency unit tests + CI workflow
-- `python scripts/diagnose.py` for local validation
+- Localhost-only status API + status dashboard skeleton
+- SSRF-safe scraper fetch foundation
+- Deriv/MT5 adapters disabled (construction raises)
+- Paper session runner for Level 3 prep
 
 See `docs/MATURITY.md` for the full maturity model and roadmap.
 
-## Target Structure
-
-```
-jarvis-unified/
-├── apps/
-│   ├── api/                 # Status + control API
-│   ├── dashboard/           # Next.js web UI (from jarvistrader)
-│   ├── telegram/            # Telegram bot
-│   └── mobile/              # Expo + Flutter companions
-├── core/
-│   ├── brain/               # AI agents & decision engine
-│   ├── signals/             # Signal generation
-│   ├── risk/                # Central risk authority
-│   ├── memory/              # Persistent + vector memory
-│   └── portfolio/           # Position & PnL tracking
-├── brokers/
-│   ├── deriv/               # Deriv adapter (from jarvis-ai-trading-system)
-│   ├── mt5/                 # MT5 adapter
-│   └── paper/               # Simulated execution (default)
-├── packages/
-│   ├── scraper/             # Full advanced-scraper (independent)
-│   ├── research/
-│   ├── analytics/
-│   └── shared/
-├── infrastructure/
-│   ├── docker/
-│   ├── monitoring/
-│   └── deployment/
-├── tests/
-├── docs/
-├── .env.example
-├── pyproject.toml
-└── main.py
-```
-
 ## Quick CLI Reference
-
-Use the project entry point directly from the repo root:
 
 ```bash
 python main.py --check
 python main.py --health
 python main.py --summary
 python main.py --report
-python main.py --serve --host localhost --port 9002
+python main.py --serve --host localhost --port 8787
+python -m unittest discover -s tests -v
+python scripts/diagnose.py
+python scripts/paper_session.py --allow-entries   # Level 3 prep; still paper-only
 ```
 
-These commands are intentionally safe and paper-first:
-
-- `--check` validates config and initializes the paper broker.
-- `--health` returns a minimal `{"ok": true}` payload for health checks.
-- `--summary` prints a compact runtime snapshot.
-- `--report` exposes a single JSON payload containing version, runtime, and account data.
-- `--serve` starts the localhost-only status API for operational monitoring.
+Open `apps/dashboard/index.html` in a browser while the status API is running.
 
 ## Documentation
 
@@ -97,6 +59,7 @@ These commands are intentionally safe and paper-first:
 | `docs/MIGRATION.md` | How the seven repos were consolidated |
 | `docs/RISK.md` | Risk engine rules |
 | `docs/SCRAPER.md` | Independent scraper module |
+| `docs/DIAGNOSTIC.md` | Audit notes |
 
 ## Safety Notice
 

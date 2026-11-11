@@ -14,45 +14,31 @@ Honest tracking only. No marketing claims.
 
 ## Current status — November 2026
 
-**Level 2 — Operational tooling** (provisional until a green GitHub Actions run is observed).
+**Level 2 — Operational tooling — CONFIRMED**
 
-Delivered beyond the Level 1 foundation:
+Green GitHub Actions runs observed on `main` (e.g. workflow runs #62 and #63 after the CI YAML fix). Unit tests, `main.py --check`, report payload assertions, and `scripts/diagnose.py` execute in CI.
 
-- CI workflow hardened (unittest, workflow_dispatch, permissions, block scalars)
-- Paper broker: MtM equity, fees/slippage, JSONL audit ledger, idempotent client IDs
-- Portfolio tracker, SignalIntent contract
-- Deriv/MT5 adapters present but **construction raises** (cannot be used)
-- SSRF-safe fetch primitive under `packages/scraper`
-- Status-only dashboard HTML
-- Paper session runner (`scripts/paper_session.py`) for Level 3 prep
-- Expanded unit tests
+### Delivered
 
-**Confirm Level 2 only after the GitHub Actions run on `main` is green.**
+- Paper-only config; kill switch engaged by default (not env-overridable)
+- Central risk gate + ExecutionService
+- Paper broker: fills, realized PnL, MtM equity, fees/slippage, JSONL audit ledger
+- Localhost status API + static status dashboard
+- Portfolio tracker + SignalIntent contract
+- Deriv/MT5 adapters present but construction raises (cannot be used)
+- SSRF-safe fetch foundation (`packages/scraper/safe_fetch.py`)
+- Paper session runner for Level 3 prep
+- Zero-dependency unittest CI with `workflow_dispatch`
 
-## Checklist
+## Level 3 path (next)
 
-### Level 2
-- [x] Paper-only config + kill switch defaults
-- [x] Risk-gated execution
-- [x] Paper broker with MtM / fees / ledger
-- [x] Localhost status API + status dashboard skeleton
-- [x] Unit tests + diagnose script
-- [x] CI workflow definition (verify green run)
-- [ ] Observe successful Actions run on `main`
+- [ ] Run sustained paper sessions with `scripts/paper_session.py --allow-entries` and retain ledgers under `var/`
+- [ ] Define signal quality baseline metrics (win rate, expectancy, max drawdown, rejection rate)
+- [ ] Multi-day timestamped logs; no profit claims without measured data
+- [ ] Optional: import source histories via `bash scripts/import_sources.sh` (local Git + SSH required)
+- [ ] Selective strategy migration only after inventory of `sources/*`
 
-### Level 3 prep (started)
-- [x] Paper session runner with audit events
-- [x] SignalIntent contract (no direct broker access)
-- [ ] Sustained multi-day paper logs with measured metrics
-- [ ] Signal quality baseline definition
-
-### Migration
-- [ ] History-preserving import via `scripts/import_sources.sh` (requires local Git + SSH)
-- [ ] Source inventory under `sources/*`
-- [x] SSRF-safe fetch foundation before exposing scraper network APIs
-- [x] Disabled Deriv/MT5 skeletons behind explicit unlock policy
-
-## Path to Level 4
+## Level 4 path (later)
 
 - Production deployment, secrets, monitoring, incident response
 - Independent security review
