@@ -39,6 +39,15 @@ class MainCliTests(unittest.TestCase):
         self.assertTrue(payload["kill_switch"])
         self.assertIn("account", payload)
 
+    def test_health_prints_ok_payload(self):
+        buffer = io.StringIO()
+        with patch.dict(os.environ, {}, clear=True):
+            with redirect_stdout(buffer):
+                main(["--health"])
+
+        payload = json.loads(buffer.getvalue().strip().splitlines()[-1])
+        self.assertEqual(payload, {"ok": True})
+
 
 if __name__ == "__main__":
     unittest.main()

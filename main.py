@@ -43,6 +43,7 @@ def print_banner() -> None:
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Jarvis Unified — paper-first trading infrastructure")
     parser.add_argument("--check", action="store_true", help="validate configuration and initialize paper runtime")
+    parser.add_argument("--health", action="store_true", help="print a minimal JSON health payload")
     parser.add_argument("--status", action="store_true", help="print a JSON status snapshot without starting the API")
     parser.add_argument("--serve", action="store_true", help="start localhost read-only status API")
     parser.add_argument("--host", help="bind address for status API; must remain localhost-only")
@@ -59,6 +60,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.check:
         print_banner()
         print("Configuration valid; paper broker initialized; kill_switch=" + str(risk.halted))
+        return
+    if args.health:
+        print(json.dumps({"ok": True}))
         return
     if args.status:
         print_banner()
