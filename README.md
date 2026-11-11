@@ -10,7 +10,7 @@ This repository consolidates:
 - `jarvistrader` → web dashboard
 - `quantum-peak-pro` → research / signal concepts
 - `jarvis-ai` → AI agents & memory
-- `advanced-scraper` → independent data collection engine (fully preserved)
+- `advanced-scraper` → independent data collection engine (history-preserving import pending)
 
 ## Core Principles
 
@@ -22,7 +22,7 @@ This repository consolidates:
 
 ## Current Status
 
-**Maturity Level: 1 — Foundation**
+**Maturity Level: 1 — Foundation** (core scaffolding committed; CI validation pending)
 
 See `docs/MATURITY.md` for the full maturity model and roadmap.
 
