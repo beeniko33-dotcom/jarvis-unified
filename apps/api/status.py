@@ -16,6 +16,11 @@ class StatusHandler(BaseHTTPRequestHandler):
         return
 
 def serve(host: str, port: int, status_provider: Callable[[], dict]) -> None:
-    if host not in {"127.0.0.1", "localhost"}: raise ValueError("Status API may only bind to localhost")
+    if host not in {"127.0.0.1", "localhost"}:
+        raise ValueError("Status API may only bind to localhost")
     handler = type("BoundStatusHandler", (StatusHandler,), {"status_provider": staticmethod(status_provider)})
-    ThreadingHTTPServer((host, port), handler).serve_forever()
+    try:
+        server = ThreadingHTTPServer((host, port), handler)
+    except OSError as exc:
+        raise RuntimeError(f"Status API could not bind to {host}:{port}: {exc.strerror or exc}") from exc
+    server.serve_forever()

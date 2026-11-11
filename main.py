@@ -53,7 +53,10 @@ def main(argv: Sequence[str] | None = None) -> None:
                 "positions": [asdict(p) for p in broker.get_positions()],
             }
 
-        serve(host, port, status)
+        try:
+            serve(host, port, status)
+        except RuntimeError as exc:
+            raise SystemExit(str(exc)) from exc
         return
     parser.print_help()
 

@@ -41,6 +41,23 @@ class StatusApiTests(unittest.TestCase):
             urlopen(self.base + "/execute", timeout=2)
         self.assertEqual(error.exception.code, 404)
 
+    def test_serve_reports_port_in_use(self):
+        occupied = ThreadingHTTPServer(("127.0.0.1", 0), StatusHandler)
+        port = occupied.server_port
+        thread = threading.Thread(target=occupied.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with self.assertRaises(RuntimeError) as error:
+                from apps.api.status import serve
+
+                serve("127.0.0.1", port, lambda: {"ok": True})
+            self.assertIn("could not bind", str(error.exception).lower())
+            self.assertIn(str(port), str(error.exception))
+        finally:
+            occupied.shutdown()
+            occupied.server_close()
+            thread.join(timeout=2)
+
 
 if __name__ == "__main__":
     unittest.main()
