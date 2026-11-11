@@ -22,7 +22,13 @@ This repository consolidates:
 
 ## Current Status
 
-**Maturity Level: 1 — Foundation** (core scaffolding committed; CI validation pending)
+**Maturity Level: 2 — Operational tooling** (provisional until a green GitHub Actions run on `main` is observed)
+
+- Paper broker with mark-to-market equity, fees/slippage, and optional JSONL audit ledger
+- Central risk gate + risk-gated execution
+- Localhost-only status API
+- Zero-dependency unit tests + CI workflow
+- `python scripts/diagnose.py` for local validation
 
 See `docs/MATURITY.md` for the full maturity model and roadmap.
 
