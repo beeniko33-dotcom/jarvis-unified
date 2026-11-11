@@ -1,57 +1,47 @@
 # Architecture — Jarvis Unified
 
-## High-level design
+## Execution flow
+
+Strategies and research produce broker-neutral intents. New entries pass through the central risk engine and ExecutionService before reaching the paper broker. The scraper is an independent research/data package and is not an execution dependency.
 
 ```
-Interfaces (web / Telegram / mobile / MCP)
-                 |
-       Local Status & Control APIs
-                 |
-       Core Orchestration Services
-       |       |        |       |
-     Brain   Signals   Risk   Portfolio
-                         |
-                 Execution Service
-                         |
-             Broker-neutral contract
-             /        |         \
-          Paper     Deriv demo  MT5 demo
-                         (future)
-                 
-       Independent packages/scraper
-       (research input; not an execution dependency)
+Research / signals -> Risk engine -> ExecutionService -> Paper broker
+                                      |
+                                  Audit ledger
+                                      |
+                              Portfolio / reports
 ```
 
 ## Enforced boundaries
 
-1. **Broker-neutral models:** strategies use shared order, position, account, and result types.
-2. **Single execution gate:** new orders flow through `core.execution.ExecutionService`, which calls the central risk engine before reaching an adapter.
-3. **Risk-reducing exits:** closing an existing position remains available while the entry kill switch is engaged. The paper adapter calculates the exact opposite-side quantity.
-4. **Fail-closed startup:** only paper mode is accepted. The kill switch is engaged by default and cannot be disabled by environment configuration. Status binds to localhost only.
-5. **Independent scraper:** scraper functionality is migrated as a separately configured package and must not gain arbitrary remote code execution.
+1. Broker-neutral order, position, account and result models.
+2. One execution gate for new orders.
+3. Risk-reducing closes remain available when the entry kill switch is engaged.
+4. Fail-closed startup: paper mode only, kill switch on by default, status API bound to localhost.
+5. Scraper remote fetching uses SSRF protections; arbitrary remote code execution is not a scraper feature.
+6. Deriv/MT5 adapter construction remains disabled.
 
 ## Current implementation
 
 - Broker contract: `brokers/base.py`
 - Paper simulation: `brokers/paper/`
-- Shared models: `core/models.py`
-- Risk gate: `core/risk/`
-- Execution gate: `core/execution.py`
-- Runtime config: `core/config.py`
-- Read-only status endpoints: `apps/api/status.py`
-- Entrypoint: `main.py`
+- Models, risk and execution: `core/`
+- Status API: `apps/api/status.py`
+- Dashboard: `apps/dashboard/`
+- Scraper fetch foundation: `packages/scraper/safe_fetch.py`
+- Paper session runner: `scripts/paper_session.py`
+- Ledger analytics: `scripts/paper_report.py`
 
-## Known limitations
+## Known limitations and upgrade priorities
 
-The current paper broker is in-memory only. It does not persist orders, model margin or fees, calculate mark-to-market equity, simulate slippage, or reconcile external broker state. Risk controls do not yet include portfolio correlation, leverage, drawdown, stale-price, or daily-reset policy. The status API is read-only and intended for localhost development.
+- Paper broker state remains in-memory; JSONL is an audit trail, not restart recovery or a transactional database.
+- Ledger currently captures fill-level account snapshots but lacks tamper-evident hash chaining and complete session/strategy attribution.
+- Risk controls still need unrealized daily loss, daily reset/timezone policy, peak-equity drawdown, stale-price checks, leverage/margin and correlated exposure.
+- The current signal contract is not a complete research engine; signal quality requires sourced market data, strategy IDs and out-of-sample attribution.
+- The scraper is a secure fetch foundation, not yet the full advanced-scraper feature set. Preserve and regression-test all legitimate original capabilities during history-preserving import.
+- Status API is development-only, unauthenticated and read-only; do not expose it publicly.
+- No Deriv/MT5 demo or live adapter is implemented.
 
-No Deriv or MT5 adapter is implemented. No live execution mode exists.
+## Maturity
 
-## Next phases
-
-1. Validate the current test suite in GitHub Actions and fix any failures.
-2. Add persistent paper ledger, valuation, fees/slippage model, and status API integration tests.
-3. Import all seven source repositories with original Git histories using a verified history-preserving migration process; retain the source repositories unchanged.
-4. Inventory scraper capabilities and dependencies, then migrate all legitimate CLI/crawl/extraction features; add DNS/IP/redirect SSRF protections and resource budgets to remote fetch APIs.
-5. Build dashboard status-only UI, then add demo broker adapters behind the same execution gate.
-6. Run sustained paper validation before considering any higher maturity level.
+Level 2 is the last confirmed baseline. The Level 3 branch adds paper-ledger metrics and a runbook. Level 3 requires sustained multi-day paper evidence and review, not merely code or green CI. Live trading remains locked.
