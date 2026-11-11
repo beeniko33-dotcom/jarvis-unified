@@ -1,48 +1,45 @@
 # START HERE — Jarvis Unified
 
-Welcome. This is the single consolidated repository.
-
 ## Current phase
 
-**Level 2 — Operational tooling — CONFIRMED** (green CI on `main`).
-
-Next focus: Level 3 paper validation and optional history-preserving source imports.
+**Level 2 foundation confirmed on main; Level 3 measurement work is in progress on `level-3-paper-validation`.** Do not describe the system as Level 3 until the sustained evidence gates in `docs/MATURITY.md` are met.
 
 ## Run locally
 
-Requires Python 3.11+; no runtime third-party dependencies.
+Requires Python 3.11+; runtime dependencies are standard-library only.
 
 ```bash
-cp .env.example .env   # optional
 python main.py --check
 python -m unittest discover -s tests -v
 python scripts/diagnose.py
+python main.py --report
 python main.py --serve
 # Open apps/dashboard/index.html in a browser
 ```
 
-Paper session (still paper-only; requires explicit flag to allow entries):
+## Controlled paper validation
 
 ```bash
 python scripts/paper_session.py --allow-entries --ledger var/paper_ledger.jsonl
+python scripts/paper_report.py var/paper_ledger.jsonl
+python scripts/paper_report.py var/paper_ledger.jsonl --min-days 30
 ```
 
-## History import (optional, local Git + SSH)
+The explicit `--allow-entries` flag releases only the in-memory paper risk gate for that one run. It does not alter configuration, connect to a broker, or enable real-money orders. Use append-only ledgers and archive each experiment. The report is descriptive; it does not prove signal quality or profitability.
+
+## Source history migration
 
 ```bash
 bash scripts/import_sources.sh
-# Then inventory sources/* before selective migration
 ```
+
+Run this on a clean local clone with Git and SSH configured. Inventory every imported source and run regression checks before porting functionality. Original source repositories must remain unchanged.
 
 ## Safety
 
-Kill switch engaged by default. Status API is localhost-only and read-only. Deriv/MT5 adapters cannot be constructed. No live execution path exists.
+- Paper mode only; kill switch engaged by default.
+- Status API is localhost-only and read-only.
+- Deriv and MT5 adapters are intentionally disabled.
+- No live execution path exists.
 
-## Key documents
-
-- `README.md` — overview
-- `docs/MATURITY.md` — maturity tracking
-- `docs/ARCHITECTURE.md` — design
-- `docs/MIGRATION.md` — source map
-- `docs/RISK.md` — risk rules
-- `docs/SCRAPER.md` — scraper plan
+See `docs/LEVEL_3_RUNBOOK.md`, `docs/MATURITY.md`, `docs/RISK.md` and `docs/SCRAPER.md`.

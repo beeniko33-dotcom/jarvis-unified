@@ -1,66 +1,44 @@
 # Jarvis Unified
 
-**Single source of truth** for the entire Jarvis trading ecosystem.
+**Single source of truth** for the Jarvis trading ecosystem.
 
-This repository consolidates:
+The repository consolidates the core application, Deriv execution research, signal logic, dashboard, AI/research concepts and the advanced scraper migration foundation.
 
-- `jarvis-trader-ecosystem` → core application & status infrastructure
-- `jarvis-ai-trading-system` → Deriv execution engine
-- `jarvis-trader` → signal logic
-- `jarvistrader` → web dashboard
-- `quantum-peak-pro` → research / signal concepts
-- `jarvis-ai` → AI agents & memory
-- `advanced-scraper` → independent data collection engine (history-preserving import pending)
+## Core principles
 
-## Core Principles
+1. **Paper-first** — live trading is disabled; paper validation precedes any production discussion.
+2. **Risk is king** — every new order must pass the central risk gate.
+3. **Broker-agnostic** — strategies use a common broker contract.
+4. **Preserve capability** — migrate the complete legitimate scraper feature set and retain source history; do not discard the original repository.
+5. **No secrets in git** — credentials belong in local environment configuration, never commits.
 
-1. **Paper-first** — Live trading is disabled by default and requires explicit validation.
-2. **Risk is king** — No strategy, AI recommendation, or signal can bypass the central risk engine.
-3. **Broker-agnostic** — Strategies talk to a common interface. Deriv, MT5, Paper (and future brokers) are adapters.
-4. **Preserve capability** — The full legitimate scraper feature set is a migration requirement; its original repository remains intact until the history-preserving import and regression checks are complete.
-5. **No secrets in git** — All credentials live in `.env` (never committed).
+## Maturity
 
-## Current Status
+**Last confirmed baseline: Level 2 — Operational tooling.**
 
-**Maturity Level: 2 — Operational tooling (CONFIRMED)**
+The `level-3-paper-validation` branch adds fill-level account snapshots, a deterministic paper session correction, paper ledger analytics and a Level 3 validation runbook. This is Level 3 preparation, not a Level 3 performance claim. Level 3 requires sustained multi-day evidence and review.
 
-- Green CI on `main`
-- Paper broker with mark-to-market equity, fees/slippage, and JSONL audit ledger
-- Central risk gate + risk-gated execution
-- Localhost-only status API + status dashboard skeleton
-- SSRF-safe scraper fetch foundation
-- Deriv/MT5 adapters disabled (construction raises)
-- Paper session runner for Level 3 prep
-
-See `docs/MATURITY.md` for the full maturity model and roadmap.
-
-## Quick CLI Reference
+## Quick start
 
 ```bash
 python main.py --check
 python main.py --health
 python main.py --summary
 python main.py --report
-python main.py --serve --host localhost --port 8787
 python -m unittest discover -s tests -v
 python scripts/diagnose.py
-python scripts/paper_session.py --allow-entries   # Level 3 prep; still paper-only
+python scripts/paper_session.py --allow-entries --ledger var/paper_ledger.jsonl
+python scripts/paper_report.py var/paper_ledger.jsonl --min-days 30
 ```
 
-Open `apps/dashboard/index.html` in a browser while the status API is running.
+## Architecture and safety
 
-## Documentation
+- Paper broker and central risk-gated execution
+- Localhost-only read-only status API
+- SSRF-safe scraper fetch foundation
+- Deriv and MT5 adapters intentionally disabled
+- No live execution path
 
-| Document | Purpose |
-|----------|---------|
-| `docs/START_HERE.md` | Onboarding & current state |
-| `docs/ARCHITECTURE.md` | System design |
-| `docs/MATURITY.md` | Honest maturity tracking |
-| `docs/MIGRATION.md` | How the seven repos were consolidated |
-| `docs/RISK.md` | Risk engine rules |
-| `docs/SCRAPER.md` | Independent scraper module |
-| `docs/DIAGNOSTIC.md` | Audit notes |
+See `docs/START_HERE.md`, `docs/ARCHITECTURE.md`, `docs/MATURITY.md`, `docs/RISK.md`, `docs/SCRAPER.md`, and `docs/LEVEL_3_RUNBOOK.md`.
 
-## Safety Notice
-
-This is experimental research software. Past claims of high accuracy must be independently verified through paper trading. Never risk capital you cannot afford to lose. Live trading remains locked until paper results are measured and reviewed.
+**Experimental research software. No signal or strategy guarantees profit.**
