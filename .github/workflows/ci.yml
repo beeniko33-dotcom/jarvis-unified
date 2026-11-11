@@ -26,6 +26,9 @@ jobs:
       - name: Run unit test suite
         run: python -m unittest discover -s tests -v
 
+      - name: Test durable paper research replay
+        run: python -m unittest discover -s tests -p 'test_paper_replay.py' -v
+
       - name: Validate paper-mode startup
         run: python main.py --check
 

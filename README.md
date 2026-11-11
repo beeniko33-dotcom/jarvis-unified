@@ -16,7 +16,7 @@ The repository consolidates the core application, Deriv execution research, sign
 
 **Last confirmed baseline: Level 2 — Operational tooling.**
 
-The `level-3-paper-validation` branch adds fill-level account snapshots, a deterministic paper session correction, paper ledger analytics and a Level 3 validation runbook. This is Level 3 preparation, not a Level 3 performance claim. Level 3 requires sustained multi-day evidence and review.
+The `level-3-paper-validation` branch adds fill-level account snapshots and ledger analytics. The `level-3-research-engine` branch adds a restart-safe SQLite historical-data paper replay engine, a versioned SMA reference strategy, source-data hashing and a hash-chained event audit. These are Level 3 preparation, not a Level 3 performance claim. This is Level 3 preparation, not a Level 3 performance claim. Level 3 requires sustained multi-day evidence and review.
 
 ## Quick start
 
