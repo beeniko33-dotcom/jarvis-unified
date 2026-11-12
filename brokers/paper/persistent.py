@@ -17,8 +17,12 @@ from threading import RLock
 from uuid import uuid4
 from typing import Callable
 
-from core.models import AccountSnapshot, OrderRequest, OrderResult, Position, Side
-from .broker import PaperBroker
+from core.models import AccountSnapshot, OrderRequest, OrderResult, OrderStatus, Position, Side
+from .broker import PaperBroker, WorkingOrder
+
+
+class CrashInjectedError(RuntimeError):
+    """Raised by test hooks to simulate a crash before commit."""
 
 
 def _dt(value: str) -> datetime:
@@ -41,6 +45,7 @@ class PersistentPaperBroker(PaperBroker):
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._persistent_lock = RLock()
+        self._crash_before_commit: str | None = None
         super().__init__(
             starting_balance,
             commission_per_side=commission_per_side,
@@ -81,11 +86,41 @@ class PersistentPaperBroker(PaperBroker):
                 db.rollback()
                 raise
 
+    def inject_crash_before_commit(self, event_type: str | None) -> None:
+        self._crash_before_commit = event_type
+
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.database_path, timeout=30, isolation_level=None)
         db.execute("PRAGMA busy_timeout=30000")
         db.execute("PRAGMA foreign_keys=ON")
         return db
+
+    def _order_to_dict(self, o: OrderResult) -> dict:
+        return {
+            "order_id": o.order_id,
+            "client_order_id": o.client_order_id,
+            "symbol": o.symbol,
+            "side": o.side.value,
+            "quantity": str(o.quantity),
+            "fill_price": str(o.fill_price),
+            "status": o.status,
+            "created_at": o.created_at.isoformat(),
+            "filled_quantity": str(
+                o.filled_quantity if o.filled_quantity is not None else o.quantity
+            ),
+            "remaining_quantity": str(
+                o.remaining_quantity if o.remaining_quantity is not None else "0"
+            ),
+        }
+
+    def _order_from_dict(self, o: dict) -> OrderResult:
+        return OrderResult(
+            o["order_id"], o["client_order_id"], o["symbol"],
+            Side(o["side"]), Decimal(o["quantity"]), Decimal(o["fill_price"]),
+            o["status"], _dt(o["created_at"]),
+            filled_quantity=Decimal(o.get("filled_quantity", o["quantity"])),
+            remaining_quantity=Decimal(o.get("remaining_quantity", "0")),
+        )
 
     def _snapshot(self) -> dict:
         return {
@@ -97,12 +132,20 @@ class PersistentPaperBroker(PaperBroker):
                 "symbol": p.symbol, "quantity": str(p.quantity),
                 "average_price": str(p.average_price), "opened_at": p.opened_at.isoformat()
             } for p in self._positions.values()],
-            "orders": [{
-                "order_id": o.order_id, "client_order_id": o.client_order_id,
-                "symbol": o.symbol, "side": o.side.value, "quantity": str(o.quantity),
-                "fill_price": str(o.fill_price), "status": o.status,
-                "created_at": o.created_at.isoformat()
-            } for o in self._orders.values()],
+            "orders": [self._order_to_dict(o) for o in self._orders.values()],
+            "working": [{
+                "order_id": w.order_id, "client_order_id": w.client_order_id,
+                "symbol": w.symbol, "side": w.side.value, "quantity": str(w.quantity),
+                "limit_price": str(w.limit_price),
+                "filled_quantity": str(w.filled_quantity),
+                "average_fill_price": str(w.average_fill_price),
+                "status": w.status, "created_at": w.created_at.isoformat(),
+                "applied_fill_ids": sorted(w.applied_fill_ids),
+            } for w in self._working.values()],
+            "fill_results": {
+                fid: {"order_id": order_id, **self._order_to_dict(result)}
+                for fid, (order_id, result) in self._fill_results.items()
+            },
             "requests": {
                 cid: [symbol, side.value, str(qty), str(price)]
                 for cid, (symbol, side, qty, price) in self._client_requests.items()
@@ -125,15 +168,37 @@ class PersistentPaperBroker(PaperBroker):
         self._orders = {}
         self._client_ids = {}
         for o in state["orders"]:
-            result = OrderResult(o["order_id"], o["client_order_id"], o["symbol"],
-                Side(o["side"]), Decimal(o["quantity"]), Decimal(o["fill_price"]),
-                o["status"], _dt(o["created_at"]))
+            result = self._order_from_dict(o)
             self._orders[result.order_id] = result
-            self._client_ids[result.client_order_id] = result
+            if result.status != OrderStatus.OPEN.value:
+                self._client_ids[result.client_order_id] = result
         self._client_requests = {
             cid: (v[0], Side(v[1]), Decimal(v[2]), Decimal(v[3]))
             for cid, v in state["requests"].items()
         }
+        self._working = {}
+        for w in state.get("working", []):
+            wo = WorkingOrder(
+                order_id=w["order_id"],
+                client_order_id=w["client_order_id"],
+                symbol=w["symbol"],
+                side=Side(w["side"]),
+                quantity=Decimal(w["quantity"]),
+                limit_price=Decimal(w["limit_price"]),
+                filled_quantity=Decimal(w["filled_quantity"]),
+                average_fill_price=Decimal(w["average_fill_price"]),
+                status=w["status"],
+                created_at=_dt(w["created_at"]),
+                applied_fill_ids=set(w.get("applied_fill_ids", [])),
+            )
+            self._working[wo.order_id] = wo
+        self._fill_results = {}
+        for fid, payload in state.get("fill_results", {}).items():
+            order_id = payload.get("order_id") or payload.get("bound_order_id")
+            result = self._order_from_dict(payload)
+            if order_id is None:
+                order_id = result.order_id
+            self._fill_results[fid] = (order_id, result)
         self._last_prices = {k: Decimal(v) for k, v in state["last_prices"].items()}
         self._commission_per_side = Decimal(state["commission_per_side"])
         self._slippage_bps = Decimal(state["slippage_bps"])
@@ -181,7 +246,6 @@ class PersistentPaperBroker(PaperBroker):
         return True
 
     def _refresh_from_db(self, db: sqlite3.Connection) -> None:
-        """Load snapshot + verify chain + compare tail under the caller's open transaction."""
         row = db.execute("SELECT payload FROM paper_state WHERE singleton=1").fetchone()
         if row is None:
             raise RuntimeError("paper ledger state is missing; broker is locked")
@@ -218,6 +282,9 @@ class PersistentPaperBroker(PaperBroker):
                     self._realized_pnl - before_realized,
                     self._commission_paid - before_commission,
                 )
+                if self._crash_before_commit == event_type:
+                    self._crash_before_commit = None
+                    raise CrashInjectedError(f"injected crash before commit on {event_type}")
                 db.commit()
                 return result
             except Exception:
@@ -226,6 +293,33 @@ class PersistentPaperBroker(PaperBroker):
 
     def place_order(self, order: OrderRequest) -> OrderResult:
         return self._mutate("paper_order", lambda: super(PersistentPaperBroker, self).place_order(order))
+
+    def place_working_order(self, order: OrderRequest) -> OrderResult:
+        return self._mutate(
+            "paper_working",
+            lambda: super(PersistentPaperBroker, self).place_working_order(order),
+        )
+
+    def apply_partial_fill(
+        self,
+        order_id: str,
+        fill_quantity: Decimal,
+        price: Decimal | float | str | None = None,
+        *,
+        fill_id: str | None = None,
+    ) -> OrderResult:
+        return self._mutate(
+            "paper_partial_fill",
+            lambda: super(PersistentPaperBroker, self).apply_partial_fill(
+                order_id, fill_quantity, price, fill_id=fill_id
+            ),
+        )
+
+    def cancel_order(self, order_id: str) -> OrderResult:
+        return self._mutate(
+            "paper_cancel",
+            lambda: super(PersistentPaperBroker, self).cancel_order(order_id),
+        )
 
     def set_last_price(self, symbol: str, price: Decimal | float | str) -> None:
         self._mutate("mark_price", lambda: super(PersistentPaperBroker, self).set_last_price(symbol, price))
@@ -294,6 +388,18 @@ class PersistentPaperBroker(PaperBroker):
                 db.rollback()
                 raise
 
+    def get_working_orders(self) -> list[WorkingOrder]:
+        with self._persistent_lock, self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                self._refresh_from_db(db)
+                working = super().get_working_orders()
+                db.commit()
+                return working
+            except Exception:
+                db.rollback()
+                raise
+
     def verify_ledger(self) -> bool:
         with self._persistent_lock, self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -308,3 +414,22 @@ class PersistentPaperBroker(PaperBroker):
     def ledger_event_count(self) -> int:
         with self._connect() as db:
             return int(db.execute("SELECT COUNT(*) FROM paper_events").fetchone()[0])
+
+    def reconcile(self) -> dict:
+        with self._persistent_lock, self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                self._refresh_from_db(db)
+                summary = {
+                    "balance": str(self._balance),
+                    "open_positions": len(self._positions),
+                    "working_orders": len(self._working),
+                    "orders": len(self._orders),
+                    "events": int(db.execute("SELECT COUNT(*) FROM paper_events").fetchone()[0]),
+                    "chain_ok": True,
+                }
+                db.commit()
+                return summary
+            except Exception:
+                db.rollback()
+                raise
