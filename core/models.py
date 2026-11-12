@@ -6,9 +6,18 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any
 
+
 class Side(str, Enum):
     BUY = "buy"
     SELL = "sell"
+
+
+class OrderStatus(str, Enum):
+    OPEN = "open"
+    PARTIAL = "partial"
+    FILLED = "filled"
+    CANCELLED = "cancelled"
+
 
 @dataclass(frozen=True)
 class OrderRequest:
@@ -18,6 +27,7 @@ class OrderRequest:
     price: Decimal
     client_order_id: str
     metadata: dict[str, Any] = field(default_factory=dict)
+
 
 @dataclass(frozen=True)
 class OrderResult:
@@ -29,6 +39,21 @@ class OrderResult:
     fill_price: Decimal
     status: str
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    filled_quantity: Decimal | None = None
+    remaining_quantity: Decimal | None = None
+
+    def __post_init__(self) -> None:
+        # Frozen dataclass: use object.__setattr__ for derived defaults.
+        if self.filled_quantity is None:
+            object.__setattr__(
+                self,
+                "filled_quantity",
+                self.quantity if self.status == OrderStatus.FILLED.value else Decimal("0"),
+            )
+        if self.remaining_quantity is None:
+            remaining = self.quantity - (self.filled_quantity or Decimal("0"))
+            object.__setattr__(self, "remaining_quantity", remaining)
+
 
 @dataclass
 class Position:
@@ -36,6 +61,7 @@ class Position:
     quantity: Decimal
     average_price: Decimal
     opened_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
 
 @dataclass(frozen=True)
 class AccountSnapshot:
