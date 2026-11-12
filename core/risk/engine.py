@@ -18,6 +18,7 @@ class RiskLimits:
     max_quote_age_seconds: int = 10
     require_quote_metadata: bool = False
     max_symbol_exposure: Decimal | None = None
+    max_peak_drawdown_pct: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,14 @@ class RiskEngine:
                 and (
                     not limits.max_symbol_exposure.is_finite()
                     or limits.max_symbol_exposure <= 0
+                )
+            )
+            or (
+                limits.max_peak_drawdown_pct is not None
+                and (
+                    not limits.max_peak_drawdown_pct.is_finite()
+                    or limits.max_peak_drawdown_pct <= 0
+                    or limits.max_peak_drawdown_pct > 100
                 )
             )
         ):
@@ -72,6 +81,8 @@ class RiskEngine:
         unrealized_pnl: Decimal = Decimal("0"),
         commission_paid: Decimal = Decimal("0"),
         symbol_exposure: Decimal = Decimal("0"),
+        current_equity: Decimal | None = None,
+        peak_equity: Decimal | None = None,
         now: datetime | None = None,
     ) -> RiskDecision:
         with self._lock:
@@ -125,6 +136,22 @@ class RiskEngine:
                 and symbol_exposure + notional > self.limits.max_symbol_exposure
             ):
                 return RiskDecision(False, "per-symbol exposure limit exceeded")
+            if self.limits.max_peak_drawdown_pct is not None:
+                if current_equity is None or peak_equity is None:
+                    return RiskDecision(False, "peak-equity drawdown data is required")
+                if (
+                    not current_equity.is_finite()
+                    or not peak_equity.is_finite()
+                    or peak_equity <= 0
+                    or current_equity < 0
+                ):
+                    return RiskDecision(False, "peak-equity drawdown inputs are invalid")
+                drawdown_pct = max(
+                    Decimal("0"),
+                    (peak_equity - current_equity) / peak_equity * Decimal("100"),
+                )
+                if drawdown_pct >= self.limits.max_peak_drawdown_pct:
+                    return RiskDecision(False, "peak-equity drawdown limit reached")
             net_marked_pnl = daily_realized_pnl + unrealized_pnl - commission_paid
             if net_marked_pnl <= -self.limits.max_daily_loss:
                 return RiskDecision(False, "net realized/unrealized loss limit reached")
