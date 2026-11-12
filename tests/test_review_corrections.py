@@ -1,6 +1,7 @@
 """Regression tests for review findings 12.x and 17.x (paper-only)."""
 from __future__ import annotations
 
+import multiprocessing as mp
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -12,6 +13,28 @@ from brokers.paper import PaperBroker, PersistentPaperBroker
 from core.execution import ExecutionService
 from core.models import OrderRequest, Side
 from core.risk import ExposureReservationStore, ReservationError, RiskEngine, RiskLimits
+
+
+def _mp_submit(args):
+    """Worker for true multi-process capacity contention."""
+    db_path, index = args
+    store = ExposureReservationStore(db_path)
+    risk = RiskEngine(
+        RiskLimits(
+            max_stake_per_trade=Decimal("100"),
+            max_daily_loss=Decimal("1000"),
+            max_open_positions=10,
+            kill_switch=False,
+            max_symbol_exposure=Decimal("10"),
+        )
+    )
+    broker = PaperBroker(Decimal("10000"))
+    svc = ExecutionService(broker, risk, reservations=store)
+    try:
+        svc.submit(OrderRequest("EURUSD", Side.BUY, Decimal("6"), Decimal("1"), f"mp-{index}"))
+        return "ok"
+    except PermissionError:
+        return "blocked"
 
 
 class AtomicReservationTests(unittest.TestCase):
@@ -45,30 +68,33 @@ class AtomicReservationTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=8) as pool:
             list(pool.map(try_reserve, range(12)))
 
-        # Only one 6-unit reservation can fit under a 10 limit.
         self.assertEqual(len(successes), 1)
         self.assertGreaterEqual(len(errors), 11)
         self.assertEqual(store.reserved_for_symbol("EURUSD"), Decimal("6"))
 
-    def test_correlated_group_capacity_is_atomic(self):
+    def test_committed_exposure_survives_reservation_release(self):
         store = ExposureReservationStore(self.db)
-        store.reserve(
-            "a",
-            "EURUSD",
-            Decimal("8"),
-            corr_group="fx",
-            max_group_notional=Decimal("10"),
-            existing_group_exposure=Decimal("0"),
-        )
+        store.reserve("tmp", "EURUSD", Decimal("6"), max_symbol_notional=Decimal("10"))
+        store.commit_exposure("order-1", "EURUSD", Decimal("6"), reservation_id="tmp")
+        self.assertEqual(store.reserved_for_symbol("EURUSD"), Decimal("0"))
+        self.assertEqual(store.committed_for_symbol("EURUSD"), Decimal("6"))
         with self.assertRaises(ReservationError):
             store.reserve(
-                "b",
-                "GBPUSD",
-                Decimal("3"),
-                corr_group="fx",
-                max_group_notional=Decimal("10"),
-                existing_group_exposure=Decimal("0"),
+                "tmp2",
+                "EURUSD",
+                Decimal("5"),
+                max_symbol_notional=Decimal("10"),
+                existing_symbol_exposure=Decimal("0"),
             )
+
+    def test_multiprocess_symbol_cap(self):
+        # Genuine OS processes sharing one SQLite reservation DB.
+        with mp.get_context("spawn").Pool(processes=4) as pool:
+            results = pool.map(_mp_submit, [(str(self.db), i) for i in range(6)])
+        self.assertEqual(results.count("ok"), 1)
+        self.assertEqual(results.count("blocked"), 5)
+        store = ExposureReservationStore(self.db)
+        self.assertEqual(store.committed_for_symbol("EURUSD"), Decimal("6"))
 
 
 class FillIdempotencyTests(unittest.TestCase):
@@ -85,6 +111,18 @@ class FillIdempotencyTests(unittest.TestCase):
         )
         self.assertEqual(first.filled_quantity, second.filled_quantity)
         self.assertEqual(broker.get_positions()[0].quantity, Decimal("2"))
+
+    def test_fill_id_cannot_be_reused_across_orders(self):
+        broker = PaperBroker(Decimal("1000"))
+        a = broker.place_working_order(
+            OrderRequest("EURUSD", Side.BUY, Decimal("5"), Decimal("1"), "a")
+        )
+        b = broker.place_working_order(
+            OrderRequest("GBPUSD", Side.BUY, Decimal("5"), Decimal("1"), "b")
+        )
+        broker.apply_partial_fill(a.order_id, Decimal("1"), fill_id="shared")
+        with self.assertRaises(ValueError):
+            broker.apply_partial_fill(b.order_id, Decimal("1"), fill_id="shared")
 
     def test_duplicate_fill_id_survives_persistent_restart(self):
         tmp = tempfile.TemporaryDirectory()
@@ -122,8 +160,6 @@ class ExecutionCapacityTests(unittest.TestCase):
                 max_symbol_exposure=Decimal("10"),
             )
         )
-        # Separate brokers so process-local locks do not serialize the race.
-        results = []
 
         def attempt(i):
             broker = PaperBroker(Decimal("10000"))
@@ -142,6 +178,7 @@ class ExecutionCapacityTests(unittest.TestCase):
 
         self.assertEqual(results.count("ok"), 1)
         self.assertEqual(results.count("blocked"), 5)
+        self.assertEqual(store.committed_for_symbol("EURUSD"), Decimal("6"))
 
 
 if __name__ == "__main__":
