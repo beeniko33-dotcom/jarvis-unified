@@ -28,6 +28,7 @@ class WorkingOrder:
     average_fill_price: Decimal = Decimal("0")
     status: str = OrderStatus.OPEN.value
     created_at: datetime = field(default_factory=_utc_now)
+    applied_fill_ids: set[str] = field(default_factory=set)
 
     @property
     def remaining_quantity(self) -> Decimal:
@@ -60,6 +61,7 @@ class PaperBroker:
         self._client_ids: dict[str, OrderResult] = {}
         self._client_requests: dict[str, tuple[str, Side, Decimal, Decimal]] = {}
         self._working: dict[str, WorkingOrder] = {}
+        self._fill_results: dict[str, OrderResult] = {}  # fill_id -> last result
         self._last_prices: dict[str, Decimal] = {}
         self._commission_per_side = Decimal(commission_per_side)
         self._slippage_bps = Decimal(slippage_bps)
@@ -78,7 +80,13 @@ class PaperBroker:
         return price * (Decimal("1") - factor)
 
     def _append_ledger(
-        self, result: OrderResult, raw_price: Decimal, fill_price: Decimal, commission: Decimal
+        self,
+        result: OrderResult,
+        raw_price: Decimal,
+        fill_price: Decimal,
+        commission: Decimal,
+        *,
+        fill_id: str | None = None,
     ) -> None:
         if self._ledger_path is None:
             return
@@ -95,6 +103,7 @@ class PaperBroker:
             "fill_price": str(fill_price),
             "commission": str(commission),
             "status": result.status,
+            "fill_id": fill_id,
             "balance": str(self._balance),
             "equity": str(self.get_account().equity),
             "realized_pnl": str(self._realized_pnl),
@@ -107,7 +116,6 @@ class PaperBroker:
     def _apply_fill_to_position(
         self, symbol: str, side: Side, quantity: Decimal, fill_price: Decimal
     ) -> Decimal:
-        """Apply a fill to positions; return commission charged for this fill leg."""
         commission = self._commission_per_side
         current = self._positions.get(symbol)
         signed = quantity if side == Side.BUY else -quantity
@@ -162,7 +170,6 @@ class PaperBroker:
             self.set_last_price(symbol, price)
 
     def place_order(self, order: OrderRequest) -> OrderResult:
-        """Immediate full fill (backward-compatible default path)."""
         if not order.symbol.strip():
             raise ValueError("symbol is required")
         if not isinstance(order.side, Side):
@@ -214,7 +221,6 @@ class PaperBroker:
             return result
 
     def place_working_order(self, order: OrderRequest) -> OrderResult:
-        """Accept an order without filling; status remains open until apply_partial_fill/cancel."""
         if not order.symbol.strip():
             raise ValueError("symbol is required")
         if not isinstance(order.side, Side):
@@ -265,18 +271,28 @@ class PaperBroker:
         order_id: str,
         fill_quantity: Decimal,
         price: Decimal | float | str | None = None,
+        *,
+        fill_id: str | None = None,
     ) -> OrderResult:
-        """Apply a partial or completing fill to a working order."""
+        """Apply a partial or completing fill. fill_id makes delivery idempotent."""
         fill_quantity = Decimal(str(fill_quantity))
         if not fill_quantity.is_finite() or fill_quantity <= 0:
             raise ValueError("fill_quantity must be finite and positive")
+        if fill_id is not None and not str(fill_id).strip():
+            raise ValueError("fill_id must be non-empty when provided")
 
         with self._lock:
+            if fill_id is not None and fill_id in self._fill_results:
+                return self._fill_results[fill_id]
+
             working = self._working.get(order_id)
             if working is None:
                 raise ValueError(f"no working order {order_id}")
             if working.status in {OrderStatus.FILLED.value, OrderStatus.CANCELLED.value}:
                 raise ValueError(f"order {order_id} is {working.status}")
+            if fill_id is not None and fill_id in working.applied_fill_ids:
+                # Should have been in _fill_results; treat as no-op via last order state.
+                return self._orders[order_id]
             if fill_quantity > working.remaining_quantity:
                 raise ValueError("fill_quantity exceeds remaining quantity")
 
@@ -297,6 +313,8 @@ class PaperBroker:
                     working.average_fill_price * prior_filled + fill_price * fill_quantity
                 ) / new_filled
             working.filled_quantity = new_filled
+            if fill_id is not None:
+                working.applied_fill_ids.add(fill_id)
             if working.remaining_quantity == 0:
                 working.status = OrderStatus.FILLED.value
             else:
@@ -314,6 +332,8 @@ class PaperBroker:
                 remaining_quantity=working.remaining_quantity,
             )
             self._orders[order_id] = result
+            if fill_id is not None:
+                self._fill_results[fill_id] = result
             if working.status == OrderStatus.FILLED.value:
                 self._client_ids[working.client_order_id] = result
                 self._client_requests[working.client_order_id] = (
@@ -323,11 +343,10 @@ class PaperBroker:
                     working.limit_price,
                 )
                 self._working.pop(order_id, None)
-            self._append_ledger(result, raw_price, fill_price, commission)
+            self._append_ledger(result, raw_price, fill_price, commission, fill_id=fill_id)
             return result
 
     def cancel_order(self, order_id: str) -> OrderResult:
-        """Cancel remaining quantity on a working order."""
         with self._lock:
             working = self._working.get(order_id)
             if working is None:
@@ -373,6 +392,7 @@ class PaperBroker:
                     w.average_fill_price,
                     w.status,
                     w.created_at,
+                    set(w.applied_fill_ids),
                 )
                 for w in self._working.values()
             ]
