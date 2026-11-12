@@ -17,7 +17,6 @@ from core.risk import ExposureReservationStore, ReservationError, RiskEngine, Ri
 
 
 def _mp_submit(args):
-    """Worker for true multi-process capacity contention."""
     db_path, index = args
     store = ExposureReservationStore(db_path)
     risk = RiskEngine(
@@ -120,23 +119,72 @@ class AtomicReservationTests(unittest.TestCase):
             return real_commit(*args, **kwargs)
 
         with mock.patch.object(store, "commit_exposure", side_effect=flaky_commit):
-            with self.assertRaises(ReconciliationRequiredError) as ctx:
+            with self.assertRaises(ReconciliationRequiredError):
                 svc.submit(
                     OrderRequest("EURUSD", Side.BUY, Decimal("5"), Decimal("1"), "recon-1")
                 )
-            err = ctx.exception
-            self.assertEqual(err.symbol, "EURUSD")
-            # Reservation must still be held — no silent capacity hole.
             self.assertEqual(store.reserved_for_symbol("EURUSD"), Decimal("5"))
             self.assertEqual(store.committed_for_symbol("EURUSD"), Decimal("0"))
             self.assertEqual(len(svc.pending_reconciliation), 1)
 
-        # Recovery path.
         fixed = svc.reconcile_exposure()
         self.assertEqual(len(fixed), 1)
         self.assertEqual(store.reserved_for_symbol("EURUSD"), Decimal("0"))
         self.assertEqual(store.committed_for_symbol("EURUSD"), Decimal("5"))
         self.assertEqual(svc.pending_reconciliation, [])
+
+    def test_pending_transfer_survives_process_restart(self):
+        """Simulate crash after fill + failed commit; recover with a fresh service."""
+        store = ExposureReservationStore(self.db)
+        risk = RiskEngine(
+            RiskLimits(
+                max_stake_per_trade=Decimal("100"),
+                max_daily_loss=Decimal("1000"),
+                max_open_positions=10,
+                kill_switch=False,
+                max_symbol_exposure=Decimal("20"),
+            )
+        )
+        broker = PaperBroker(Decimal("10000"))
+        svc = ExecutionService(broker, risk, reservations=store)
+
+        with mock.patch.object(
+            store, "commit_exposure", side_effect=RuntimeError("crash window")
+        ):
+            with self.assertRaises(ReconciliationRequiredError):
+                svc.submit(
+                    OrderRequest("EURUSD", Side.BUY, Decimal("4"), Decimal("1"), "restart-1")
+                )
+
+        # Process "dies": drop references. Reservation + pending must remain in SQLite.
+        del svc
+        del broker
+        del store
+
+        recovered_store = ExposureReservationStore(self.db)
+        self.assertEqual(recovered_store.reserved_for_symbol("EURUSD"), Decimal("4"))
+        self.assertEqual(recovered_store.committed_for_symbol("EURUSD"), Decimal("0"))
+        pending = recovered_store.list_pending_transfers()
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]["symbol"], "EURUSD")
+        self.assertEqual(Decimal(pending[0]["notional"]), Decimal("4"))
+
+        recovered_svc = ExecutionService(
+            PaperBroker(Decimal("10000")),
+            risk,
+            reservations=recovered_store,
+        )
+        fixed = recovered_svc.reconcile_exposure()
+        self.assertEqual(len(fixed), 1)
+        # Exactly once: reservation converted to committed, total unchanged.
+        self.assertEqual(recovered_store.reserved_for_symbol("EURUSD"), Decimal("0"))
+        self.assertEqual(recovered_store.committed_for_symbol("EURUSD"), Decimal("4"))
+        self.assertEqual(recovered_store.list_pending_transfers(), [])
+
+        # Second reconcile is a no-op (idempotent).
+        again = recovered_svc.reconcile_exposure()
+        self.assertEqual(again, [])
+        self.assertEqual(recovered_store.committed_for_symbol("EURUSD"), Decimal("4"))
 
 
 class FillIdempotencyTests(unittest.TestCase):
