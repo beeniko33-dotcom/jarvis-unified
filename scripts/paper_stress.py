@@ -7,6 +7,10 @@ import tempfile
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+import sys
+
+# Direct script execution puts scripts/ (not the repository root) on sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from brokers.paper import PersistentPaperBroker
 from core.models import OrderRequest, Side
