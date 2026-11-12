@@ -179,7 +179,6 @@ class ExecutionService:
                         error="pending conversion",
                     )
                 except Exception as record_exc:
-                    # Reservation still held (no TTL). Surface reconciliation requirement.
                     self._release_failures.append(
                         {
                             "reservation_id": reservation_id,
@@ -243,11 +242,7 @@ class ExecutionService:
             return result
 
     def reconcile_exposure(self) -> list[dict]:
-        """Complete pending reservation→committed transfers, including after restart.
-
-        Reads durable pending rows from SQLite. commit_exposure is idempotent on
-        order_id and clears pending + reservation in one transaction.
-        """
+        """Complete pending reservation→committed transfers, including after restart."""
         if self.reservations is None:
             return []
         reconciled: list[dict] = []
@@ -271,7 +266,7 @@ class ExecutionService:
                     logger.warning(
                         "reconcile_exposure still failing order_id=%s error=%s",
                         item["order_id"],
-                        exp if (exp := exc) else exc,
+                        exc,
                     )
         return reconciled
 
