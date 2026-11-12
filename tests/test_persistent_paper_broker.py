@@ -75,6 +75,17 @@ class PersistentPaperBrokerTests(unittest.TestCase):
         self.assertEqual(len(first.get_positions()), 1)
         self.assertTrue(second.verify_ledger())
 
+    def test_peak_equity_is_persisted_and_drawdown_is_reported_after_restart(self):
+        broker = self.broker()
+        broker.place_order(self.order())
+        broker.set_last_price("EURUSD", "5")
+        first = broker.get_account()
+        self.assertEqual(first.peak_equity, Decimal("1000"))
+        self.assertGreater(first.drawdown_pct, Decimal("0"))
+        recovered = self.broker()
+        after = recovered.get_account()
+        self.assertEqual(after.peak_equity, Decimal("1000"))
+        self.assertEqual(after.drawdown_pct, first.drawdown_pct)
     def test_tampered_event_is_detected_and_broker_fails_closed(self):
         broker = self.broker()
         broker.place_order(self.order())
