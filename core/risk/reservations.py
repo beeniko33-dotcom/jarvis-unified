@@ -49,6 +49,23 @@ class ExposureReservationStore:
                 )"""
             )
             db.execute(
+                """CREATE TABLE IF NOT EXISTS exposure_releases (
+                    release_id TEXT PRIMARY KEY,
+                    symbol TEXT NOT NULL,
+                    notional TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                )"""
+            )
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS exposure_pending_releases (
+                    release_id TEXT PRIMARY KEY,
+                    symbol TEXT NOT NULL,
+                    notional TEXT NOT NULL,
+                    error TEXT,
+                    created_at REAL NOT NULL
+                )"""
+            )
+            db.execute(
                 """CREATE TABLE IF NOT EXISTS exposure_pending (
                     reservation_id TEXT PRIMARY KEY,
                     order_id TEXT NOT NULL UNIQUE,
@@ -331,6 +348,97 @@ class ExposureReservationStore:
                 "created_at": r[7],
             }
             for r in rows
+        ]
+
+    def reduce_committed_for_symbol(
+        self, release_id: str, symbol: str, notional: Decimal
+    ) -> None:
+        """Idempotently reduce committed exposure after a confirmed position close."""
+        if not release_id.strip():
+            raise ReservationError("release_id is required")
+        symbol = symbol.strip().upper()
+        if not symbol:
+            raise ReservationError("symbol is required")
+        if not notional.is_finite() or notional <= 0:
+            raise ReservationError("release notional must be finite and positive")
+        now = time.time()
+        with self._lock, closing(self._connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                if db.execute(
+                    "SELECT 1 FROM exposure_releases WHERE release_id=?", (release_id,)
+                ).fetchone():
+                    db.commit()
+                    return
+                rows = db.execute(
+                    "SELECT commit_id,notional FROM exposure_committed "
+                    "WHERE symbol=? ORDER BY created_at,commit_id", (symbol,)
+                ).fetchall()
+                remaining = notional
+                for commit_id, raw in rows:
+                    if remaining <= 0:
+                        break
+                    available = Decimal(raw)
+                    consumed = min(available, remaining)
+                    left = available - consumed
+                    if left == 0:
+                        db.execute(
+                            "DELETE FROM exposure_committed WHERE commit_id=?", (commit_id,)
+                        )
+                    else:
+                        db.execute(
+                            "UPDATE exposure_committed SET notional=? WHERE commit_id=?",
+                            (str(left), commit_id),
+                        )
+                    remaining -= consumed
+                if remaining > 0:
+                    raise ReservationError(
+                        f"cannot release {notional} {symbol}; committed exposure is insufficient"
+                    )
+                db.execute(
+                    "INSERT INTO exposure_releases(release_id,symbol,notional,created_at) "
+                    "VALUES(?,?,?,?)", (release_id, symbol, str(notional), now)
+                )
+                db.execute(
+                    "DELETE FROM exposure_pending_releases WHERE release_id=?", (release_id,)
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+
+    def record_pending_release(
+        self, release_id: str, symbol: str, notional: Decimal, error: str
+    ) -> None:
+        """Persist a post-close exposure reduction that needs retrying."""
+        if not release_id.strip() or not symbol.strip():
+            raise ReservationError("release_id and symbol are required")
+        if not notional.is_finite() or notional <= 0:
+            raise ReservationError("release notional must be finite and positive")
+        with self._lock, closing(self._connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                db.execute(
+                    "INSERT INTO exposure_pending_releases"
+                    "(release_id,symbol,notional,error,created_at) VALUES(?,?,?,?,?) "
+                    "ON CONFLICT(release_id) DO UPDATE SET error=excluded.error",
+                    (release_id, symbol.strip().upper(), str(notional), error, time.time()),
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+
+    def list_pending_releases(self) -> list[dict]:
+        with self._lock, closing(self._connect()) as db:
+            rows = db.execute(
+                "SELECT release_id,symbol,notional,error,created_at "
+                "FROM exposure_pending_releases ORDER BY created_at"
+            ).fetchall()
+        return [
+            {"release_id": row[0], "symbol": row[1], "notional": row[2],
+             "error": row[3], "created_at": row[4]}
+            for row in rows
         ]
 
     def release_committed(self, commit_id: str) -> None:
