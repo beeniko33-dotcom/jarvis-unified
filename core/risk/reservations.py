@@ -1,7 +1,9 @@
 """Cross-process correlated exposure reservations (paper-only).
 
 Reservations are held in SQLite so concurrent paper processes share the same
-notional budget before an order is submitted. They do not enable live trading.
+notional budget before an order is submitted. Capacity checks and inserts share
+one BEGIN IMMEDIATE transaction so two processes cannot both pass a limit.
+They do not enable live trading.
 """
 from __future__ import annotations
 
@@ -56,6 +58,28 @@ class ExposureReservationStore:
             (now,),
         )
 
+    def _sum_notional(
+        self, db: sqlite3.Connection, *,
+        symbol: str | None = None,
+        corr_group: str | None = None,
+    ) -> Decimal:
+        if symbol is not None:
+            rows = db.execute(
+                "SELECT notional FROM exposure_reservations WHERE symbol=?",
+                (symbol,),
+            ).fetchall()
+        elif corr_group is not None:
+            rows = db.execute(
+                "SELECT notional FROM exposure_reservations WHERE corr_group=?",
+                (corr_group,),
+            ).fetchall()
+        else:
+            rows = []
+        total = Decimal("0")
+        for (raw,) in rows:
+            total += Decimal(raw)
+        return total
+
     def reserve(
         self,
         reservation_id: str,
@@ -64,7 +88,16 @@ class ExposureReservationStore:
         *,
         corr_group: str | None = None,
         ttl_seconds: float | None = 120.0,
+        max_symbol_notional: Decimal | None = None,
+        max_group_notional: Decimal | None = None,
+        existing_symbol_exposure: Decimal = Decimal("0"),
+        existing_group_exposure: Decimal = Decimal("0"),
     ) -> None:
+        """Insert a reservation only if symbol/group capacity remains.
+
+        Capacity = limit - (open position exposure + current reservations).
+        Check and insert share one BEGIN IMMEDIATE transaction.
+        """
         if not reservation_id.strip():
             raise ReservationError("reservation_id is required")
         symbol = symbol.strip().upper()
@@ -72,6 +105,21 @@ class ExposureReservationStore:
             raise ReservationError("symbol is required")
         if not notional.is_finite() or notional <= 0:
             raise ReservationError("notional must be finite and positive")
+        for value, label in (
+            (existing_symbol_exposure, "existing_symbol_exposure"),
+            (existing_group_exposure, "existing_group_exposure"),
+        ):
+            if not value.is_finite() or value < 0:
+                raise ReservationError(f"{label} must be finite and non-negative")
+        if max_symbol_notional is not None and (
+            not max_symbol_notional.is_finite() or max_symbol_notional <= 0
+        ):
+            raise ReservationError("max_symbol_notional must be finite and positive")
+        if max_group_notional is not None and (
+            not max_group_notional.is_finite() or max_group_notional <= 0
+        ):
+            raise ReservationError("max_group_notional must be finite and positive")
+
         now = time.time()
         expires = None if ttl_seconds is None else now + float(ttl_seconds)
         with self._lock, closing(self._connect()) as db:
@@ -84,6 +132,17 @@ class ExposureReservationStore:
                 ).fetchone()
                 if existing:
                     raise ReservationError(f"reservation already exists: {reservation_id}")
+
+                reserved_symbol = self._sum_notional(db, symbol=symbol)
+                if max_symbol_notional is not None:
+                    if existing_symbol_exposure + reserved_symbol + notional > max_symbol_notional:
+                        raise ReservationError("per-symbol exposure limit exceeded")
+
+                if max_group_notional is not None and corr_group is not None:
+                    reserved_group = self._sum_notional(db, corr_group=corr_group)
+                    if existing_group_exposure + reserved_group + notional > max_group_notional:
+                        raise ReservationError("correlated exposure limit exceeded")
+
                 db.execute(
                     "INSERT INTO exposure_reservations"
                     "(reservation_id,symbol,notional,corr_group,created_at,expires_at)"
@@ -121,34 +180,38 @@ class ExposureReservationStore:
         symbol = symbol.strip().upper()
         now = time.time()
         with self._lock, closing(self._connect()) as db:
-            self._purge_expired(db, now)
-            db.commit()
-            rows = db.execute(
-                "SELECT notional FROM exposure_reservations WHERE symbol=?",
-                (symbol,),
-            ).fetchall()
-        total = Decimal("0")
-        for (raw,) in rows:
-            total += Decimal(raw)
-        return total
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                self._purge_expired(db, now)
+                total = self._sum_notional(db, symbol=symbol)
+                db.commit()
+                return total
+            except Exception:
+                db.rollback()
+                raise
 
     def reserved_for_group(self, corr_group: str) -> Decimal:
         now = time.time()
         with self._lock, closing(self._connect()) as db:
-            self._purge_expired(db, now)
-            db.commit()
-            rows = db.execute(
-                "SELECT notional FROM exposure_reservations WHERE corr_group=?",
-                (corr_group,),
-            ).fetchall()
-        total = Decimal("0")
-        for (raw,) in rows:
-            total += Decimal(raw)
-        return total
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                self._purge_expired(db, now)
+                total = self._sum_notional(db, corr_group=corr_group)
+                db.commit()
+                return total
+            except Exception:
+                db.rollback()
+                raise
 
     def count(self) -> int:
         now = time.time()
         with self._lock, closing(self._connect()) as db:
-            self._purge_expired(db, now)
-            db.commit()
-            return int(db.execute("SELECT COUNT(*) FROM exposure_reservations").fetchone()[0])
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                self._purge_expired(db, now)
+                n = int(db.execute("SELECT COUNT(*) FROM exposure_reservations").fetchone()[0])
+                db.commit()
+                return n
+            except Exception:
+                db.rollback()
+                raise

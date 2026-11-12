@@ -1,13 +1,16 @@
 """The only supported path from strategy orders to a broker adapter."""
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 from threading import RLock
 from uuid import uuid4
 
 from brokers.base import Broker
 from core.models import OrderRequest, OrderResult
-from core.risk import ExposureReservationStore, RiskEngine
+from core.risk import ExposureReservationStore, ReservationError, RiskEngine
+
+logger = logging.getLogger(__name__)
 
 
 class ExecutionService:
@@ -21,12 +24,19 @@ class ExecutionService:
         self.broker = broker
         self.risk = risk
         self.reservations = reservations
-        # Serialize account snapshot -> risk decision -> broker submission. Without
-        # this lock concurrent callers can all pass using the same stale position count.
+        # Serialize account snapshot -> risk decision -> broker submission within one process.
+        # Cross-process exposure is enforced by ExposureReservationStore.reserve limits.
         self._submission_lock = RLock()
+        self._release_failures: list[dict] = []
+
+    @property
+    def release_failures(self) -> list[dict]:
+        """Operator-visible reservation cleanup failures (paper diagnostics)."""
+        with self._submission_lock:
+            return list(self._release_failures)
 
     def submit(self, order: OrderRequest) -> OrderResult:
-        """Submit only after a serialized, net-marked-PnL risk check."""
+        """Submit only after risk check and, when configured, atomic capacity reservation."""
         reservation_id: str | None = None
         with self._submission_lock:
             account = self.broker.get_account()
@@ -86,21 +96,40 @@ class ExecutionService:
 
             if self.reservations is not None:
                 reservation_id = f"exec-{uuid4()}"
-                self.reservations.reserve(
-                    reservation_id,
-                    symbol,
-                    notional,
-                    corr_group=group,
-                    ttl_seconds=120.0,
-                )
+                try:
+                    self.reservations.reserve(
+                        reservation_id,
+                        symbol,
+                        notional,
+                        corr_group=group,
+                        ttl_seconds=120.0,
+                        max_symbol_notional=self.risk.limits.max_symbol_exposure,
+                        max_group_notional=self.risk.limits.max_correlated_exposure,
+                        existing_symbol_exposure=symbol_exposure,
+                        existing_group_exposure=correlated_exposure,
+                    )
+                except ReservationError as exc:
+                    raise PermissionError(f"order rejected by risk engine: {exc}") from exc
+
             try:
                 result = self.broker.place_order(order)
             finally:
                 if reservation_id is not None and self.reservations is not None:
                     try:
                         self.reservations.release(reservation_id)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        failure = {
+                            "reservation_id": reservation_id,
+                            "symbol": symbol,
+                            "error": str(exc),
+                        }
+                        self._release_failures.append(failure)
+                        logger.warning(
+                            "reservation release failed id=%s symbol=%s error=%s",
+                            reservation_id,
+                            symbol,
+                            exc,
+                        )
             return result
 
     def close_position(self, symbol: str, price: Decimal) -> OrderResult:
