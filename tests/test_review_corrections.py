@@ -200,6 +200,41 @@ class AtomicReservationTests(unittest.TestCase):
         self.assertEqual(recovered_svc.reconcile_exposure(), [])
 
 
+class CloseExposureReleaseTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = Path(self.tmp.name) / "res.sqlite3"
+        self.store = ExposureReservationStore(self.db)
+        self.broker = PaperBroker(Decimal("10000"))
+        self.risk = RiskEngine(RiskLimits(
+            max_stake_per_trade=Decimal("100"), max_daily_loss=Decimal("1000"),
+            max_open_positions=10, kill_switch=False,
+            max_symbol_exposure=Decimal("20"),
+        ))
+        self.service = ExecutionService(self.broker, self.risk, reservations=self.store)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_close_releases_committed_exposure_and_is_idempotent(self):
+        opened = self.service.submit(
+            OrderRequest("EURUSD", Side.BUY, Decimal("5"), Decimal("2"), "open-1")
+        )
+        self.assertEqual(self.store.committed_for_symbol("EURUSD"), Decimal("10"))
+        closed = self.service.close_position("eurusd", Decimal("3"))
+        self.assertNotEqual(opened.order_id, closed.order_id)
+        self.assertEqual(self.store.committed_for_symbol("EURUSD"), Decimal("0"))
+        self.store.reduce_committed_for_symbol(
+            closed.order_id, "EURUSD", Decimal("10")
+        )
+        self.assertEqual(self.store.committed_for_symbol("EURUSD"), Decimal("0"))
+
+    def test_partial_release_preserves_remaining_committed_exposure(self):
+        self.store.commit_exposure("entry-1", "EURUSD", Decimal("10"))
+        self.store.reduce_committed_for_symbol("exit-1", "EURUSD", Decimal("4"))
+        self.assertEqual(self.store.committed_for_symbol("EURUSD"), Decimal("6"))
+
+
 class FillIdempotencyTests(unittest.TestCase):
     def test_duplicate_fill_id_does_not_double_apply(self):
         broker = PaperBroker(Decimal("1000"))
