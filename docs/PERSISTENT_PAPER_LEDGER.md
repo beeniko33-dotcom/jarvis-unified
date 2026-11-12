@@ -49,9 +49,22 @@ service = ExecutionService(broker, risk)
 Use one shared database path for cooperating processes. Treat the database and backups as
 sensitive operational records. This adapter remains paper-only.
 
+## Quote freshness and exposure gates
+
+The risk engine can require `quote_timestamp` and `quote_source` in each order's metadata.
+When a timestamp is present, it must be timezone-aware, not in the future, and no older than
+`RiskLimits.max_quote_age_seconds`. Set `require_quote_metadata=True` to reject missing
+metadata. The timestamp and source are provenance metadata only: they do not cryptographically
+authenticate a provider or turn a public feed into verified evidence. Provider identity,
+transport/session binding and independent provenance verification remain separate controls.
+
+An optional `max_symbol_exposure` caps current absolute position notional plus proposed order
+notional. `ExecutionService` supplies existing exposure from broker positions. This is a
+conservative average-entry-price estimate, not a live mark, margin or correlated-risk model.
+
 ## Known gaps
 
-This implementation does not yet provide provider quote provenance, stale-quote rejection,
-partial-fill simulation, peak-equity drawdown controls, per-symbol/correlated exposure
-reservations, or independent external ledger attestation. Those controls remain required
-before any higher-level validation claim. No Level 3 certification is implied.
+Peak-equity drawdown, cross-symbol/correlated exposure reservations, partial-fill simulation,
+crash-injection tests and independent external ledger attestation remain outstanding.
+These controls are required before any higher-level validation claim. No Level 3
+certification is implied.
