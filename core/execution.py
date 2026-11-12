@@ -280,6 +280,11 @@ class ExecutionService:
                         notional=Decimal(item["notional"]),
                         corr_group=item.get("corr_group"),
                         reservation_id=item["reservation_id"],
+                        # Keep the position link submit() uses for its commits.
+                        # Omitting it writes a legacy symbol-wide row that can
+                        # never be released by position, so a crash-recovered
+                        # entry would permanently consume capacity.
+                        position_id=item.get("position_id") or item["symbol"],
                     )
                     reconciled.append(dict(item))
                     logger.info(
@@ -295,10 +300,14 @@ class ExecutionService:
                     )
         for item in self.reservations.list_pending_releases():
             try:
+                # Retry with the notional that was recorded. Passing none means
+                # "release every commit for this position", which would
+                # over-release a queued partial close.
                 self.reservations.reduce_committed_for_position(
                     release_id=item["release_id"],
                     symbol=item["symbol"],
                     position_id=item.get("position_id"),
+                    notional=Decimal(item["notional"]),
                 )
                 reconciled.append(dict(item))
             except Exception as exc:
@@ -337,11 +346,21 @@ class ExecutionService:
                         position_id=normalized,
                     )
                 except Exception as exc:
+                    # Record what is actually committed for this position, not a
+                    # recomputed quantity x average_price. A slippage-adjusted
+                    # average can sit either side of the committed notional, so a
+                    # recomputed bound would under- or over-release on retry.
+                    try:
+                        outstanding = self.reservations.committed_for_symbol(normalized)
+                    except Exception:
+                        outstanding = Decimal("0")
                     try:
                         self.reservations.record_pending_release(
                             result.order_id,
                             normalized,
-                            abs(position.quantity) * position.average_price,
+                            outstanding
+                            if outstanding > 0
+                            else abs(position.quantity) * position.average_price,
                             str(exc),
                             position_id=normalized,
                         )
