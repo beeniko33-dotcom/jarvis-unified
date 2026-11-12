@@ -47,3 +47,5 @@ class AccountSnapshot:
     daily_realized_pnl: Decimal = Decimal("0")
     daily_commission_paid: Decimal = Decimal("0")
     daily_accounting_available: bool = False
+    peak_equity: Decimal = Decimal("0")
+    drawdown_pct: Decimal = Decimal("0")
