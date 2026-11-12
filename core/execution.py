@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 class ReconciliationRequiredError(RuntimeError):
     """Paper fill succeeded but durable exposure commit did not.
 
-    The temporary reservation is intentionally retained so capacity remains
-    conservative until reconcile_exposure() completes the transfer.
+    The temporary reservation is retained and a pending transfer is written to
+    SQLite so a restarted process can call reconcile_exposure().
     """
 
     def __init__(
@@ -49,10 +49,8 @@ class ExecutionService:
         self.broker = broker
         self.risk = risk
         self.reservations = reservations
-        # Process-local serialization. Cross-process capacity uses the reservation store.
         self._submission_lock = RLock()
         self._release_failures: list[dict] = []
-        self._pending_reconciliation: list[dict] = []
 
     @property
     def release_failures(self) -> list[dict]:
@@ -61,11 +59,12 @@ class ExecutionService:
 
     @property
     def pending_reconciliation(self) -> list[dict]:
-        with self._submission_lock:
-            return list(self._pending_reconciliation)
+        """Durable pending transfers from the reservation store (survives restart)."""
+        if self.reservations is None:
+            return []
+        return self.reservations.list_pending_transfers()
 
     def submit(self, order: OrderRequest) -> OrderResult:
-        """Submit after risk check and atomic capacity reservation when configured."""
         reservation_id: str | None = None
         with self._submission_lock:
             account = self.broker.get_account()
@@ -130,8 +129,6 @@ class ExecutionService:
             if self.reservations is not None:
                 reservation_id = f"exec-{uuid4()}"
                 try:
-                    # No TTL until commit_exposure converts or explicit release on broker failure.
-                    # Prevents exposure from disappearing during the fill->commit window.
                     self.reservations.reserve(
                         reservation_id,
                         symbol,
@@ -179,21 +176,29 @@ class ExecutionService:
                         reservation_id=reservation_id,
                     )
                 except Exception as exc:
-                    # Keep the reservation so capacity stays conservative.
-                    # Do not release. Operator must call reconcile_exposure().
-                    pending = {
-                        "reservation_id": reservation_id,
-                        "order_id": result.order_id,
-                        "client_order_id": result.client_order_id,
-                        "symbol": symbol,
-                        "notional": str(notional),
-                        "corr_group": group,
-                        "error": str(exc),
-                    }
-                    self._pending_reconciliation.append(pending)
+                    # Keep reservation and persist pending transfer for restart recovery.
+                    try:
+                        self.reservations.record_pending_transfer(
+                            reservation_id=reservation_id,
+                            order_id=result.order_id,
+                            client_order_id=result.client_order_id,
+                            symbol=symbol,
+                            notional=notional,
+                            corr_group=group,
+                            error=str(exc),
+                        )
+                    except Exception as record_exc:
+                        logger.error(
+                            "failed to persist pending transfer id=%s error=%s",
+                            reservation_id,
+                            record_exc,
+                        )
                     self._release_failures.append(
                         {
-                            **pending,
+                            "reservation_id": reservation_id,
+                            "order_id": result.order_id,
+                            "symbol": symbol,
+                            "error": str(exc),
                             "phase": "commit_exposure_kept_reservation",
                         }
                     )
@@ -217,18 +222,16 @@ class ExecutionService:
             return result
 
     def reconcile_exposure(self) -> list[dict]:
-        """Complete pending reservation→committed transfers after a commit failure.
+        """Complete pending reservation→committed transfers, including after restart.
 
-        Safe to call repeatedly. For each pending item, attempts commit_exposure
-        using the retained reservation_id. Successful items are removed from the
-        pending list. Returns the list of successfully reconciled records.
+        Reads durable pending rows from SQLite. Safe to call repeatedly.
+        commit_exposure is idempotent on order_id.
         """
         if self.reservations is None:
             return []
         reconciled: list[dict] = []
         with self._submission_lock:
-            remaining: list[dict] = []
-            for item in self._pending_reconciliation:
+            for item in self.reservations.list_pending_transfers():
                 try:
                     self.reservations.commit_exposure(
                         commit_id=item["order_id"],
@@ -244,19 +247,14 @@ class ExecutionService:
                         item["reservation_id"],
                     )
                 except Exception as exc:
-                    item = dict(item)
-                    item["last_error"] = str(exc)
-                    remaining.append(item)
                     logger.warning(
                         "reconcile_exposure still failing order_id=%s error=%s",
                         item["order_id"],
                         exc,
                     )
-            self._pending_reconciliation = remaining
         return reconciled
 
     def close_position(self, symbol: str, price: Decimal) -> OrderResult:
-        """Close an existing paper position; risk stops new entries, not risk-reducing exits."""
         with self._submission_lock:
             if not price.is_finite() or price <= 0:
                 raise ValueError("close price must be a finite positive value")

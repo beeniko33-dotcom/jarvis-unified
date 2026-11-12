@@ -3,6 +3,7 @@
 Temporary reservations cover the gap between risk check and broker fill.
 Committed exposure records durable filled notional so completed orders cannot
 disappear from shared capacity accounting after the temporary reservation is released.
+Pending transfers record fill→commit failures so a restarted process can recover.
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ class ReservationError(ValueError):
 
 
 class ExposureReservationStore:
-    """Atomic temporary reservations plus durable committed exposure."""
+    """Atomic temporary reservations, durable committed exposure, pending transfers."""
 
     def __init__(self, database_path: str | Path) -> None:
         self.database_path = Path(database_path)
@@ -44,6 +45,18 @@ class ExposureReservationStore:
                     symbol TEXT NOT NULL,
                     notional TEXT NOT NULL,
                     corr_group TEXT,
+                    created_at REAL NOT NULL
+                )"""
+            )
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS exposure_pending (
+                    reservation_id TEXT PRIMARY KEY,
+                    order_id TEXT NOT NULL UNIQUE,
+                    client_order_id TEXT,
+                    symbol TEXT NOT NULL,
+                    notional TEXT NOT NULL,
+                    corr_group TEXT,
+                    error TEXT,
                     created_at REAL NOT NULL
                 )"""
             )
@@ -123,11 +136,6 @@ class ExposureReservationStore:
         existing_symbol_exposure: Decimal = Decimal("0"),
         existing_group_exposure: Decimal = Decimal("0"),
     ) -> None:
-        """Insert a temporary reservation if capacity remains.
-
-        Capacity uses: caller-reported position exposure + reserved + committed.
-        Check and insert share one BEGIN IMMEDIATE transaction.
-        """
         if not reservation_id.strip():
             raise ReservationError("reservation_id is required")
         symbol = symbol.strip().upper()
@@ -214,11 +222,6 @@ class ExposureReservationStore:
         corr_group: str | None = None,
         reservation_id: str | None = None,
     ) -> None:
-        """Record durable filled notional and optionally drop the temporary reservation.
-
-        Atomic: insert committed row and delete reservation in one transaction so
-        exposure never disappears between fill and release.
-        """
         if not commit_id.strip():
             raise ReservationError("commit_id is required")
         symbol = symbol.strip().upper()
@@ -233,10 +236,13 @@ class ExposureReservationStore:
                     (commit_id,),
                 ).fetchone()
                 if exists:
-                    # Idempotent commit for the same fill/order key.
                     if reservation_id:
                         db.execute(
                             "DELETE FROM exposure_reservations WHERE reservation_id=?",
+                            (reservation_id,),
+                        )
+                        db.execute(
+                            "DELETE FROM exposure_pending WHERE reservation_id=?",
                             (reservation_id,),
                         )
                     db.commit()
@@ -251,10 +257,81 @@ class ExposureReservationStore:
                         "DELETE FROM exposure_reservations WHERE reservation_id=?",
                         (reservation_id,),
                     )
+                    db.execute(
+                        "DELETE FROM exposure_pending WHERE reservation_id=?",
+                        (reservation_id,),
+                    )
                 db.commit()
             except Exception:
                 db.rollback()
                 raise
+
+    def record_pending_transfer(
+        self,
+        *,
+        reservation_id: str,
+        order_id: str,
+        client_order_id: str | None,
+        symbol: str,
+        notional: Decimal,
+        corr_group: str | None,
+        error: str,
+    ) -> None:
+        """Persist a fill that still needs reservation→committed conversion."""
+        if not reservation_id.strip() or not order_id.strip():
+            raise ReservationError("reservation_id and order_id are required")
+        symbol = symbol.strip().upper()
+        now = time.time()
+        with self._lock, closing(self._connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                db.execute(
+                    "INSERT INTO exposure_pending"
+                    "(reservation_id,order_id,client_order_id,symbol,notional,corr_group,error,created_at)"
+                    " VALUES(?,?,?,?,?,?,?,?)"
+                    " ON CONFLICT(reservation_id) DO UPDATE SET"
+                    " error=excluded.error, created_at=excluded.created_at",
+                    (
+                        reservation_id,
+                        order_id,
+                        client_order_id,
+                        symbol,
+                        str(notional),
+                        corr_group,
+                        error,
+                        now,
+                    ),
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+
+    def list_pending_transfers(self) -> list[dict]:
+        with self._lock, closing(self._connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                rows = db.execute(
+                    "SELECT reservation_id,order_id,client_order_id,symbol,notional,"
+                    "corr_group,error,created_at FROM exposure_pending ORDER BY created_at"
+                ).fetchall()
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+        return [
+            {
+                "reservation_id": r[0],
+                "order_id": r[1],
+                "client_order_id": r[2],
+                "symbol": r[3],
+                "notional": r[4],
+                "corr_group": r[5],
+                "error": r[6],
+                "created_at": r[7],
+            }
+            for r in rows
+        ]
 
     def release_committed(self, commit_id: str) -> None:
         with self._lock, closing(self._connect()) as db:
@@ -276,6 +353,10 @@ class ExposureReservationStore:
             try:
                 cur = db.execute(
                     "DELETE FROM exposure_reservations WHERE reservation_id=?",
+                    (reservation_id,),
+                )
+                db.execute(
+                    "DELETE FROM exposure_pending WHERE reservation_id=?",
                     (reservation_id,),
                 )
                 db.commit()
