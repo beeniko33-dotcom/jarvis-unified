@@ -54,6 +54,17 @@ class ExecutionServiceTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             service.submit(second)
 
+    def test_execution_supplies_existing_symbol_exposure_to_risk_gate(self):
+        self.risk = RiskEngine(RiskLimits(
+            Decimal("5"), Decimal("10"), 3, True,
+            max_symbol_exposure=Decimal("1.5"),
+        ))
+        self.service = ExecutionService(self.broker, self.risk)
+        self.risk.release_kill_switch(explicit_operator_action=True)
+        self.service.submit(self.order)
+        second = OrderRequest("EURUSD", Side.BUY, Decimal("0.1"), Decimal("10"), "order-2")
+        with self.assertRaises(PermissionError):
+            self.service.submit(second)
     def test_concurrent_submissions_cannot_exceed_position_cap(self):
         risk = RiskEngine(RiskLimits(Decimal("5"), Decimal("10"), 2, False))
         service = ExecutionService(PaperBroker(Decimal("1000")), risk)
