@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -44,7 +45,7 @@ class PersistentPaperBroker(PaperBroker):
             commission_per_side=commission_per_side,
             slippage_bps=slippage_bps,
         )
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("PRAGMA synchronous=FULL")
             db.execute("""CREATE TABLE IF NOT EXISTS paper_state (
@@ -59,7 +60,11 @@ class PersistentPaperBroker(PaperBroker):
                 initial = self._snapshot()
                 self._append_event(db, "initialized", initial, Decimal("0"), Decimal("0"))
             else:
-                self._restore(json.loads(row[0]))
+                stored_state = json.loads(row[0])
+        self._restore(stored_state)
+        latest = db.execute("SELECT payload FROM paper_events ORDER BY seq DESC LIMIT 1").fetchone()
+        if latest is None or json.loads(latest[0]).get("state") != stored_state:
+            raise RuntimeError("paper ledger snapshot does not match its audit tail; broker is locked")
                 self._verify_chain(db)
 
     def _connect(self) -> sqlite3.Connection:
@@ -213,6 +218,7 @@ class PersistentPaperBroker(PaperBroker):
                 balance=base.balance, equity=base.equity, realized_pnl=base.realized_pnl,
                 open_positions=base.open_positions, commission_paid=base.commission_paid,
                 daily_realized_pnl=daily_realized, daily_commission_paid=daily_commission,
+                daily_accounting_available=True,
             )
 
     def get_positions(self) -> list[Position]:
