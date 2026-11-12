@@ -45,26 +45,50 @@ class ExposureReservationStore:
                     symbol TEXT NOT NULL,
                     notional TEXT NOT NULL,
                     corr_group TEXT,
+                    position_id TEXT,
                     created_at REAL NOT NULL
                 )"""
             )
+            # Migration: older databases predate position-linked commits.
+            committed_cols = {
+                row[1]
+                for row in db.execute("PRAGMA table_info(exposure_committed)").fetchall()
+            }
+            if "position_id" not in committed_cols:
+                db.execute("ALTER TABLE exposure_committed ADD COLUMN position_id TEXT")
             db.execute(
                 """CREATE TABLE IF NOT EXISTS exposure_releases (
                     release_id TEXT PRIMARY KEY,
                     symbol TEXT NOT NULL,
                     notional TEXT NOT NULL,
+                    position_id TEXT,
                     created_at REAL NOT NULL
                 )"""
             )
+            release_cols = {
+                row[1]
+                for row in db.execute("PRAGMA table_info(exposure_releases)").fetchall()
+            }
+            if "position_id" not in release_cols:
+                db.execute("ALTER TABLE exposure_releases ADD COLUMN position_id TEXT")
             db.execute(
                 """CREATE TABLE IF NOT EXISTS exposure_pending_releases (
                     release_id TEXT PRIMARY KEY,
                     symbol TEXT NOT NULL,
                     notional TEXT NOT NULL,
+                    position_id TEXT,
                     error TEXT,
                     created_at REAL NOT NULL
                 )"""
             )
+            pending_release_cols = {
+                row[1]
+                for row in db.execute("PRAGMA table_info(exposure_pending_releases)").fetchall()
+            }
+            if "position_id" not in pending_release_cols:
+                db.execute(
+                    "ALTER TABLE exposure_pending_releases ADD COLUMN position_id TEXT"
+                )
             db.execute(
                 """CREATE TABLE IF NOT EXISTS exposure_pending (
                     reservation_id TEXT PRIMARY KEY,
@@ -238,6 +262,7 @@ class ExposureReservationStore:
         *,
         corr_group: str | None = None,
         reservation_id: str | None = None,
+        position_id: str | None = None,
     ) -> None:
         if not commit_id.strip():
             raise ReservationError("commit_id is required")
@@ -266,8 +291,9 @@ class ExposureReservationStore:
                     return
                 db.execute(
                     "INSERT INTO exposure_committed"
-                    "(commit_id,symbol,notional,corr_group,created_at) VALUES(?,?,?,?,?)",
-                    (commit_id, symbol, str(notional), corr_group, now),
+                    "(commit_id,symbol,notional,corr_group,position_id,created_at)"
+                    " VALUES(?,?,?,?,?,?)",
+                    (commit_id, symbol, str(notional), corr_group, position_id, now),
                 )
                 if reservation_id:
                     db.execute(
@@ -350,36 +376,71 @@ class ExposureReservationStore:
             for r in rows
         ]
 
-    def reduce_committed_for_symbol(
-        self, release_id: str, symbol: str, notional: Decimal
-    ) -> None:
-        """Idempotently reduce committed exposure after a confirmed position close."""
+    def reduce_committed_for_position(
+        self,
+        release_id: str,
+        symbol: str,
+        *,
+        position_id: str | None = None,
+        notional: Decimal | None = None,
+    ) -> Decimal:
+        """Idempotently release committed exposure for the position that closed.
+
+        Releases the commits belonging to ``position_id`` when it is known, so a
+        close cannot consume another position's commitment. When ``position_id``
+        is absent (legacy rows) it falls back to symbol-wide FIFO.
+
+        The released amount is the *committed* notional, not a recomputed
+        quantity x average_price, so slippage cannot leave a residual or
+        over-release. ``notional`` is only an upper bound for partial closes.
+
+        Returns the amount actually released.
+        """
         if not release_id.strip():
             raise ReservationError("release_id is required")
         symbol = symbol.strip().upper()
         if not symbol:
             raise ReservationError("symbol is required")
-        if not notional.is_finite() or notional <= 0:
+        if notional is not None and (not notional.is_finite() or notional <= 0):
             raise ReservationError("release notional must be finite and positive")
         now = time.time()
         with self._lock, closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             try:
-                if db.execute(
-                    "SELECT 1 FROM exposure_releases WHERE release_id=?", (release_id,)
-                ).fetchone():
+                prior = db.execute(
+                    "SELECT notional FROM exposure_releases WHERE release_id=?",
+                    (release_id,),
+                ).fetchone()
+                if prior:
                     db.commit()
-                    return
-                rows = db.execute(
-                    "SELECT commit_id,notional FROM exposure_committed "
-                    "WHERE symbol=? ORDER BY created_at,commit_id", (symbol,)
-                ).fetchall()
-                remaining = notional
+                    return Decimal(prior[0])
+
+                if position_id:
+                    rows = db.execute(
+                        "SELECT commit_id,notional FROM exposure_committed "
+                        "WHERE symbol=? AND position_id=? ORDER BY created_at,commit_id",
+                        (symbol, position_id),
+                    ).fetchall()
+                else:
+                    rows = db.execute(
+                        "SELECT commit_id,notional FROM exposure_committed "
+                        "WHERE symbol=? ORDER BY created_at,commit_id",
+                        (symbol,),
+                    ).fetchall()
+
+                if not rows:
+                    raise ReservationError(
+                        f"no committed exposure to release for {symbol}"
+                        + (f" position {position_id}" if position_id else "")
+                    )
+
+                budget = notional
+                released = Decimal("0")
                 for commit_id, raw in rows:
-                    if remaining <= 0:
+                    if budget is not None and budget <= 0:
                         break
                     available = Decimal(raw)
-                    consumed = min(available, remaining)
+                    consumed = available if budget is None else min(available, budget)
                     left = available - consumed
                     if left == 0:
                         db.execute(
@@ -390,25 +451,44 @@ class ExposureReservationStore:
                             "UPDATE exposure_committed SET notional=? WHERE commit_id=?",
                             (str(left), commit_id),
                         )
-                    remaining -= consumed
-                if remaining > 0:
+                    released += consumed
+                    if budget is not None:
+                        budget -= consumed
+
+                if released <= 0:
                     raise ReservationError(
-                        f"cannot release {notional} {symbol}; committed exposure is insufficient"
+                        f"cannot release {symbol}; committed exposure is insufficient"
                     )
                 db.execute(
-                    "INSERT INTO exposure_releases(release_id,symbol,notional,created_at) "
-                    "VALUES(?,?,?,?)", (release_id, symbol, str(notional), now)
+                    "INSERT INTO exposure_releases"
+                    "(release_id,symbol,notional,position_id,created_at) VALUES(?,?,?,?,?)",
+                    (release_id, symbol, str(released), position_id, now),
                 )
                 db.execute(
                     "DELETE FROM exposure_pending_releases WHERE release_id=?", (release_id,)
                 )
                 db.commit()
+                return released
             except Exception:
                 db.rollback()
                 raise
 
+    def reduce_committed_for_symbol(
+        self, release_id: str, symbol: str, notional: Decimal
+    ) -> None:
+        """Legacy symbol-wide release. Prefer reduce_committed_for_position()."""
+        self.reduce_committed_for_position(
+            release_id, symbol, position_id=None, notional=notional
+        )
+
     def record_pending_release(
-        self, release_id: str, symbol: str, notional: Decimal, error: str
+        self,
+        release_id: str,
+        symbol: str,
+        notional: Decimal,
+        error: str,
+        *,
+        position_id: str | None = None,
     ) -> None:
         """Persist a post-close exposure reduction that needs retrying."""
         if not release_id.strip() or not symbol.strip():
@@ -420,9 +500,17 @@ class ExposureReservationStore:
             try:
                 db.execute(
                     "INSERT INTO exposure_pending_releases"
-                    "(release_id,symbol,notional,error,created_at) VALUES(?,?,?,?,?) "
+                    "(release_id,symbol,notional,position_id,error,created_at)"
+                    " VALUES(?,?,?,?,?,?) "
                     "ON CONFLICT(release_id) DO UPDATE SET error=excluded.error",
-                    (release_id, symbol.strip().upper(), str(notional), error, time.time()),
+                    (
+                        release_id,
+                        symbol.strip().upper(),
+                        str(notional),
+                        position_id,
+                        error,
+                        time.time(),
+                    ),
                 )
                 db.commit()
             except Exception:
@@ -432,12 +520,12 @@ class ExposureReservationStore:
     def list_pending_releases(self) -> list[dict]:
         with self._lock, closing(self._connect()) as db:
             rows = db.execute(
-                "SELECT release_id,symbol,notional,error,created_at "
+                "SELECT release_id,symbol,notional,position_id,error,created_at "
                 "FROM exposure_pending_releases ORDER BY created_at"
             ).fetchall()
         return [
             {"release_id": row[0], "symbol": row[1], "notional": row[2],
-             "error": row[3], "created_at": row[4]}
+             "position_id": row[3], "error": row[4], "created_at": row[5]}
             for row in rows
         ]
 

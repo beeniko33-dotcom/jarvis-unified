@@ -39,6 +39,28 @@ class ReconciliationRequiredError(RuntimeError):
         self.corr_group = corr_group
 
 
+class PositionClosedReleaseFailedError(RuntimeError):
+    """The paper position closed successfully, but its exposure release did not.
+
+    Callers must treat this as *close succeeded, accounting pending* — not as a
+    failed close. The position is flat at the broker; the release is persisted
+    in ``exposure_pending_releases`` and retried by ``reconcile_exposure()``.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        order_result: OrderResult,
+        symbol: str,
+        position_id: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.order_result = order_result
+        self.symbol = symbol
+        self.position_id = position_id
+
+
 class ExecutionService:
     def __init__(
         self,
@@ -204,6 +226,8 @@ class ExecutionService:
                     ) from record_exc
 
                 # 2) Convert reservation → committed; clears pending in the same txn.
+                #    The commit is tagged with the position it belongs to so the
+                #    close path can release exactly this position's exposure.
                 try:
                     self.reservations.commit_exposure(
                         commit_id=result.order_id,
@@ -211,6 +235,7 @@ class ExecutionService:
                         notional=notional,
                         corr_group=group,
                         reservation_id=reservation_id,
+                        position_id=symbol,
                     )
                 except Exception as exc:
                     self._release_failures.append(
@@ -270,10 +295,10 @@ class ExecutionService:
                     )
         for item in self.reservations.list_pending_releases():
             try:
-                self.reservations.reduce_committed_for_symbol(
+                self.reservations.reduce_committed_for_position(
                     release_id=item["release_id"],
                     symbol=item["symbol"],
-                    notional=Decimal(item["notional"]),
+                    position_id=item.get("position_id"),
                 )
                 reconciled.append(dict(item))
             except Exception as exc:
@@ -284,6 +309,13 @@ class ExecutionService:
         return reconciled
 
     def close_position(self, symbol: str, price: Decimal) -> OrderResult:
+        """Close a paper position and release the exposure it committed.
+
+        Raises ``PositionClosedReleaseFailedError`` when the broker close
+        succeeded but the durable release did not. That is deliberately a
+        distinct type from a failed close: the position *is* flat, and the
+        release is queued for ``reconcile_exposure()``.
+        """
         with self._submission_lock:
             if not price.is_finite() or price <= 0:
                 raise ValueError("close price must be a finite positive value")
@@ -292,19 +324,26 @@ class ExecutionService:
             position = positions.get(normalized)
             if position is None:
                 raise ValueError(f"no open position for {normalized}")
-            released_notional = abs(position.quantity) * position.average_price
             result = self.broker.close_position(normalized, price)
             if self.reservations is not None:
+                # Release what was actually committed for this position. The
+                # committed notional is authoritative: recomputing it from
+                # quantity x average_price drifts under slippage and can
+                # over- or under-release.
                 try:
-                    self.reservations.reduce_committed_for_symbol(
+                    self.reservations.reduce_committed_for_position(
                         release_id=result.order_id,
                         symbol=normalized,
-                        notional=released_notional,
+                        position_id=normalized,
                     )
                 except Exception as exc:
                     try:
                         self.reservations.record_pending_release(
-                            result.order_id, normalized, released_notional, str(exc)
+                            result.order_id,
+                            normalized,
+                            abs(position.quantity) * position.average_price,
+                            str(exc),
+                            position_id=normalized,
                         )
                     except Exception as record_exc:
                         self._release_failures.append({
@@ -313,7 +352,11 @@ class ExecutionService:
                             "error": str(record_exc),
                             "phase": "close_release_record_failed",
                         })
-                    raise RuntimeError(
-                        "position close succeeded but committed exposure release needs reconciliation"
+                    raise PositionClosedReleaseFailedError(
+                        "position close succeeded but committed exposure release "
+                        "needs reconciliation",
+                        order_result=result,
+                        symbol=normalized,
+                        position_id=normalized,
                     ) from exc
             return result
