@@ -3,32 +3,65 @@ from __future__ import annotations
 
 from decimal import Decimal
 from threading import RLock
+from uuid import uuid4
 
 from brokers.base import Broker
 from core.models import OrderRequest, OrderResult
-from core.risk import RiskEngine
+from core.risk import ExposureReservationStore, RiskEngine
 
 
 class ExecutionService:
-    def __init__(self, broker: Broker, risk: RiskEngine) -> None:
+    def __init__(
+        self,
+        broker: Broker,
+        risk: RiskEngine,
+        *,
+        reservations: ExposureReservationStore | None = None,
+    ) -> None:
         self.broker = broker
         self.risk = risk
+        self.reservations = reservations
         # Serialize account snapshot -> risk decision -> broker submission. Without
         # this lock concurrent callers can all pass using the same stale position count.
         self._submission_lock = RLock()
 
     def submit(self, order: OrderRequest) -> OrderResult:
         """Submit only after a serialized, net-marked-PnL risk check."""
+        reservation_id: str | None = None
         with self._submission_lock:
             account = self.broker.get_account()
             unrealized_pnl = account.equity - account.balance
             positions = self.broker.get_positions()
             symbol = order.symbol.strip().upper()
+            notional = order.quantity * order.price
             symbol_exposure = sum(
-                (abs(position.quantity) * position.average_price
-                 for position in positions if position.symbol.upper() == symbol),
+                (
+                    abs(position.quantity) * position.average_price
+                    for position in positions
+                    if position.symbol.upper() == symbol
+                ),
                 Decimal("0"),
             )
+            group = self.risk.group_for_symbol(symbol)
+            correlated_exposure = Decimal("0")
+            if group and self.risk.limits.correlation_groups:
+                members = {m.upper() for m in self.risk.limits.correlation_groups[group]}
+                correlated_exposure = sum(
+                    (
+                        abs(position.quantity) * position.average_price
+                        for position in positions
+                        if position.symbol.upper() in members
+                    ),
+                    Decimal("0"),
+                )
+
+            reserved_symbol = Decimal("0")
+            reserved_group = Decimal("0")
+            if self.reservations is not None:
+                reserved_symbol = self.reservations.reserved_for_symbol(symbol)
+                if group:
+                    reserved_group = self.reservations.reserved_for_group(group)
+
             decision = self.risk.evaluate(
                 order,
                 daily_realized_pnl=(
@@ -42,12 +75,33 @@ class ExecutionService:
                 ),
                 open_positions=account.open_positions,
                 symbol_exposure=symbol_exposure,
+                reserved_symbol_notional=reserved_symbol,
+                correlated_exposure=correlated_exposure,
+                reserved_group_notional=reserved_group,
                 current_equity=account.equity,
                 peak_equity=account.peak_equity,
             )
             if not decision.allowed:
                 raise PermissionError(f"order rejected by risk engine: {decision.reason}")
-            return self.broker.place_order(order)
+
+            if self.reservations is not None:
+                reservation_id = f"exec-{uuid4()}"
+                self.reservations.reserve(
+                    reservation_id,
+                    symbol,
+                    notional,
+                    corr_group=group,
+                    ttl_seconds=120.0,
+                )
+            try:
+                result = self.broker.place_order(order)
+            finally:
+                if reservation_id is not None and self.reservations is not None:
+                    try:
+                        self.reservations.release(reservation_id)
+                    except Exception:
+                        pass
+            return result
 
     def close_position(self, symbol: str, price: Decimal) -> OrderResult:
         """Close an existing paper position; risk stops new entries, not risk-reducing exits."""
