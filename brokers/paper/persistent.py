@@ -61,22 +61,30 @@ class PersistentPaperBroker(PaperBroker):
                 seq INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL,
                 event_type TEXT NOT NULL, utc_day TEXT NOT NULL, payload TEXT NOT NULL,
                 previous_hash TEXT NOT NULL, event_hash TEXT NOT NULL UNIQUE)""")
-            row = db.execute("SELECT payload FROM paper_state WHERE singleton=1").fetchone()
-            if row is None:
-                self._save_snapshot(db)
-                initial = self._snapshot()
-                self._append_event(db, "initialized", initial, Decimal("0"), Decimal("0"))
-            else:
-                stored_state = json.loads(row[0])
-                self._restore(stored_state)
-                self._verify_chain(db)
-                latest = db.execute(
-                    "SELECT payload FROM paper_events ORDER BY seq DESC LIMIT 1"
-                ).fetchone()
-                if latest is None or json.loads(latest[0]).get("state") != stored_state:
-                    raise RuntimeError(
-                        "paper ledger snapshot does not match its audit tail; broker is locked"
-                    )
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                row = db.execute("SELECT payload FROM paper_state WHERE singleton=1").fetchone()
+                if row is None:
+                    self._save_snapshot(db)
+                    initial = self._snapshot()
+                    self._append_event(db, "initialized", initial, Decimal("0"), Decimal("0"))
+                    db.commit()
+                else:
+                    stored_state = json.loads(row[0])
+                    self._verify_chain(db)
+                    latest = db.execute(
+                        "SELECT payload FROM paper_events ORDER BY seq DESC LIMIT 1"
+                    ).fetchone()
+                    if latest is None or json.loads(latest[0]).get("state") != stored_state:
+                        db.rollback()
+                        raise RuntimeError(
+                            "paper ledger snapshot does not match its audit tail; broker is locked"
+                        )
+                    self._restore(stored_state)
+                    db.commit()
+            except Exception:
+                db.rollback()
+                raise
 
     def inject_crash_before_commit(self, event_type: str | None) -> None:
         """Test hook: next matching mutation raises before commit (transaction rolls back)."""
@@ -113,7 +121,27 @@ class PersistentPaperBroker(PaperBroker):
                 "filled_quantity": str(w.filled_quantity),
                 "average_fill_price": str(w.average_fill_price),
                 "status": w.status, "created_at": w.created_at.isoformat(),
+                "applied_fill_ids": sorted(w.applied_fill_ids),
             } for w in self._working.values()],
+            "fill_results": {
+                fid: {
+                    "order_id": o.order_id,
+                    "client_order_id": o.client_order_id,
+                    "symbol": o.symbol,
+                    "side": o.side.value,
+                    "quantity": str(o.quantity),
+                    "fill_price": str(o.fill_price),
+                    "status": o.status,
+                    "created_at": o.created_at.isoformat(),
+                    "filled_quantity": str(
+                        o.filled_quantity if o.filled_quantity is not None else o.quantity
+                    ),
+                    "remaining_quantity": str(
+                        o.remaining_quantity if o.remaining_quantity is not None else "0"
+                    ),
+                }
+                for fid, o in self._fill_results.items()
+            },
             "requests": {
                 cid: [symbol, side.value, str(qty), str(price)]
                 for cid, (symbol, side, qty, price) in self._client_requests.items()
@@ -144,9 +172,8 @@ class PersistentPaperBroker(PaperBroker):
                 remaining_quantity=Decimal(o.get("remaining_quantity", "0")),
             )
             self._orders[result.order_id] = result
-            if result.status in {OrderStatus.FILLED.value, OrderStatus.PARTIAL.value, OrderStatus.CANCELLED.value}:
-                if result.status != OrderStatus.OPEN.value:
-                    self._client_ids[result.client_order_id] = result
+            if result.status != OrderStatus.OPEN.value:
+                self._client_ids[result.client_order_id] = result
         self._client_requests = {
             cid: (v[0], Side(v[1]), Decimal(v[2]), Decimal(v[3]))
             for cid, v in state["requests"].items()
@@ -164,8 +191,18 @@ class PersistentPaperBroker(PaperBroker):
                 average_fill_price=Decimal(w["average_fill_price"]),
                 status=w["status"],
                 created_at=_dt(w["created_at"]),
+                applied_fill_ids=set(w.get("applied_fill_ids", [])),
             )
             self._working[wo.order_id] = wo
+        self._fill_results = {}
+        for fid, o in state.get("fill_results", {}).items():
+            self._fill_results[fid] = OrderResult(
+                o["order_id"], o["client_order_id"], o["symbol"],
+                Side(o["side"]), Decimal(o["quantity"]), Decimal(o["fill_price"]),
+                o["status"], _dt(o["created_at"]),
+                filled_quantity=Decimal(o.get("filled_quantity", o["quantity"])),
+                remaining_quantity=Decimal(o.get("remaining_quantity", "0")),
+            )
         self._last_prices = {k: Decimal(v) for k, v in state["last_prices"].items()}
         self._commission_per_side = Decimal(state["commission_per_side"])
         self._slippage_bps = Decimal(state["slippage_bps"])
@@ -213,6 +250,7 @@ class PersistentPaperBroker(PaperBroker):
         return True
 
     def _refresh_from_db(self, db: sqlite3.Connection) -> None:
+        """Load snapshot + verify chain + compare tail under the caller's open transaction."""
         row = db.execute("SELECT payload FROM paper_state WHERE singleton=1").fetchone()
         if row is None:
             raise RuntimeError("paper ledger state is missing; broker is locked")
@@ -272,11 +310,13 @@ class PersistentPaperBroker(PaperBroker):
         order_id: str,
         fill_quantity: Decimal,
         price: Decimal | float | str | None = None,
+        *,
+        fill_id: str | None = None,
     ) -> OrderResult:
         return self._mutate(
             "paper_partial_fill",
             lambda: super(PersistentPaperBroker, self).apply_partial_fill(
-                order_id, fill_quantity, price
+                order_id, fill_quantity, price, fill_id=fill_id
             ),
         )
 
@@ -309,45 +349,72 @@ class PersistentPaperBroker(PaperBroker):
 
     def get_account(self) -> AccountSnapshot:
         with self._persistent_lock, self._connect() as db:
-            self._refresh_from_db(db)
-            base = super().get_account()
-            now = self._clock()
-            if now.tzinfo is None or now.utcoffset() is None:
-                raise ValueError("persistent broker clock must be timezone-aware")
-            day = now.astimezone(timezone.utc).date().isoformat()
-            daily_realized = Decimal("0")
-            daily_commission = Decimal("0")
-            for (payload,) in db.execute(
-                "SELECT payload FROM paper_events WHERE utc_day=?", (day,)
-            ):
-                event = json.loads(payload)
-                daily_realized += Decimal(event["realized_delta"])
-                daily_commission += Decimal(event["commission_delta"])
-            return AccountSnapshot(
-                balance=base.balance, equity=base.equity, realized_pnl=base.realized_pnl,
-                open_positions=base.open_positions, commission_paid=base.commission_paid,
-                daily_realized_pnl=daily_realized, daily_commission_paid=daily_commission,
-                daily_accounting_available=True,
-                peak_equity=self._peak_equity,
-                drawdown_pct=(
-                    max(Decimal("0"), (self._peak_equity - base.equity) / self._peak_equity * Decimal("100"))
-                    if self._peak_equity > 0 else Decimal("0")
-                ),
-            )
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                self._refresh_from_db(db)
+                base = super().get_account()
+                now = self._clock()
+                if now.tzinfo is None or now.utcoffset() is None:
+                    raise ValueError("persistent broker clock must be timezone-aware")
+                day = now.astimezone(timezone.utc).date().isoformat()
+                daily_realized = Decimal("0")
+                daily_commission = Decimal("0")
+                for (payload,) in db.execute(
+                    "SELECT payload FROM paper_events WHERE utc_day=?", (day,)
+                ):
+                    event = json.loads(payload)
+                    daily_realized += Decimal(event["realized_delta"])
+                    daily_commission += Decimal(event["commission_delta"])
+                db.commit()
+                return AccountSnapshot(
+                    balance=base.balance, equity=base.equity, realized_pnl=base.realized_pnl,
+                    open_positions=base.open_positions, commission_paid=base.commission_paid,
+                    daily_realized_pnl=daily_realized, daily_commission_paid=daily_commission,
+                    daily_accounting_available=True,
+                    peak_equity=self._peak_equity,
+                    drawdown_pct=(
+                        max(Decimal("0"), (self._peak_equity - base.equity) / self._peak_equity * Decimal("100"))
+                        if self._peak_equity > 0 else Decimal("0")
+                    ),
+                )
+            except Exception:
+                db.rollback()
+                raise
 
     def get_positions(self) -> list[Position]:
         with self._persistent_lock, self._connect() as db:
-            self._refresh_from_db(db)
-            return super().get_positions()
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                self._refresh_from_db(db)
+                positions = super().get_positions()
+                db.commit()
+                return positions
+            except Exception:
+                db.rollback()
+                raise
 
     def get_working_orders(self) -> list[WorkingOrder]:
         with self._persistent_lock, self._connect() as db:
-            self._refresh_from_db(db)
-            return super().get_working_orders()
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                self._refresh_from_db(db)
+                working = super().get_working_orders()
+                db.commit()
+                return working
+            except Exception:
+                db.rollback()
+                raise
 
     def verify_ledger(self) -> bool:
         with self._persistent_lock, self._connect() as db:
-            return self._verify_chain(db)
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                ok = self._verify_chain(db)
+                db.commit()
+                return ok
+            except Exception:
+                db.rollback()
+                raise
 
     def ledger_event_count(self) -> int:
         with self._connect() as db:
@@ -356,12 +423,19 @@ class PersistentPaperBroker(PaperBroker):
     def reconcile(self) -> dict:
         """Reload from durable store and return a consistency summary."""
         with self._persistent_lock, self._connect() as db:
-            self._refresh_from_db(db)
-            return {
-                "balance": str(self._balance),
-                "open_positions": len(self._positions),
-                "working_orders": len(self._working),
-                "orders": len(self._orders),
-                "events": int(db.execute("SELECT COUNT(*) FROM paper_events").fetchone()[0]),
-                "chain_ok": True,
-            }
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                self._refresh_from_db(db)
+                summary = {
+                    "balance": str(self._balance),
+                    "open_positions": len(self._positions),
+                    "working_orders": len(self._working),
+                    "orders": len(self._orders),
+                    "events": int(db.execute("SELECT COUNT(*) FROM paper_events").fetchone()[0]),
+                    "chain_ok": True,
+                }
+                db.commit()
+                return summary
+            except Exception:
+                db.rollback()
+                raise
