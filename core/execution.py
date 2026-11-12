@@ -24,9 +24,15 @@ class ExecutionService:
             unrealized_pnl = account.equity - account.balance
             decision = self.risk.evaluate(
                 order,
-                daily_realized_pnl=account.realized_pnl,
+                daily_realized_pnl=(
+                    account.daily_realized_pnl if account.daily_accounting_available
+                    else account.realized_pnl
+                ),
                 unrealized_pnl=unrealized_pnl,
-                commission_paid=account.commission_paid,
+                commission_paid=(
+                    account.daily_commission_paid if account.daily_accounting_available
+                    else account.commission_paid
+                ),
                 open_positions=account.open_positions,
             )
             if not decision.allowed:
