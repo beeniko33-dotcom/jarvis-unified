@@ -218,6 +218,7 @@ class PaperBroker:
                 equity=equity,
                 realized_pnl=self._realized_pnl,
                 open_positions=len(self._positions),
+                commission_paid=self._commission_paid,
             )
 
     def close_position(self, symbol: str, price: float | Decimal) -> OrderResult:
