@@ -62,6 +62,13 @@ An optional `max_symbol_exposure` caps current absolute position notional plus p
 notional. `ExecutionService` supplies existing exposure from broker positions. This is a
 conservative average-entry-price estimate, not a live mark, margin or correlated-risk model.
 
+The persistent broker stores peak equity in the same snapshot and hash-chained event as each
+mutation. Mark updates and order mutations can raise the high-water mark; the peak survives
+restart. `AccountSnapshot` reports `peak_equity` and current `drawdown_pct`. Configure
+`RiskLimits.max_peak_drawdown_pct` to reject new entries when the account drawdown reaches the
+configured percentage. The gate fails closed if the broker does not provide valid peak/equity
+data. This control is a paper-account circuit breaker, not a guarantee against gaps or model risk.
+
 ## Known gaps
 
 Peak-equity drawdown, cross-symbol/correlated exposure reservations, partial-fill simulation,
