@@ -268,13 +268,52 @@ class ExecutionService:
                         item["order_id"],
                         exc,
                     )
+        for item in self.reservations.list_pending_releases():
+            try:
+                self.reservations.reduce_committed_for_symbol(
+                    release_id=item["release_id"],
+                    symbol=item["symbol"],
+                    notional=Decimal(item["notional"]),
+                )
+                reconciled.append(dict(item))
+            except Exception as exc:
+                logger.warning(
+                    "reconcile_exposure still failing release_id=%s error=%s",
+                    item["release_id"], exc,
+                )
         return reconciled
 
     def close_position(self, symbol: str, price: Decimal) -> OrderResult:
         with self._submission_lock:
             if not price.is_finite() or price <= 0:
                 raise ValueError("close price must be a finite positive value")
-            positions = {position.symbol: position for position in self.broker.get_positions()}
-            if symbol not in positions:
-                raise ValueError(f"no open position for {symbol}")
-            return self.broker.close_position(symbol, price)
+            normalized = symbol.strip().upper()
+            positions = {position.symbol.upper(): position for position in self.broker.get_positions()}
+            position = positions.get(normalized)
+            if position is None:
+                raise ValueError(f"no open position for {normalized}")
+            released_notional = abs(position.quantity) * position.average_price
+            result = self.broker.close_position(normalized, price)
+            if self.reservations is not None:
+                try:
+                    self.reservations.reduce_committed_for_symbol(
+                        release_id=result.order_id,
+                        symbol=normalized,
+                        notional=released_notional,
+                    )
+                except Exception as exc:
+                    try:
+                        self.reservations.record_pending_release(
+                            result.order_id, normalized, released_notional, str(exc)
+                        )
+                    except Exception as record_exc:
+                        self._release_failures.append({
+                            "release_id": result.order_id,
+                            "symbol": normalized,
+                            "error": str(record_exc),
+                            "phase": "close_release_record_failed",
+                        })
+                    raise RuntimeError(
+                        "position close succeeded but committed exposure release needs reconciliation"
+                    ) from exc
+            return result
