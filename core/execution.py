@@ -20,24 +20,6 @@ class ReconciliationRequiredError(RuntimeError):
     conservative until reconcile_exposure() completes the transfer.
     """
 
-    def __init(
-        self,
-        message: str,
-        *,
-        order_result: OrderResult,
-        reservation_id: str,
-        symbol: str,
-        notional: Decimal,
-        corr_group: str | None,
-    ) -> None:
-        super().__init__(message)
-        self.order_result = order_result
-        self.reservation_id = reservation_id
-        self.symbol = symbol
-        self.notional = notional
-        self.corr_group = corr_group
-
-    # Support both __init__ spellings for clarity in dataclasses-style usage
     def __init__(
         self,
         message: str,
@@ -148,7 +130,7 @@ class ExecutionService:
             if self.reservations is not None:
                 reservation_id = f"exec-{uuid4()}"
                 try:
-                    # No TTL until commit_exposure converts or explicit release on failure.
+                    # No TTL until commit_exposure converts or explicit release on broker failure.
                     # Prevents exposure from disappearing during the fill->commit window.
                     self.reservations.reserve(
                         reservation_id,
