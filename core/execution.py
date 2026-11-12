@@ -13,6 +13,49 @@ from core.risk import ExposureReservationStore, ReservationError, RiskEngine
 logger = logging.getLogger(__name__)
 
 
+class ReconciliationRequiredError(RuntimeError):
+    """Paper fill succeeded but durable exposure commit did not.
+
+    The temporary reservation is intentionally retained so capacity remains
+    conservative until reconcile_exposure() completes the transfer.
+    """
+
+    def __init(
+        self,
+        message: str,
+        *,
+        order_result: OrderResult,
+        reservation_id: str,
+        symbol: str,
+        notional: Decimal,
+        corr_group: str | None,
+    ) -> None:
+        super().__init__(message)
+        self.order_result = order_result
+        self.reservation_id = reservation_id
+        self.symbol = symbol
+        self.notional = notional
+        self.corr_group = corr_group
+
+    # Support both __init__ spellings for clarity in dataclasses-style usage
+    def __init__(
+        self,
+        message: str,
+        *,
+        order_result: OrderResult,
+        reservation_id: str,
+        symbol: str,
+        notional: Decimal,
+        corr_group: str | None,
+    ) -> None:
+        super().__init__(message)
+        self.order_result = order_result
+        self.reservation_id = reservation_id
+        self.symbol = symbol
+        self.notional = notional
+        self.corr_group = corr_group
+
+
 class ExecutionService:
     def __init__(
         self,
@@ -27,11 +70,17 @@ class ExecutionService:
         # Process-local serialization. Cross-process capacity uses the reservation store.
         self._submission_lock = RLock()
         self._release_failures: list[dict] = []
+        self._pending_reconciliation: list[dict] = []
 
     @property
     def release_failures(self) -> list[dict]:
         with self._submission_lock:
             return list(self._release_failures)
+
+    @property
+    def pending_reconciliation(self) -> list[dict]:
+        with self._submission_lock:
+            return list(self._pending_reconciliation)
 
     def submit(self, order: OrderRequest) -> OrderResult:
         """Submit after risk check and atomic capacity reservation when configured."""
@@ -99,15 +148,16 @@ class ExecutionService:
             if self.reservations is not None:
                 reservation_id = f"exec-{uuid4()}"
                 try:
+                    # No TTL until commit_exposure converts or explicit release on failure.
+                    # Prevents exposure from disappearing during the fill->commit window.
                     self.reservations.reserve(
                         reservation_id,
                         symbol,
                         notional,
                         corr_group=group,
-                        ttl_seconds=120.0,
+                        ttl_seconds=None,
                         max_symbol_notional=self.risk.limits.max_symbol_exposure,
                         max_group_notional=self.risk.limits.max_correlated_exposure,
-                        # Position exposure only; committed is counted inside reserve().
                         existing_symbol_exposure=symbol_exposure,
                         existing_group_exposure=correlated_exposure,
                     )
@@ -138,8 +188,6 @@ class ExecutionService:
                 raise
 
             if self.reservations is not None and reservation_id is not None:
-                # Convert temporary reservation into durable committed exposure so
-                # concurrent processes still see this fill after release.
                 try:
                     self.reservations.commit_exposure(
                         commit_id=result.order_id,
@@ -149,32 +197,81 @@ class ExecutionService:
                         reservation_id=reservation_id,
                     )
                 except Exception as exc:
+                    # Keep the reservation so capacity stays conservative.
+                    # Do not release. Operator must call reconcile_exposure().
+                    pending = {
+                        "reservation_id": reservation_id,
+                        "order_id": result.order_id,
+                        "client_order_id": result.client_order_id,
+                        "symbol": symbol,
+                        "notional": str(notional),
+                        "corr_group": group,
+                        "error": str(exc),
+                    }
+                    self._pending_reconciliation.append(pending)
                     self._release_failures.append(
                         {
-                            "reservation_id": reservation_id,
-                            "symbol": symbol,
-                            "error": str(exc),
-                            "phase": "commit_exposure",
+                            **pending,
+                            "phase": "commit_exposure_kept_reservation",
                         }
                     )
-                    logger.warning(
-                        "commit_exposure failed id=%s symbol=%s error=%s",
+                    logger.error(
+                        "commit_exposure failed; reservation retained for reconciliation "
+                        "id=%s order_id=%s symbol=%s error=%s",
                         reservation_id,
+                        result.order_id,
                         symbol,
                         exc,
                     )
-                    try:
-                        self.reservations.release(reservation_id)
-                    except Exception as release_exc:
-                        self._release_failures.append(
-                            {
-                                "reservation_id": reservation_id,
-                                "symbol": symbol,
-                                "error": str(release_exc),
-                                "phase": "fallback_release",
-                            }
-                        )
+                    raise ReconciliationRequiredError(
+                        "paper fill succeeded but durable exposure commit failed; "
+                        "reservation retained — run reconcile_exposure()",
+                        order_result=result,
+                        reservation_id=reservation_id,
+                        symbol=symbol,
+                        notional=notional,
+                        corr_group=group,
+                    ) from exc
             return result
+
+    def reconcile_exposure(self) -> list[dict]:
+        """Complete pending reservation→committed transfers after a commit failure.
+
+        Safe to call repeatedly. For each pending item, attempts commit_exposure
+        using the retained reservation_id. Successful items are removed from the
+        pending list. Returns the list of successfully reconciled records.
+        """
+        if self.reservations is None:
+            return []
+        reconciled: list[dict] = []
+        with self._submission_lock:
+            remaining: list[dict] = []
+            for item in self._pending_reconciliation:
+                try:
+                    self.reservations.commit_exposure(
+                        commit_id=item["order_id"],
+                        symbol=item["symbol"],
+                        notional=Decimal(item["notional"]),
+                        corr_group=item.get("corr_group"),
+                        reservation_id=item["reservation_id"],
+                    )
+                    reconciled.append(dict(item))
+                    logger.info(
+                        "reconciled exposure order_id=%s reservation_id=%s",
+                        item["order_id"],
+                        item["reservation_id"],
+                    )
+                except Exception as exc:
+                    item = dict(item)
+                    item["last_error"] = str(exc)
+                    remaining.append(item)
+                    logger.warning(
+                        "reconcile_exposure still failing order_id=%s error=%s",
+                        item["order_id"],
+                        exc,
+                    )
+            self._pending_reconciliation = remaining
+        return reconciled
 
     def close_position(self, symbol: str, price: Decimal) -> OrderResult:
         """Close an existing paper position; risk stops new entries, not risk-reducing exits."""

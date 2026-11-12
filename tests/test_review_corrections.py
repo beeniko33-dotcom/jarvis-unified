@@ -8,9 +8,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from unittest import mock
 
 from brokers.paper import PaperBroker, PersistentPaperBroker
-from core.execution import ExecutionService
+from core.execution import ExecutionService, ReconciliationRequiredError
 from core.models import OrderRequest, Side
 from core.risk import ExposureReservationStore, ReservationError, RiskEngine, RiskLimits
 
@@ -88,13 +89,54 @@ class AtomicReservationTests(unittest.TestCase):
             )
 
     def test_multiprocess_symbol_cap(self):
-        # Genuine OS processes sharing one SQLite reservation DB.
         with mp.get_context("spawn").Pool(processes=4) as pool:
             results = pool.map(_mp_submit, [(str(self.db), i) for i in range(6)])
         self.assertEqual(results.count("ok"), 1)
         self.assertEqual(results.count("blocked"), 5)
         store = ExposureReservationStore(self.db)
         self.assertEqual(store.committed_for_symbol("EURUSD"), Decimal("6"))
+
+    def test_commit_failure_retains_reservation_and_reconciles(self):
+        store = ExposureReservationStore(self.db)
+        risk = RiskEngine(
+            RiskLimits(
+                max_stake_per_trade=Decimal("100"),
+                max_daily_loss=Decimal("1000"),
+                max_open_positions=10,
+                kill_switch=False,
+                max_symbol_exposure=Decimal("20"),
+            )
+        )
+        broker = PaperBroker(Decimal("10000"))
+        svc = ExecutionService(broker, risk, reservations=store)
+
+        real_commit = store.commit_exposure
+        calls = {"n": 0}
+
+        def flaky_commit(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("simulated commit failure")
+            return real_commit(*args, **kwargs)
+
+        with mock.patch.object(store, "commit_exposure", side_effect=flaky_commit):
+            with self.assertRaises(ReconciliationRequiredError) as ctx:
+                svc.submit(
+                    OrderRequest("EURUSD", Side.BUY, Decimal("5"), Decimal("1"), "recon-1")
+                )
+            err = ctx.exception
+            self.assertEqual(err.symbol, "EURUSD")
+            # Reservation must still be held — no silent capacity hole.
+            self.assertEqual(store.reserved_for_symbol("EURUSD"), Decimal("5"))
+            self.assertEqual(store.committed_for_symbol("EURUSD"), Decimal("0"))
+            self.assertEqual(len(svc.pending_reconciliation), 1)
+
+        # Recovery path.
+        fixed = svc.reconcile_exposure()
+        self.assertEqual(len(fixed), 1)
+        self.assertEqual(store.reserved_for_symbol("EURUSD"), Decimal("0"))
+        self.assertEqual(store.committed_for_symbol("EURUSD"), Decimal("5"))
+        self.assertEqual(svc.pending_reconciliation, [])
 
 
 class FillIdempotencyTests(unittest.TestCase):
