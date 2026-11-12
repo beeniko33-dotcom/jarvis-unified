@@ -56,7 +56,6 @@ class PersistentPaperBroker(PaperBroker):
                 seq INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL,
                 event_type TEXT NOT NULL, utc_day TEXT NOT NULL, payload TEXT NOT NULL,
                 previous_hash TEXT NOT NULL, event_hash TEXT NOT NULL UNIQUE)""")
-            # Finding 12.2: genesis snapshot + event in one explicit transaction.
             db.execute("BEGIN IMMEDIATE")
             try:
                 row = db.execute("SELECT payload FROM paper_state WHERE singleton=1").fetchone()
@@ -66,7 +65,6 @@ class PersistentPaperBroker(PaperBroker):
                     self._append_event(db, "initialized", initial, Decimal("0"), Decimal("0"))
                     db.commit()
                 else:
-                    # Finding 12.1: snapshot, chain verify, and tail compare under one txn.
                     stored_state = json.loads(row[0])
                     self._verify_chain(db)
                     latest = db.execute(
@@ -201,7 +199,7 @@ class PersistentPaperBroker(PaperBroker):
         except RuntimeError:
             raise
         except Exception as exc:
-            raise RuntimeError("paper ledger snapshot is malformed; broker is locked") from exp if False else exc
+            raise RuntimeError("paper ledger snapshot is malformed; broker is locked") from exc
 
     def _mutate(self, event_type: str, operation: Callable[[], object]):
         with self._persistent_lock, self._connect() as db:
