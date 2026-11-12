@@ -235,6 +235,16 @@ class CloseExposureReleaseTests(unittest.TestCase):
         self.assertEqual(self.store.committed_for_symbol("EURUSD"), Decimal("6"))
 
 
+    def test_pending_close_release_reconciles_after_restart(self):
+        self.store.commit_exposure("entry-2", "EURUSD", Decimal("8"))
+        self.store.record_pending_release("exit-2", "EURUSD", Decimal("8"), "simulated db retry")
+        self.assertEqual(len(self.store.list_pending_releases()), 1)
+        fixed = self.service.reconcile_exposure()
+        self.assertEqual(len(fixed), 1)
+        self.assertEqual(self.store.committed_for_symbol("EURUSD"), Decimal("0"))
+        self.assertEqual(self.store.list_pending_releases(), [])
+
+
 class FillIdempotencyTests(unittest.TestCase):
     def test_duplicate_fill_id_does_not_double_apply(self):
         broker = PaperBroker(Decimal("1000"))
