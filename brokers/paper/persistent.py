@@ -174,7 +174,20 @@ class PersistentPaperBroker(PaperBroker):
         if row is None:
             raise RuntimeError("paper ledger state is missing; broker is locked")
         self._verify_chain(db)
-        self._restore(json.loads(row[0]))
+        try:
+            stored_state = json.loads(row[0])
+            latest = db.execute(
+                "SELECT payload FROM paper_events ORDER BY seq DESC LIMIT 1"
+            ).fetchone()
+            if latest is None or json.loads(latest[0]).get("state") != stored_state:
+                raise RuntimeError(
+                    "paper ledger snapshot does not match its audit tail; broker is locked"
+                )
+            self._restore(stored_state)
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            raise RuntimeError("paper ledger snapshot is malformed; broker is locked") from exc
 
     def _mutate(self, event_type: str, operation: Callable[[], object]):
         with self._persistent_lock, self._connect() as db:
