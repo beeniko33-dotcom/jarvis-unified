@@ -24,19 +24,17 @@ class ExecutionService:
         self.broker = broker
         self.risk = risk
         self.reservations = reservations
-        # Serialize account snapshot -> risk decision -> broker submission within one process.
-        # Cross-process exposure is enforced by ExposureReservationStore.reserve limits.
+        # Process-local serialization. Cross-process capacity uses the reservation store.
         self._submission_lock = RLock()
         self._release_failures: list[dict] = []
 
     @property
     def release_failures(self) -> list[dict]:
-        """Operator-visible reservation cleanup failures (paper diagnostics)."""
         with self._submission_lock:
             return list(self._release_failures)
 
     def submit(self, order: OrderRequest) -> OrderResult:
-        """Submit only after risk check and, when configured, atomic capacity reservation."""
+        """Submit after risk check and atomic capacity reservation when configured."""
         reservation_id: str | None = None
         with self._submission_lock:
             account = self.broker.get_account()
@@ -67,10 +65,14 @@ class ExecutionService:
 
             reserved_symbol = Decimal("0")
             reserved_group = Decimal("0")
+            committed_symbol = Decimal("0")
+            committed_group = Decimal("0")
             if self.reservations is not None:
                 reserved_symbol = self.reservations.reserved_for_symbol(symbol)
+                committed_symbol = self.reservations.committed_for_symbol(symbol)
                 if group:
                     reserved_group = self.reservations.reserved_for_group(group)
+                    committed_group = self.reservations.committed_for_group(group)
 
             decision = self.risk.evaluate(
                 order,
@@ -84,9 +86,9 @@ class ExecutionService:
                     else account.commission_paid
                 ),
                 open_positions=account.open_positions,
-                symbol_exposure=symbol_exposure,
+                symbol_exposure=symbol_exposure + committed_symbol,
                 reserved_symbol_notional=reserved_symbol,
-                correlated_exposure=correlated_exposure,
+                correlated_exposure=correlated_exposure + committed_group,
                 reserved_group_notional=reserved_group,
                 current_equity=account.equity,
                 peak_equity=account.peak_equity,
@@ -105,6 +107,7 @@ class ExecutionService:
                         ttl_seconds=120.0,
                         max_symbol_notional=self.risk.limits.max_symbol_exposure,
                         max_group_notional=self.risk.limits.max_correlated_exposure,
+                        # Position exposure only; committed is counted inside reserve().
                         existing_symbol_exposure=symbol_exposure,
                         existing_group_exposure=correlated_exposure,
                     )
@@ -113,22 +116,63 @@ class ExecutionService:
 
             try:
                 result = self.broker.place_order(order)
-            finally:
+            except Exception:
                 if reservation_id is not None and self.reservations is not None:
                     try:
                         self.reservations.release(reservation_id)
                     except Exception as exc:
-                        failure = {
-                            "reservation_id": reservation_id,
-                            "symbol": symbol,
-                            "error": str(exc),
-                        }
-                        self._release_failures.append(failure)
+                        self._release_failures.append(
+                            {
+                                "reservation_id": reservation_id,
+                                "symbol": symbol,
+                                "error": str(exc),
+                                "phase": "rollback",
+                            }
+                        )
                         logger.warning(
                             "reservation release failed id=%s symbol=%s error=%s",
                             reservation_id,
                             symbol,
                             exc,
+                        )
+                raise
+
+            if self.reservations is not None and reservation_id is not None:
+                # Convert temporary reservation into durable committed exposure so
+                # concurrent processes still see this fill after release.
+                try:
+                    self.reservations.commit_exposure(
+                        commit_id=result.order_id,
+                        symbol=symbol,
+                        notional=notional,
+                        corr_group=group,
+                        reservation_id=reservation_id,
+                    )
+                except Exception as exc:
+                    self._release_failures.append(
+                        {
+                            "reservation_id": reservation_id,
+                            "symbol": symbol,
+                            "error": str(exc),
+                            "phase": "commit_exposure",
+                        }
+                    )
+                    logger.warning(
+                        "commit_exposure failed id=%s symbol=%s error=%s",
+                        reservation_id,
+                        symbol,
+                        exc,
+                    )
+                    try:
+                        self.reservations.release(reservation_id)
+                    except Exception as release_exc:
+                        self._release_failures.append(
+                            {
+                                "reservation_id": reservation_id,
+                                "symbol": symbol,
+                                "error": str(release_exc),
+                                "phase": "fallback_release",
+                            }
                         )
             return result
 
