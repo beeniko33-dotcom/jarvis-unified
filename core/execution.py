@@ -16,8 +16,9 @@ logger = logging.getLogger(__name__)
 class ReconciliationRequiredError(RuntimeError):
     """Paper fill succeeded but durable exposure commit did not.
 
-    The temporary reservation is retained and a pending transfer is written to
-    SQLite so a restarted process can call reconcile_exposure().
+    A pending transfer is written to SQLite *before* conversion is attempted, so
+    a restarted process can call reconcile_exposure() even if the first process
+    died mid-conversion. The temporary reservation is retained until conversion.
     """
 
     def __init__(
@@ -59,7 +60,6 @@ class ExecutionService:
 
     @property
     def pending_reconciliation(self) -> list[dict]:
-        """Durable pending transfers from the reservation store (survives restart)."""
         if self.reservations is None:
             return []
         return self.reservations.list_pending_transfers()
@@ -167,6 +167,44 @@ class ExecutionService:
                 raise
 
             if self.reservations is not None and reservation_id is not None:
+                # 1) Persist intent BEFORE conversion so a crash mid-commit is recoverable.
+                try:
+                    self.reservations.record_pending_transfer(
+                        reservation_id=reservation_id,
+                        order_id=result.order_id,
+                        client_order_id=result.client_order_id,
+                        symbol=symbol,
+                        notional=notional,
+                        corr_group=group,
+                        error="pending conversion",
+                    )
+                except Exception as record_exc:
+                    # Reservation still held (no TTL). Surface reconciliation requirement.
+                    self._release_failures.append(
+                        {
+                            "reservation_id": reservation_id,
+                            "order_id": result.order_id,
+                            "symbol": symbol,
+                            "error": str(record_exc),
+                            "phase": "record_pending_failed",
+                        }
+                    )
+                    logger.error(
+                        "failed to persist pending transfer id=%s error=%s",
+                        reservation_id,
+                        record_exc,
+                    )
+                    raise ReconciliationRequiredError(
+                        "paper fill succeeded but pending transfer could not be recorded; "
+                        "reservation retained — manual reconcile may be required",
+                        order_result=result,
+                        reservation_id=reservation_id,
+                        symbol=symbol,
+                        notional=notional,
+                        corr_group=group,
+                    ) from record_exc
+
+                # 2) Convert reservation → committed; clears pending in the same txn.
                 try:
                     self.reservations.commit_exposure(
                         commit_id=result.order_id,
@@ -176,23 +214,6 @@ class ExecutionService:
                         reservation_id=reservation_id,
                     )
                 except Exception as exc:
-                    # Keep reservation and persist pending transfer for restart recovery.
-                    try:
-                        self.reservations.record_pending_transfer(
-                            reservation_id=reservation_id,
-                            order_id=result.order_id,
-                            client_order_id=result.client_order_id,
-                            symbol=symbol,
-                            notional=notional,
-                            corr_group=group,
-                            error=str(exc),
-                        )
-                    except Exception as record_exc:
-                        logger.error(
-                            "failed to persist pending transfer id=%s error=%s",
-                            reservation_id,
-                            record_exc,
-                        )
                     self._release_failures.append(
                         {
                             "reservation_id": reservation_id,
@@ -203,7 +224,7 @@ class ExecutionService:
                         }
                     )
                     logger.error(
-                        "commit_exposure failed; reservation retained for reconciliation "
+                        "commit_exposure failed; pending transfer retained for reconciliation "
                         "id=%s order_id=%s symbol=%s error=%s",
                         reservation_id,
                         result.order_id,
@@ -212,7 +233,7 @@ class ExecutionService:
                     )
                     raise ReconciliationRequiredError(
                         "paper fill succeeded but durable exposure commit failed; "
-                        "reservation retained — run reconcile_exposure()",
+                        "pending transfer retained — run reconcile_exposure()",
                         order_result=result,
                         reservation_id=reservation_id,
                         symbol=symbol,
@@ -224,8 +245,8 @@ class ExecutionService:
     def reconcile_exposure(self) -> list[dict]:
         """Complete pending reservation→committed transfers, including after restart.
 
-        Reads durable pending rows from SQLite. Safe to call repeatedly.
-        commit_exposure is idempotent on order_id.
+        Reads durable pending rows from SQLite. commit_exposure is idempotent on
+        order_id and clears pending + reservation in one transaction.
         """
         if self.reservations is None:
             return []
@@ -250,7 +271,7 @@ class ExecutionService:
                     logger.warning(
                         "reconcile_exposure still failing order_id=%s error=%s",
                         item["order_id"],
-                        exc,
+                        exp if (exp := exc) else exc,
                     )
         return reconciled
 
