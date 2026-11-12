@@ -46,6 +46,7 @@ class PersistentPaperBroker(PaperBroker):
             commission_per_side=commission_per_side,
             slippage_bps=slippage_bps,
         )
+        self._peak_equity = Decimal(starting_balance)
         with closing(self._connect()) as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("PRAGMA synchronous=FULL")
@@ -81,6 +82,7 @@ class PersistentPaperBroker(PaperBroker):
     def _snapshot(self) -> dict:
         return {
             "balance": str(self._balance),
+            "peak_equity": str(self._peak_equity),
             "realized_pnl": str(self._realized_pnl),
             "commission_paid": str(self._commission_paid),
             "positions": [{
@@ -104,6 +106,7 @@ class PersistentPaperBroker(PaperBroker):
 
     def _restore(self, state: dict) -> None:
         self._balance = Decimal(state["balance"])
+        self._peak_equity = Decimal(state.get("peak_equity", state["balance"]))
         self._realized_pnl = Decimal(state["realized_pnl"])
         self._commission_paid = Decimal(state["commission_paid"])
         self._positions = {
@@ -197,6 +200,8 @@ class PersistentPaperBroker(PaperBroker):
                 before_realized = self._realized_pnl
                 before_commission = self._commission_paid
                 result = operation()
+                current_equity = super(PersistentPaperBroker, self).get_account().equity
+                self._peak_equity = max(self._peak_equity, current_equity)
                 state = self._snapshot()
                 self._save_snapshot(db)
                 self._append_event(
@@ -255,6 +260,11 @@ class PersistentPaperBroker(PaperBroker):
                 open_positions=base.open_positions, commission_paid=base.commission_paid,
                 daily_realized_pnl=daily_realized, daily_commission_paid=daily_commission,
                 daily_accounting_available=True,
+                peak_equity=self._peak_equity,
+                drawdown_pct=(
+                    max(Decimal("0"), (self._peak_equity - base.equity) / self._peak_equity * Decimal("100"))
+                    if self._peak_equity > 0 else Decimal("0")
+                ),
             )
 
     def get_positions(self) -> list[Position]:
