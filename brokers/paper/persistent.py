@@ -56,22 +56,32 @@ class PersistentPaperBroker(PaperBroker):
                 seq INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL,
                 event_type TEXT NOT NULL, utc_day TEXT NOT NULL, payload TEXT NOT NULL,
                 previous_hash TEXT NOT NULL, event_hash TEXT NOT NULL UNIQUE)""")
-            row = db.execute("SELECT payload FROM paper_state WHERE singleton=1").fetchone()
-            if row is None:
-                self._save_snapshot(db)
-                initial = self._snapshot()
-                self._append_event(db, "initialized", initial, Decimal("0"), Decimal("0"))
-            else:
-                stored_state = json.loads(row[0])
-                self._restore(stored_state)
-                self._verify_chain(db)
-                latest = db.execute(
-                    "SELECT payload FROM paper_events ORDER BY seq DESC LIMIT 1"
-                ).fetchone()
-                if latest is None or json.loads(latest[0]).get("state") != stored_state:
-                    raise RuntimeError(
-                        "paper ledger snapshot does not match its audit tail; broker is locked"
-                    )
+            # Finding 12.2: genesis snapshot + event in one explicit transaction.
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                row = db.execute("SELECT payload FROM paper_state WHERE singleton=1").fetchone()
+                if row is None:
+                    self._save_snapshot(db)
+                    initial = self._snapshot()
+                    self._append_event(db, "initialized", initial, Decimal("0"), Decimal("0"))
+                    db.commit()
+                else:
+                    # Finding 12.1: snapshot, chain verify, and tail compare under one txn.
+                    stored_state = json.loads(row[0])
+                    self._verify_chain(db)
+                    latest = db.execute(
+                        "SELECT payload FROM paper_events ORDER BY seq DESC LIMIT 1"
+                    ).fetchone()
+                    if latest is None or json.loads(latest[0]).get("state") != stored_state:
+                        db.rollback()
+                        raise RuntimeError(
+                            "paper ledger snapshot does not match its audit tail; broker is locked"
+                        )
+                    self._restore(stored_state)
+                    db.commit()
+            except Exception:
+                db.rollback()
+                raise
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.database_path, timeout=30, isolation_level=None)
@@ -173,6 +183,7 @@ class PersistentPaperBroker(PaperBroker):
         return True
 
     def _refresh_from_db(self, db: sqlite3.Connection) -> None:
+        """Load snapshot + verify chain + compare tail under the caller's open transaction."""
         row = db.execute("SELECT payload FROM paper_state WHERE singleton=1").fetchone()
         if row is None:
             raise RuntimeError("paper ledger state is missing; broker is locked")
@@ -190,7 +201,7 @@ class PersistentPaperBroker(PaperBroker):
         except RuntimeError:
             raise
         except Exception as exc:
-            raise RuntimeError("paper ledger snapshot is malformed; broker is locked") from exc
+            raise RuntimeError("paper ledger snapshot is malformed; broker is locked") from exp if False else exc
 
     def _mutate(self, event_type: str, operation: Callable[[], object]):
         with self._persistent_lock, self._connect() as db:
@@ -241,40 +252,60 @@ class PersistentPaperBroker(PaperBroker):
 
     def get_account(self) -> AccountSnapshot:
         with self._persistent_lock, self._connect() as db:
-            self._refresh_from_db(db)
-            base = super().get_account()
-            now = self._clock()
-            if now.tzinfo is None or now.utcoffset() is None:
-                raise ValueError("persistent broker clock must be timezone-aware")
-            day = now.astimezone(timezone.utc).date().isoformat()
-            daily_realized = Decimal("0")
-            daily_commission = Decimal("0")
-            for (payload,) in db.execute(
-                "SELECT payload FROM paper_events WHERE utc_day=?", (day,)
-            ):
-                event = json.loads(payload)
-                daily_realized += Decimal(event["realized_delta"])
-                daily_commission += Decimal(event["commission_delta"])
-            return AccountSnapshot(
-                balance=base.balance, equity=base.equity, realized_pnl=base.realized_pnl,
-                open_positions=base.open_positions, commission_paid=base.commission_paid,
-                daily_realized_pnl=daily_realized, daily_commission_paid=daily_commission,
-                daily_accounting_available=True,
-                peak_equity=self._peak_equity,
-                drawdown_pct=(
-                    max(Decimal("0"), (self._peak_equity - base.equity) / self._peak_equity * Decimal("100"))
-                    if self._peak_equity > 0 else Decimal("0")
-                ),
-            )
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                self._refresh_from_db(db)
+                base = super().get_account()
+                now = self._clock()
+                if now.tzinfo is None or now.utcoffset() is None:
+                    raise ValueError("persistent broker clock must be timezone-aware")
+                day = now.astimezone(timezone.utc).date().isoformat()
+                daily_realized = Decimal("0")
+                daily_commission = Decimal("0")
+                for (payload,) in db.execute(
+                    "SELECT payload FROM paper_events WHERE utc_day=?", (day,)
+                ):
+                    event = json.loads(payload)
+                    daily_realized += Decimal(event["realized_delta"])
+                    daily_commission += Decimal(event["commission_delta"])
+                db.commit()
+                return AccountSnapshot(
+                    balance=base.balance, equity=base.equity, realized_pnl=base.realized_pnl,
+                    open_positions=base.open_positions, commission_paid=base.commission_paid,
+                    daily_realized_pnl=daily_realized, daily_commission_paid=daily_commission,
+                    daily_accounting_available=True,
+                    peak_equity=self._peak_equity,
+                    drawdown_pct=(
+                        max(Decimal("0"), (self._peak_equity - base.equity) / self._peak_equity * Decimal("100"))
+                        if self._peak_equity > 0 else Decimal("0")
+                    ),
+                )
+            except Exception:
+                db.rollback()
+                raise
 
     def get_positions(self) -> list[Position]:
         with self._persistent_lock, self._connect() as db:
-            self._refresh_from_db(db)
-            return super().get_positions()
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                self._refresh_from_db(db)
+                positions = super().get_positions()
+                db.commit()
+                return positions
+            except Exception:
+                db.rollback()
+                raise
 
     def verify_ledger(self) -> bool:
         with self._persistent_lock, self._connect() as db:
-            return self._verify_chain(db)
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                ok = self._verify_chain(db)
+                db.commit()
+                return ok
+            except Exception:
+                db.rollback()
+                raise
 
     def ledger_event_count(self) -> int:
         with self._connect() as db:
