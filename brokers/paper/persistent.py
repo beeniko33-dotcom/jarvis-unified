@@ -62,11 +62,15 @@ class PersistentPaperBroker(PaperBroker):
                 self._append_event(db, "initialized", initial, Decimal("0"), Decimal("0"))
             else:
                 stored_state = json.loads(row[0])
-        self._restore(stored_state)
-        latest = db.execute("SELECT payload FROM paper_events ORDER BY seq DESC LIMIT 1").fetchone()
-        if latest is None or json.loads(latest[0]).get("state") != stored_state:
-            raise RuntimeError("paper ledger snapshot does not match its audit tail; broker is locked")
+                self._restore(stored_state)
                 self._verify_chain(db)
+                latest = db.execute(
+                    "SELECT payload FROM paper_events ORDER BY seq DESC LIMIT 1"
+                ).fetchone()
+                if latest is None or json.loads(latest[0]).get("state") != stored_state:
+                    raise RuntimeError(
+                        "paper ledger snapshot does not match its audit tail; broker is locked"
+                    )
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.database_path, timeout=30, isolation_level=None)
