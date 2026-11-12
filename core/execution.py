@@ -22,6 +22,13 @@ class ExecutionService:
         with self._submission_lock:
             account = self.broker.get_account()
             unrealized_pnl = account.equity - account.balance
+            positions = self.broker.get_positions()
+            symbol = order.symbol.strip().upper()
+            symbol_exposure = sum(
+                (abs(position.quantity) * position.average_price
+                 for position in positions if position.symbol.upper() == symbol),
+                Decimal("0"),
+            )
             decision = self.risk.evaluate(
                 order,
                 daily_realized_pnl=(
@@ -34,6 +41,7 @@ class ExecutionService:
                     else account.commission_paid
                 ),
                 open_positions=account.open_positions,
+                symbol_exposure=symbol_exposure,
             )
             if not decision.allowed:
                 raise PermissionError(f"order rejected by risk engine: {decision.reason}")
