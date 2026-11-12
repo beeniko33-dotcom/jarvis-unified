@@ -42,6 +42,8 @@ class ExecutionService:
                 ),
                 open_positions=account.open_positions,
                 symbol_exposure=symbol_exposure,
+                current_equity=account.equity,
+                peak_equity=account.peak_equity,
             )
             if not decision.allowed:
                 raise PermissionError(f"order rejected by risk engine: {decision.reason}")
