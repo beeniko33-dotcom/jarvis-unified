@@ -125,6 +125,21 @@ class RiskEngineTests(unittest.TestCase):
         self.assertFalse(decision.allowed)
         self.assertIn("symbol exposure", decision.reason)
 
+    def test_peak_equity_drawdown_limit_fails_closed_and_trips(self):
+        risk = RiskEngine(RiskLimits(
+            Decimal("5"), Decimal("10"), 2, False,
+            max_peak_drawdown_pct=Decimal("5"),
+        ))
+        decision = risk.evaluate(
+            self.order, daily_realized_pnl=Decimal("0"), open_positions=0,
+            current_equity=Decimal("950"), peak_equity=Decimal("1000"),
+        )
+        self.assertFalse(decision.allowed)
+        self.assertIn("drawdown", decision.reason)
+        missing = risk.evaluate(
+            self.order, daily_realized_pnl=Decimal("0"), open_positions=0,
+        )
+        self.assertFalse(missing.allowed)
     def test_concurrent_evaluate_is_thread_safe(self):
         results = []
 
