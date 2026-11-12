@@ -61,7 +61,8 @@ class PaperBroker:
         self._client_ids: dict[str, OrderResult] = {}
         self._client_requests: dict[str, tuple[str, Side, Decimal, Decimal]] = {}
         self._working: dict[str, WorkingOrder] = {}
-        self._fill_results: dict[str, OrderResult] = {}  # fill_id -> last result
+        # fill_id -> (order_id, OrderResult) so cross-order reuse is rejected
+        self._fill_results: dict[str, tuple[str, OrderResult]] = {}
         self._last_prices: dict[str, Decimal] = {}
         self._commission_per_side = Decimal(commission_per_side)
         self._slippage_bps = Decimal(slippage_bps)
@@ -274,7 +275,7 @@ class PaperBroker:
         *,
         fill_id: str | None = None,
     ) -> OrderResult:
-        """Apply a partial or completing fill. fill_id makes delivery idempotent."""
+        """Apply a partial or completing fill. fill_id is scoped to order_id."""
         fill_quantity = Decimal(str(fill_quantity))
         if not fill_quantity.is_finite() or fill_quantity <= 0:
             raise ValueError("fill_quantity must be finite and positive")
@@ -283,7 +284,12 @@ class PaperBroker:
 
         with self._lock:
             if fill_id is not None and fill_id in self._fill_results:
-                return self._fill_results[fill_id]
+                prior_order_id, prior_result = self._fill_results[fill_id]
+                if prior_order_id != order_id:
+                    raise ValueError(
+                        f"fill_id {fill_id!r} was already applied to a different order"
+                    )
+                return prior_result
 
             working = self._working.get(order_id)
             if working is None:
@@ -291,7 +297,6 @@ class PaperBroker:
             if working.status in {OrderStatus.FILLED.value, OrderStatus.CANCELLED.value}:
                 raise ValueError(f"order {order_id} is {working.status}")
             if fill_id is not None and fill_id in working.applied_fill_ids:
-                # Should have been in _fill_results; treat as no-op via last order state.
                 return self._orders[order_id]
             if fill_quantity > working.remaining_quantity:
                 raise ValueError("fill_quantity exceeds remaining quantity")
@@ -333,7 +338,7 @@ class PaperBroker:
             )
             self._orders[order_id] = result
             if fill_id is not None:
-                self._fill_results[fill_id] = result
+                self._fill_results[fill_id] = (order_id, result)
             if working.status == OrderStatus.FILLED.value:
                 self._client_ids[working.client_order_id] = result
                 self._client_requests[working.client_order_id] = (
