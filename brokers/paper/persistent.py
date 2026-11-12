@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from threading import RLock
+from uuid import uuid4
 from typing import Callable
 
 from core.models import AccountSnapshot, OrderRequest, OrderResult, Position, Side
@@ -197,6 +198,24 @@ class PersistentPaperBroker(PaperBroker):
 
     def set_last_price(self, symbol: str, price: Decimal | float | str) -> None:
         self._mutate("mark_price", lambda: super(PersistentPaperBroker, self).set_last_price(symbol, price))
+
+    def close_position(self, symbol: str, price: Decimal | float) -> OrderResult:
+        close_price = Decimal(str(price))
+        normalized = symbol.strip().upper()
+        if not close_price.is_finite() or close_price <= 0:
+            raise ValueError("close price must be finite and positive")
+
+        def close_atomically():
+            position = self._positions.get(normalized)
+            if position is None:
+                raise ValueError(f"no open position for {normalized}")
+            side = Side.SELL if position.quantity > 0 else Side.BUY
+            request = OrderRequest(
+                normalized, side, abs(position.quantity), close_price, f"close-{uuid4()}"
+            )
+            return super(PersistentPaperBroker, self).place_order(request)
+
+        return self._mutate("paper_close", close_atomically)
 
     def get_account(self) -> AccountSnapshot:
         with self._persistent_lock, self._connect() as db:
