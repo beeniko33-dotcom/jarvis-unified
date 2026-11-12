@@ -25,15 +25,22 @@ Invalid orders fail closed. Non-paper modes are rejected at config load.
 
 ## Important limitations
 
-- The paper broker remains in-memory. Open positions, idempotency keys and PnL state do not
-  survive process restart; a JSONL ledger is an audit trail, not a recovery/reconciliation engine.
-- The current broker PnL is cumulative for the running process, not a correctly reset UTC-day
-  PnL series. The configured loss limit is therefore a conservative process-session guard,
-  not a certified daily-loss control. Restarting the process resets that in-memory state.
+- The default `PaperBroker` remains in-memory for fast deterministic tests. The opt-in
+  `PersistentPaperBroker` stores positions, orders, client-order idempotency keys, balance,
+  realized PnL, commissions and marks in SQLite. Its state updates and SHA-256 chained audit
+  events commit in one `BEGIN IMMEDIATE` transaction.
+- `PersistentPaperBroker` reconstructs state after restart, verifies every audit-chain link,
+  and compares the current snapshot with the latest event. Missing, altered or inconsistent
+  state fails closed by raising an integrity error.
+- The persistent broker derives UTC-day realized PnL and commissions from timestamped events.
+  `ExecutionService` uses those day-scoped totals when the broker advertises daily accounting;
+  the in-memory broker retains process-session accounting and is explicitly marked as such.
+- SQLite writer transactions serialize reservations across broker instances/processes. This
+  does not provide distributed coordination across separate database files or hosts.
 - The risk gate uses requested notional and does not yet model margin, leverage, spread or
   slippage-adjusted notional.
-- No correlated exposure, per-symbol caps, stale quote timestamps or peak-equity drawdown
-  control is implemented.
+- Stale-quote rejection, provider quote provenance, per-symbol/correlated exposure limits,
+  peak-equity drawdown controls and crash-injection testing remain outstanding.
 - A service-level lock protects callers sharing one ExecutionService instance; it is not a
   cross-process lock or a substitute for broker-side atomic reservations.
 

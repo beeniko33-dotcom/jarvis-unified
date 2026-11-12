@@ -1,2 +1,4 @@
 from .broker import PaperBroker
-__all__ = ["PaperBroker"]
+from .persistent import PersistentPaperBroker
+
+__all__ = ["PaperBroker", "PersistentPaperBroker"]

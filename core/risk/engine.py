@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal
 from threading import RLock
 
@@ -14,6 +15,10 @@ class RiskLimits:
     max_daily_loss: Decimal = Decimal("10.0")
     max_open_positions: int = 2
     kill_switch: bool = True
+    max_quote_age_seconds: int = 10
+    require_quote_metadata: bool = False
+    max_symbol_exposure: Decimal | None = None
+    max_peak_drawdown_pct: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -30,6 +35,22 @@ class RiskEngine:
             or limits.max_stake_per_trade <= 0
             or limits.max_daily_loss <= 0
             or limits.max_open_positions < 1
+            or limits.max_quote_age_seconds < 0
+            or (
+                limits.max_symbol_exposure is not None
+                and (
+                    not limits.max_symbol_exposure.is_finite()
+                    or limits.max_symbol_exposure <= 0
+                )
+            )
+            or (
+                limits.max_peak_drawdown_pct is not None
+                and (
+                    not limits.max_peak_drawdown_pct.is_finite()
+                    or limits.max_peak_drawdown_pct <= 0
+                    or limits.max_peak_drawdown_pct > 100
+                )
+            )
         ):
             raise ValueError("risk limits must be finite and positive")
         self.limits = limits
@@ -59,6 +80,10 @@ class RiskEngine:
         open_positions: int,
         unrealized_pnl: Decimal = Decimal("0"),
         commission_paid: Decimal = Decimal("0"),
+        symbol_exposure: Decimal = Decimal("0"),
+        current_equity: Decimal | None = None,
+        peak_equity: Decimal | None = None,
+        now: datetime | None = None,
     ) -> RiskDecision:
         with self._lock:
             if self._halted:
@@ -74,16 +99,59 @@ class RiskEngine:
                 or order.price <= 0
             ):
                 return RiskDecision(False, "quantity and price must be finite and positive")
-            pnl_values = (daily_realized_pnl, unrealized_pnl, commission_paid)
+            pnl_values = (daily_realized_pnl, unrealized_pnl, commission_paid, symbol_exposure)
             if any(not value.is_finite() for value in pnl_values):
-                return RiskDecision(False, "P&L and commission inputs must be finite")
-            if commission_paid < 0:
-                return RiskDecision(False, "commission input cannot be negative")
+                return RiskDecision(False, "risk and exposure inputs must be finite")
+            if commission_paid < 0 or symbol_exposure < 0:
+                return RiskDecision(False, "commission and exposure cannot be negative")
             if not isinstance(open_positions, int) or open_positions < 0:
                 return RiskDecision(False, "open position count is invalid")
+
+            metadata = order.metadata or {}
+            quote_time = metadata.get("quote_timestamp")
+            quote_source = metadata.get("quote_source")
+            if self.limits.require_quote_metadata and (not quote_time or not quote_source):
+                return RiskDecision(False, "quote timestamp and source provenance are required")
+            if quote_time:
+                try:
+                    parsed = datetime.fromisoformat(str(quote_time).replace("Z", "+00:00"))
+                    if parsed.tzinfo is None or parsed.utcoffset() is None:
+                        return RiskDecision(False, "quote timestamp must include a timezone")
+                    current = now or datetime.now(timezone.utc)
+                    if current.tzinfo is None or current.utcoffset() is None:
+                        return RiskDecision(False, "risk clock must include a timezone")
+                    age = (current.astimezone(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds()
+                    if age < 0:
+                        return RiskDecision(False, "quote timestamp is in the future")
+                    if age > self.limits.max_quote_age_seconds:
+                        return RiskDecision(False, "quote is stale")
+                except (TypeError, ValueError, OverflowError):
+                    return RiskDecision(False, "quote timestamp is invalid")
+
             notional = order.quantity * order.price
             if notional > self.limits.max_stake_per_trade:
                 return RiskDecision(False, "per-trade notional exceeds hard limit")
+            if (
+                self.limits.max_symbol_exposure is not None
+                and symbol_exposure + notional > self.limits.max_symbol_exposure
+            ):
+                return RiskDecision(False, "per-symbol exposure limit exceeded")
+            if self.limits.max_peak_drawdown_pct is not None:
+                if current_equity is None or peak_equity is None:
+                    return RiskDecision(False, "peak-equity drawdown data is required")
+                if (
+                    not current_equity.is_finite()
+                    or not peak_equity.is_finite()
+                    or peak_equity <= 0
+                    or current_equity < 0
+                ):
+                    return RiskDecision(False, "peak-equity drawdown inputs are invalid")
+                drawdown_pct = max(
+                    Decimal("0"),
+                    (peak_equity - current_equity) / peak_equity * Decimal("100"),
+                )
+                if drawdown_pct >= self.limits.max_peak_drawdown_pct:
+                    return RiskDecision(False, "peak-equity drawdown limit reached")
             net_marked_pnl = daily_realized_pnl + unrealized_pnl - commission_paid
             if net_marked_pnl <= -self.limits.max_daily_loss:
                 return RiskDecision(False, "net realized/unrealized loss limit reached")
