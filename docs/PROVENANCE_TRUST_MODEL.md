@@ -44,7 +44,7 @@ Anything stronger is **out of scope** for the public tick feed and must not be e
 Until review accepts otherwise:
 
 1. **Default and only production path:** store observations as `unverified_candidate`; gate remains `BLOCKED_PROVENANCE`.
-2. **Transport session record** (optional, informational): capture endpoint URL, collector git identity if provided, process start UTC, and that certificate verification was requested. Never alone promotes a row to verified.
+2. **Transport session record** (informational): created only after the collector has an established `ssl.SSLSocket`; it validates the exact approved Deriv public WSS URL, observes `CERT_REQUIRED`, hostname checking, and a peer certificate, and records a session identifier. Each tick carries that session identifier and session metadata. This binds the record structurally to the collector observation but remains caller-writable metadata and never authenticates the provider or promotes a row to verified.
 3. **Promotion to verified** requires a **separate, reviewed module** that:
    - is not a caller-supplied callback,
    - is not driven by JSON/CLI flags,
@@ -59,7 +59,8 @@ Until review accepts otherwise:
 
 ```text
 Pinned WSS endpoint
-    → TLS CERT_REQUIRED + check_hostname
+    → established ssl.SSLSocket (CERT_REQUIRED + check_hostname + peer certificate observed)
+    → session record bound to each observation (informational only)
     → raw recv bytes
     → build_tick_observation (parse, bind symbol/epoch/quote)
     → transport_security_claim = "unverified"
@@ -69,7 +70,7 @@ Pinned WSS endpoint
          → SHA-256 hash chain append (BEGIN IMMEDIATE)
 ```
 
-Local binding (`validate_deriv_observation_binding`) proves **payload consistency**, not provider authenticity.
+Local binding (`validate_deriv_observation_binding`) checks the session identifier/endpoint association and payload consistency. These checks are not cryptographic attestation of the collector process or provider authenticity; an attacker able to rewrite the ledger can rewrite both observation and session metadata.
 
 ## 6. Independent review checklist
 
