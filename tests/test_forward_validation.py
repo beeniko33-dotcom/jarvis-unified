@@ -60,7 +60,8 @@ class ForwardValidationTests(unittest.TestCase):
     def test_unverified_candidates_never_count_toward_streak(self):
         for offset in range(5):
             when = self.now - timedelta(minutes=offset)
-            self.store.ingest(self.item(when))
+            forged = dict(self.item(when), provenance_verified=True, evidence_class="verified_forward_candidate")
+            self.store.ingest(forged)
         report = self.store.report(1)
         self.assertEqual(report["unverified_candidate_count"], 5)
         self.assertEqual(report["verified_observation_count"], 0)
@@ -118,6 +119,14 @@ class ForwardValidationTests(unittest.TestCase):
             self.assertEqual(check.report(1)["unverified_candidate_count"], 2)
         finally:
             check.close()
+
+    def test_legacy_database_with_injected_verified_rows_is_rejected(self):
+        self.store.ingest(self.item())
+        self.store.db.execute("UPDATE observations SET provenance_verified=1")
+        self.store.db.commit()
+        self.store.close()
+        with self.assertRaisesRegex(ValueError, "legacy injectable verifier"):
+            self.make_store()
 
     def test_duplicate_is_idempotent(self):
         self.assertTrue(self.store.ingest(self.item()))
