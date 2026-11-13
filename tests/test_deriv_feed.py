@@ -19,7 +19,6 @@ class DerivFeedTests(unittest.TestCase):
         self.item = build_tick_observation(
             self.raw, deriv_symbol="frxEURUSD",
             received_at=datetime(2026, 11, 11, 12, 0, tzinfo=timezone.utc),
-            tls_verified=True,
         )
 
     def test_resolves_eurusd_from_deriv_active_symbols(self):
@@ -45,6 +44,7 @@ class DerivFeedTests(unittest.TestCase):
         self.assertEqual(self.item["transport_endpoint"], DERIV_PUBLIC_WS)
         self.assertEqual(self.item["provider"], "Deriv")
         self.assertEqual(self.item["instrument"], "EURUSD")
+        self.assertEqual(self.item["transport_security_claim"], "unverified")
 
     def test_caller_supplied_tls_claim_is_not_an_authenticator(self):
         item = dict(self.item, transport_security_claim="tls_verified")
@@ -84,7 +84,7 @@ class DerivFeedTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_tick_observation(
                 raw, deriv_symbol="frxEURUSD",
-                received_at=datetime.now(timezone.utc), tls_verified=True,
+                received_at=datetime.now(timezone.utc),
             )
 
 
