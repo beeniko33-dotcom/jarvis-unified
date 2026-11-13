@@ -193,6 +193,8 @@ def collect(duration_seconds: int, database: Path, timeout: int = 20) -> dict:
                 raw, deriv_symbol=symbol, received_at=received,
                 transport_session=session_record,
             )
+            if not validate_deriv_observation_binding(item):
+                raise RuntimeError("collector observation failed payload/session binding checks")
             added = store.ingest(item)
             inserted += int(added)
             duplicates += int(not added)
