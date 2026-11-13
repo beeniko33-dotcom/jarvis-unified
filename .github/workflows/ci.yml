@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, deriv-eurusd-readonly-feed, level3-provenance-ops-readiness, feat/deriv-tls-claim-fail-closed]
+    branches: [main, deriv-eurusd-readonly-feed, level3-provenance-ops-readiness, feat/deriv-tls-claim-fail-closed, fix/forward-evidence-verifier-injection-closed]
   pull_request:
     branches: [main, deriv-eurusd-readonly-feed, level3-provenance-ops-readiness]
   workflow_dispatch:
