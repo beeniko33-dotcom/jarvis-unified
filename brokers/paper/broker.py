@@ -195,6 +195,24 @@ class PaperBroker:
                     raise ValueError("client_order_id was already used for a different order")
                 return prior
 
+            # A partially-filled working order is still active and is not yet
+            # present in _client_ids. Treat a retry with the same client ID as
+            # an idempotent lookup, never as a second executable order.
+            for working in self._working.values():
+                if working.client_order_id != order.client_order_id:
+                    continue
+                same_request = (
+                    working.symbol,
+                    working.side,
+                    working.quantity,
+                    working.limit_price,
+                ) == (symbol, order.side, order.quantity, order.price)
+                if not same_request:
+                    raise ValueError(
+                        "client_order_id was already used for a different order"
+                    )
+                return self._orders[working.order_id]
+
             raw_price = order.price
             fill_price = self._apply_slippage(order.side, raw_price)
             commission = self._apply_fill_to_position(symbol, order.side, order.quantity, fill_price)
