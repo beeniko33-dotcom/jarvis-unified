@@ -79,6 +79,9 @@ def build_deriv_public_session(
     even a successful record has evidence_credit=False.
     """
     normalized_endpoint = _validate_deriv_endpoint(endpoint)
+    started = started_at or _utc_now()
+    if started.tzinfo is None or started.utcoffset() is None:
+        raise ValueError("started_at must be timezone-aware")
     if not isinstance(tls_socket, ssl.SSLSocket):
         raise ValueError("an established TLS SSLSocket is required")
     context = tls_socket.context
@@ -89,9 +92,6 @@ def build_deriv_public_session(
     certificate_der = tls_socket.getpeercert(binary_form=True)
     if not certificate_der:
         raise ValueError("TLS peer certificate is unavailable")
-    started = started_at or _utc_now()
-    if started.tzinfo is None or started.utcoffset() is None:
-        raise ValueError("started_at must be timezone-aware")
     started_iso = started.astimezone(timezone.utc).isoformat(timespec="microseconds")
     certificate_digest = hashlib.sha256(certificate_der).hexdigest()
     identity = (collector_identity or "").strip() or None
