@@ -153,13 +153,13 @@ def collect(duration_seconds: int, database: Path, timeout: int = 20) -> dict:
 
     # websocket-client validates the certificate chain and hostname. No token,
     # account authorization, proposal, buy, sell, or account endpoint is used.
-    session_started_at = datetime.now(timezone.utc)
     ws = websocket.create_connection(
         DERIV_PUBLIC_WS,
         timeout=timeout,
         sslopt={"cert_reqs": ssl.CERT_REQUIRED, "check_hostname": True},
         enable_multithread=False,
     )
+    session_started_at = datetime.now(timezone.utc)
     store = ForwardEvidenceStore(
         database,
         instrument=INSTRUMENT,
