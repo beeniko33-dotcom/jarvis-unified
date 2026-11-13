@@ -1,8 +1,8 @@
 """Durable candidate store and conservative gate for forward paper observations.
 
-The CLI cannot authenticate arbitrary provider data. Without an explicitly configured,
-provider-specific provenance verifier, observations remain unverified candidates and
-never contribute to the forward-evidence coverage streak.
+The current implementation has no trusted provider verifier. Every observation is stored
+as an unverified candidate. No caller-supplied callback, JSON field, CLI flag, or imported
+record can enable evidence credit.
 """
 from __future__ import annotations
 
@@ -75,7 +75,6 @@ class ForwardEvidenceStore:
         interval: str,
         strategy_id: str,
         strategy_version: str,
-        provenance_verifier: Callable[[dict], bool] | None = None,
         clock: Callable[[], datetime] = utc_now,
         max_observation_age: timedelta = timedelta(minutes=10),
         future_tolerance: timedelta = timedelta(minutes=1),
@@ -89,7 +88,6 @@ class ForwardEvidenceStore:
             "instrument": instrument, "provider": provider, "interval": interval,
             "strategy_id": strategy_id, "strategy_version": strategy_version,
         }
-        self.provenance_verifier = provenance_verifier
         self.clock = clock
         self.max_observation_age = max_observation_age
         self.future_tolerance = future_tolerance
@@ -112,6 +110,15 @@ class ForwardEvidenceStore:
         if "ingested_at" not in columns:
             self.db.close()
             raise ValueError("legacy evidence database lacks trusted ingestion timestamps; start a new database")
+        legacy_verified = self.db.execute(
+            "SELECT COUNT(*) FROM observations WHERE provenance_verified=1"
+        ).fetchone()[0]
+        if legacy_verified:
+            self.db.close()
+            raise ValueError(
+                "database contains records approved by the legacy injectable verifier; "
+                "preserve it for audit and start a new database with this fail-closed version"
+            )
         encoded = json.dumps(self.config, sort_keys=True, separators=(",", ":"))
         existing = self.db.execute("SELECT value FROM metadata WHERE key='configuration'").fetchone()
         if existing and existing[0] != encoded:
@@ -138,12 +145,9 @@ class ForwardEvidenceStore:
             raise ValueError("observation timestamp is in the future")
         if age > self.max_observation_age:
             raise ValueError("stale/backfilled observation rejected; only fresh observations may be ingested")
+        # No trusted provider verifier is implemented yet. Never accept a public
+        # callback here: arbitrary caller code could return True and mint evidence.
         verified = False
-        if self.provenance_verifier is not None:
-            try:
-                verified = self.provenance_verifier(dict(item)) is True
-            except Exception as exc:
-                raise ValueError("provider provenance verification failed") from exc
         item["ingested_at"] = now.isoformat(timespec="microseconds")
         item["provenance_verified"] = verified
         item["evidence_class"] = "verified_forward_candidate" if verified else "unverified_candidate"
@@ -243,7 +247,7 @@ class ForwardEvidenceStore:
             "required_consecutive_utc_days": required_days,
             "stale_observations_rejected": True,
             "ingestion_time_is_collector_generated": True,
-            "provider_signature_or_equivalent_verifier_configured": self.provenance_verifier is not None,
+            "provider_signature_or_equivalent_verifier_configured": False,
             "missing_days_break_streak": True,
             "latest_verified_observation_age_seconds": latest_age.total_seconds() if latest_age is not None else None,
             "latest_verified_observation_fresh": latest_is_fresh,

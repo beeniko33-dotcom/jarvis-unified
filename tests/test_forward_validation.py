@@ -15,12 +15,12 @@ class ForwardValidationTests(unittest.TestCase):
         self.store = self.make_store()
         self.addCleanup(self.store.close)
 
-    def make_store(self, verifier=None):
+    def make_store(self):
         return ForwardEvidenceStore(
             Path(self.tmp.name) / "forward.sqlite3",
             instrument="EURUSD", provider="ExampleFeed", interval="1h",
             strategy_id="sma-crossover-long", strategy_version="1.0.0",
-            provenance_verifier=verifier, clock=self.clock,
+            clock=self.clock,
             max_observation_age=timedelta(minutes=10),
         )
 
@@ -60,7 +60,8 @@ class ForwardValidationTests(unittest.TestCase):
     def test_unverified_candidates_never_count_toward_streak(self):
         for offset in range(5):
             when = self.now - timedelta(minutes=offset)
-            self.store.ingest(self.item(when))
+            forged = dict(self.item(when), provenance_verified=True, evidence_class="verified_forward_candidate")
+            self.store.ingest(forged)
         report = self.store.report(1)
         self.assertEqual(report["unverified_candidate_count"], 5)
         self.assertEqual(report["verified_observation_count"], 0)
@@ -68,37 +69,23 @@ class ForwardValidationTests(unittest.TestCase):
         self.assertEqual(report["level_3_forward_evidence_gate"], "BLOCKED_PROVENANCE")
         self.assertFalse(report["level_3_certification"])
 
-    def test_only_verifier_approved_records_count(self):
-        self.store.close()
-        self.store = self.make_store(verifier=lambda item: item["source"] == "provider-signed-v1")
-        self.store.ingest(self.item(self.now, "provider-signed-v1"))
-        self.store.ingest(self.item(self.now - timedelta(minutes=1)))
-        report = self.store.report(1)
-        self.assertEqual(report["verified_observation_count"], 1)
-        self.assertEqual(report["unverified_candidate_count"], 1)
-        self.assertEqual(report["level_3_forward_evidence_gate"], "PASS")
-        self.assertFalse(report["level_3_certification"])
+    def test_public_constructor_rejects_caller_supplied_verifier(self):
+        with self.assertRaises(TypeError):
+            ForwardEvidenceStore(
+                Path(self.tmp.name) / "injected.sqlite3",
+                instrument="EURUSD", provider="ExampleFeed", interval="1h",
+                strategy_id="sma-crossover-long", strategy_version="1.0.0",
+                provenance_verifier=lambda item: True, clock=self.clock,
+            )
 
-    def test_missing_day_breaks_verified_streak(self):
-        self.store.close()
-        self.store = self.make_store(verifier=lambda item: True)
-        self.now = datetime(2026, 1, 28, 12, tzinfo=timezone.utc)
+    def test_unverified_observations_cannot_pass_stale_or_day_streak_gates(self):
         self.store.ingest(self.item())
-        self.now = datetime(2026, 1, 30, 12, tzinfo=timezone.utc)
-        self.store.ingest(self.item())
-        report = self.store.report(2)
-        self.assertEqual(report["latest_consecutive_verified_utc_day_streak"], 1)
-        self.assertEqual(report["level_3_forward_evidence_gate"], "NOT_MET")
-
-    def test_report_fails_closed_when_latest_verified_observation_goes_stale(self):
-        self.store.close()
-        self.store = self.make_store(verifier=lambda item: True)
-        self.store.ingest(self.item())
-        self.assertEqual(self.store.report(1)["level_3_forward_evidence_gate"], "PASS")
+        self.assertEqual(self.store.report(1)["level_3_forward_evidence_gate"], "BLOCKED_PROVENANCE")
         self.now += timedelta(minutes=11)
         report = self.store.report(1)
+        self.assertEqual(report["verified_observation_count"], 0)
         self.assertFalse(report["latest_verified_observation_fresh"])
-        self.assertEqual(report["level_3_forward_evidence_gate"], "BLOCKED_STALE")
+        self.assertEqual(report["level_3_forward_evidence_gate"], "BLOCKED_PROVENANCE")
         self.assertFalse(report["level_3_certification"])
 
     def test_concurrent_store_instances_preserve_one_hash_chain(self):
@@ -110,7 +97,7 @@ class ForwardValidationTests(unittest.TestCase):
             store = ForwardEvidenceStore(
                 database, instrument="EURUSD", provider="ExampleFeed", interval="1h",
                 strategy_id="sma-crossover-long", strategy_version="1.0.0",
-                provenance_verifier=lambda item: True, clock=self.clock,
+                clock=self.clock,
             )
             try:
                 barrier.wait()
@@ -123,14 +110,23 @@ class ForwardValidationTests(unittest.TestCase):
         check = ForwardEvidenceStore(
             database, instrument="EURUSD", provider="ExampleFeed", interval="1h",
             strategy_id="sma-crossover-long", strategy_version="1.0.0",
-            provenance_verifier=lambda item: True, clock=self.clock,
+            clock=self.clock,
         )
         try:
             self.assertEqual(results, [True, True])
             self.assertTrue(check.verify_chain())
-            self.assertEqual(check.report(1)["verified_observation_count"], 2)
+            self.assertEqual(check.report(1)["verified_observation_count"], 0)
+            self.assertEqual(check.report(1)["unverified_candidate_count"], 2)
         finally:
             check.close()
+
+    def test_legacy_database_with_injected_verified_rows_is_rejected(self):
+        self.store.ingest(self.item())
+        self.store.db.execute("UPDATE observations SET provenance_verified=1")
+        self.store.db.commit()
+        self.store.close()
+        with self.assertRaisesRegex(ValueError, "legacy injectable verifier"):
+            self.make_store()
 
     def test_duplicate_is_idempotent(self):
         self.assertTrue(self.store.ingest(self.item()))
