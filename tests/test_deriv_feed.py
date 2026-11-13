@@ -12,6 +12,13 @@ from research.deriv_feed import (
 
 class DerivFeedTests(unittest.TestCase):
     def setUp(self):
+        self.session = {
+            "session_id": "test-session-id",
+            "endpoint": DERIV_PUBLIC_WS,
+            "provider": "Deriv",
+            "tls_socket_observed": True,
+            "evidence_credit": False,
+        }
         self.raw = json.dumps({
             "msg_type": "tick",
             "tick": {"symbol": "frxEURUSD", "epoch": 1794400000, "quote": 1.08525}
@@ -19,6 +26,7 @@ class DerivFeedTests(unittest.TestCase):
         self.item = build_tick_observation(
             self.raw, deriv_symbol="frxEURUSD",
             received_at=datetime(2026, 11, 11, 12, 0, tzinfo=timezone.utc),
+            transport_session=self.session,
         )
 
     def test_resolves_eurusd_from_deriv_active_symbols(self):
@@ -67,6 +75,15 @@ class DerivFeedTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_rejects_session_id_mismatch(self):
+        item = dict(self.item, transport_session_id="different-session")
+        self.assertFalse(validate_deriv_observation_binding(item))
+
+    def test_rejects_forged_session_credit(self):
+        session = dict(self.session, evidence_credit=True)
+        item = dict(self.item, transport_session=session)
+        self.assertFalse(validate_deriv_observation_binding(item))
+
     def test_rejects_raw_payload_tampering(self):
         item = dict(self.item, raw_message=self.raw.replace("1.08525", "1.99999"))
         self.assertFalse(validate_deriv_observation_binding(item))
@@ -85,6 +102,7 @@ class DerivFeedTests(unittest.TestCase):
             build_tick_observation(
                 raw, deriv_symbol="frxEURUSD",
                 received_at=datetime.now(timezone.utc),
+                transport_session=self.session,
             )
 
 
