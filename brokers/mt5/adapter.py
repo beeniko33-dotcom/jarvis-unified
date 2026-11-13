@@ -22,5 +22,7 @@ class MT5Broker:
     def get_account(self) -> AccountSnapshot:  # pragma: no cover
         raise RuntimeError("MT5 adapter is disabled")
 
-    def close_position(self, symbol: str, price: Decimal) -> OrderResult:  # pragma: no cover
+    def close_position(
+        self, symbol: str, price: Decimal, *, client_order_id: str | None = None
+    ) -> OrderResult:  # pragma: no cover
         raise RuntimeError("MT5 adapter is disabled")

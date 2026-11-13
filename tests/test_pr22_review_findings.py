@@ -53,7 +53,6 @@ class PR22ReviewFindings(unittest.TestCase):
         return broker, store, service
 
     # -- Finding 1 (HIGH) -------------------------------------------------------------
-    @unittest.expectedFailure
     def test_crash_after_fill_before_pending_record_does_not_leak_reservation(self):
         """A death between the broker fill and record_pending_transfer must be recoverable."""
         _, store, service = self.build()
@@ -74,7 +73,6 @@ class PR22ReviewFindings(unittest.TestCase):
         self.assertEqual(store2.committed_for_symbol("Y"), D("10"))
 
     # -- Finding 2 (HIGH) -------------------------------------------------------------
-    @unittest.expectedFailure
     def test_crash_after_broker_close_before_release_is_recoverable(self):
         """A death between broker close and release must not strand committed exposure."""
         _, store, service = self.build()
@@ -93,7 +91,6 @@ class PR22ReviewFindings(unittest.TestCase):
         self.assertEqual(store2.committed_for_symbol("Z"), D("0"))
 
     # -- Finding 3 (MED-HIGH) ---------------------------------------------------------
-    @unittest.expectedFailure
     def test_retry_of_pending_order_does_not_leak_second_reservation(self):
         """Resubmitting the same client_order_id before reconcile must not reserve twice."""
         _, store, service = self.build()
@@ -116,7 +113,6 @@ class PR22ReviewFindings(unittest.TestCase):
         self.assertEqual(store2.committed_for_symbol("Q"), D("10"))
 
     # -- Finding 5 (HIGH) -------------------------------------------------------------
-    @unittest.expectedFailure
     def test_opposite_side_order_does_not_commit_new_exposure(self):
         """Flattening a long with a SELL must not leave phantom committed exposure."""
         broker, store, service = self.build()
@@ -126,7 +122,6 @@ class PR22ReviewFindings(unittest.TestCase):
         self.assertEqual(store.committed_for_symbol("X"), D("0"))
 
     # -- Finding 6 (MED, over-restrictive) --------------------------------------------
-    @unittest.expectedFailure
     def test_exposure_exactly_at_limit_is_allowed(self):
         """Two notional-5 buys against a limit of 10 total exactly 10 and must be allowed."""
         _, _, service = self.build(max_symbol_exposure=D("10"))

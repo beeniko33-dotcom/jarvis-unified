@@ -28,5 +28,7 @@ class DerivBroker:
     def get_account(self) -> AccountSnapshot:  # pragma: no cover
         raise RuntimeError("Deriv adapter is disabled")
 
-    def close_position(self, symbol: str, price: Decimal) -> OrderResult:  # pragma: no cover
+    def close_position(
+        self, symbol: str, price: Decimal, *, client_order_id: str | None = None
+    ) -> OrderResult:  # pragma: no cover
         raise RuntimeError("Deriv adapter is disabled")

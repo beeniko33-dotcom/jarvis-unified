@@ -420,6 +420,21 @@ class PaperBroker:
                 for w in self._working.values()
             ]
 
+    def get_order_by_client_id(self, client_order_id: str) -> OrderResult | None:
+        """Return the order already known under this client ID, or None.
+
+        Read-only. Lets a recovering caller ask "did this submission actually reach the
+        broker?" without risking a second execution.
+        """
+        with self._lock:
+            prior = self._client_ids.get(client_order_id)
+            if prior is not None:
+                return prior
+            for working in self._working.values():
+                if working.client_order_id == client_order_id:
+                    return self._orders[working.order_id]
+            return None
+
     def get_positions(self) -> list[Position]:
         with self._lock:
             return [
@@ -445,7 +460,11 @@ class PaperBroker:
                 commission_paid=self._commission_paid,
             )
 
-    def close_position(self, symbol: str, price: float | Decimal) -> OrderResult:
+    def close_position(
+        self, symbol: str, price: float | Decimal, *, client_order_id: str | None = None
+    ) -> OrderResult:
+        """Close the whole position. A caller may choose ``client_order_id`` up front so a
+        recovering process can later look the closing order up by that ID."""
         price = Decimal(str(price))
         if not price.is_finite() or price <= 0:
             raise ValueError("close price must be finite and positive")
@@ -457,7 +476,15 @@ class PaperBroker:
             side = Side.SELL if pos.quantity > 0 else Side.BUY
             qty = abs(pos.quantity)
         return self.place_order(
-            OrderRequest(symbol, side, qty, price, f"close-{uuid4()}")
+            OrderRequest(
+                symbol,
+                side,
+                qty,
+                price,
+                # An explicit empty string must reach place_order's validation, not be
+                # silently replaced by a generated ID.
+                client_order_id if client_order_id is not None else f"close-{uuid4()}",
+            )
         )
 
     @property

@@ -165,17 +165,23 @@ class PersistentPaperBroker(PaperBroker):
                 Decimal(p["average_price"]), _dt(p["opened_at"]))
             for p in state["positions"]
         }
+        self._client_requests = {
+            cid: (v[0], Side(v[1]), Decimal(v[2]), Decimal(v[3]))
+            for cid, v in state["requests"].items()
+        }
         self._orders = {}
         self._client_ids = {}
         for o in state["orders"]:
             result = self._order_from_dict(o)
             self._orders[result.order_id] = result
-            if result.status in {OrderStatus.FILLED.value, OrderStatus.CANCELLED.value}:
+            # Mirror PaperBroker: a client ID is finalized only when it also has a request
+            # fingerprint. A cancelled order with no fills never gets one, so it must not
+            # enter _client_ids or a reuse of that ID hits a KeyError after restart.
+            if (
+                result.status in {OrderStatus.FILLED.value, OrderStatus.CANCELLED.value}
+                and result.client_order_id in self._client_requests
+            ):
                 self._client_ids[result.client_order_id] = result
-        self._client_requests = {
-            cid: (v[0], Side(v[1]), Decimal(v[2]), Decimal(v[3]))
-            for cid, v in state["requests"].items()
-        }
         self._working = {}
         for w in state.get("working", []):
             wo = WorkingOrder(
@@ -324,7 +330,9 @@ class PersistentPaperBroker(PaperBroker):
     def set_last_price(self, symbol: str, price: Decimal | float | str) -> None:
         self._mutate("mark_price", lambda: super(PersistentPaperBroker, self).set_last_price(symbol, price))
 
-    def close_position(self, symbol: str, price: Decimal | float) -> OrderResult:
+    def close_position(
+        self, symbol: str, price: Decimal | float, *, client_order_id: str | None = None
+    ) -> OrderResult:
         close_price = Decimal(str(price))
         normalized = symbol.strip().upper()
         if not close_price.is_finite() or close_price <= 0:
@@ -336,7 +344,11 @@ class PersistentPaperBroker(PaperBroker):
                 raise ValueError(f"no open position for {normalized}")
             side = Side.SELL if position.quantity > 0 else Side.BUY
             request = OrderRequest(
-                normalized, side, abs(position.quantity), close_price, f"close-{uuid4()}"
+                normalized,
+                side,
+                abs(position.quantity),
+                close_price,
+                client_order_id if client_order_id is not None else f"close-{uuid4()}",
             )
             return super(PersistentPaperBroker, self).place_order(request)
 
@@ -384,6 +396,19 @@ class PersistentPaperBroker(PaperBroker):
                 positions = super().get_positions()
                 db.commit()
                 return positions
+            except Exception:
+                db.rollback()
+                raise
+
+    def get_order_by_client_id(self, client_order_id: str) -> OrderResult | None:
+        # Refresh from the database first: another process may have filled this order.
+        with self._persistent_lock, closing(self._connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                self._refresh_from_db(db)
+                found = super().get_order_by_client_id(client_order_id)
+                db.commit()
+                return found
             except Exception:
                 db.rollback()
                 raise

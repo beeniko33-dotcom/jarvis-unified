@@ -101,6 +101,24 @@ class ExposureReservationStore:
                     created_at REAL NOT NULL
                 )"""
             )
+            # Write-ahead journal: written BEFORE the broker is called, so a crash at
+            # any later point leaves a durable record that recovery can resolve by
+            # asking the broker whether the client order actually filled.
+            #   kind='open'   -> pairs with a reservation (reservation_id set)
+            #   kind='reduce' -> a risk-reducing order submitted via submit()
+            #   kind='close'  -> close_position(); client_order_id is a synthetic id
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS exposure_intents (
+                    client_order_id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    corr_group TEXT,
+                    position_id TEXT,
+                    notional TEXT,
+                    reservation_id TEXT,
+                    created_at REAL NOT NULL
+                )"""
+            )
             db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_res_symbol ON exposure_reservations(symbol)"
             )
@@ -192,9 +210,25 @@ class ExposureReservationStore:
         max_group_notional: Decimal | None = None,
         existing_symbol_exposure: Decimal = Decimal("0"),
         existing_group_exposure: Decimal = Decimal("0"),
+        client_order_id: str | None = None,
+        max_open_symbols: int | None = None,
+        existing_open_symbols: frozenset[str] | set[str] = frozenset(),
     ) -> None:
+        """Reserve capacity atomically.
+
+        When ``client_order_id`` is given, an 'open' write-ahead intent is recorded in
+        the same transaction, so a crash before the broker fill is recoverable and a
+        second in-flight submission of the same client order is refused.
+
+        ``max_open_symbols`` caps the number of distinct open symbols. It is evaluated
+        inside the reservation transaction against the union of the caller's view
+        (``existing_open_symbols``), every committed symbol and every reserved symbol, so
+        concurrent services sharing this store cannot jointly exceed it.
+        """
         if not reservation_id.strip():
             raise ReservationError("reservation_id is required")
+        if client_order_id is not None and not client_order_id.strip():
+            raise ReservationError("client_order_id must be non-empty when provided")
         symbol = symbol.strip().upper()
         if not symbol:
             raise ReservationError("symbol is required")
@@ -227,6 +261,23 @@ class ExposureReservationStore:
                 ).fetchone()
                 if existing:
                     raise ReservationError(f"reservation already exists: {reservation_id}")
+                if client_order_id is not None and db.execute(
+                    "SELECT 1 FROM exposure_intents WHERE client_order_id=?",
+                    (client_order_id,),
+                ).fetchone():
+                    raise ReservationError(
+                        f"client_order_id already has an in-flight intent: {client_order_id}"
+                    )
+
+                if max_open_symbols is not None:
+                    open_symbols = {s.strip().upper() for s in existing_open_symbols}
+                    for (held,) in db.execute(
+                        "SELECT symbol FROM exposure_committed "
+                        "UNION SELECT symbol FROM exposure_reservations"
+                    ).fetchall():
+                        open_symbols.add(held)
+                    if symbol not in open_symbols and len(open_symbols) >= max_open_symbols:
+                        raise ReservationError("maximum open positions reached")
 
                 reserved_symbol = self._sum_reserved(db, symbol=symbol)
                 committed_symbol = self._sum_committed(db, symbol=symbol)
@@ -265,6 +316,22 @@ class ExposureReservationStore:
                         expires,
                     ),
                 )
+                if client_order_id is not None:
+                    db.execute(
+                        "INSERT INTO exposure_intents"
+                        "(client_order_id,kind,symbol,corr_group,position_id,notional,"
+                        "reservation_id,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                        (
+                            client_order_id,
+                            "open",
+                            symbol,
+                            corr_group,
+                            symbol,
+                            str(notional),
+                            reservation_id,
+                            now,
+                        ),
+                    )
                 db.commit()
             except Exception:
                 db.rollback()
@@ -303,6 +370,10 @@ class ExposureReservationStore:
                             "DELETE FROM exposure_pending WHERE reservation_id=?",
                             (reservation_id,),
                         )
+                        db.execute(
+                            "DELETE FROM exposure_intents WHERE reservation_id=?",
+                            (reservation_id,),
+                        )
                     db.commit()
                     return
                 db.execute(
@@ -318,6 +389,10 @@ class ExposureReservationStore:
                     )
                     db.execute(
                         "DELETE FROM exposure_pending WHERE reservation_id=?",
+                        (reservation_id,),
+                    )
+                    db.execute(
+                        "DELETE FROM exposure_intents WHERE reservation_id=?",
                         (reservation_id,),
                     )
                 db.commit()
@@ -399,8 +474,12 @@ class ExposureReservationStore:
         *,
         position_id: str | None = None,
         notional: Decimal | None = None,
+        clear_intent: str | None = None,
     ) -> Decimal:
         """Idempotently release committed exposure for the position that closed.
+
+        ``clear_intent`` removes the named write-ahead intent in the same
+        transaction as the release, so the two can never disagree.
 
         Releases the commits belonging to ``position_id`` when it is known, so a
         close cannot consume another position's commitment. When ``position_id``
@@ -428,6 +507,11 @@ class ExposureReservationStore:
                     (release_id,),
                 ).fetchone()
                 if prior:
+                    if clear_intent:
+                        db.execute(
+                            "DELETE FROM exposure_intents WHERE client_order_id=?",
+                            (clear_intent,),
+                        )
                     db.commit()
                     return Decimal(prior[0])
 
@@ -483,6 +567,11 @@ class ExposureReservationStore:
                 db.execute(
                     "DELETE FROM exposure_pending_releases WHERE release_id=?", (release_id,)
                 )
+                if clear_intent:
+                    db.execute(
+                        "DELETE FROM exposure_intents WHERE client_order_id=?",
+                        (clear_intent,),
+                    )
                 db.commit()
                 return released
             except Exception:
@@ -505,8 +594,13 @@ class ExposureReservationStore:
         error: str,
         *,
         position_id: str | None = None,
+        clear_intent: str | None = None,
     ) -> None:
-        """Persist a post-close exposure reduction that needs retrying."""
+        """Persist a post-close exposure reduction that needs retrying.
+
+        ``clear_intent`` hands the intent's responsibility to this pending row in one
+        transaction, so exactly one durable record owns the release at any moment.
+        """
         if not release_id.strip() or not symbol.strip():
             raise ReservationError("release_id and symbol are required")
         if not notional.is_finite() or notional <= 0:
@@ -528,10 +622,138 @@ class ExposureReservationStore:
                         time.time(),
                     ),
                 )
+                if clear_intent:
+                    db.execute(
+                        "DELETE FROM exposure_intents WHERE client_order_id=?",
+                        (clear_intent,),
+                    )
                 db.commit()
             except Exception:
                 db.rollback()
                 raise
+
+    # ------------------------------------------------------------------ intents
+    @staticmethod
+    def _intent_dict(row: tuple) -> dict:
+        return {
+            "client_order_id": row[0],
+            "kind": row[1],
+            "symbol": row[2],
+            "corr_group": row[3],
+            "position_id": row[4],
+            "notional": row[5],
+            "reservation_id": row[6],
+            "created_at": row[7],
+        }
+
+    _INTENT_COLUMNS = (
+        "client_order_id,kind,symbol,corr_group,position_id,notional,reservation_id,created_at"
+    )
+
+    def record_intent(
+        self,
+        client_order_id: str,
+        kind: str,
+        symbol: str,
+        *,
+        position_id: str | None = None,
+        notional: Decimal | None = None,
+        corr_group: str | None = None,
+    ) -> None:
+        """Write a 'reduce' or 'close' intent BEFORE the broker call.
+
+        'open' intents are created by :meth:`reserve` so they share its transaction.
+        ``notional`` is an optional upper bound for partial reductions; None means the
+        whole committed exposure of the position.
+        """
+        if kind not in {"reduce", "close"}:
+            raise ReservationError("kind must be 'reduce' or 'close'")
+        if not client_order_id.strip():
+            raise ReservationError("client_order_id is required")
+        symbol = symbol.strip().upper()
+        if not symbol:
+            raise ReservationError("symbol is required")
+        if notional is not None and (not notional.is_finite() or notional <= 0):
+            raise ReservationError("intent notional must be finite and positive")
+        with self._lock, closing(self._connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                if db.execute(
+                    "SELECT 1 FROM exposure_intents WHERE client_order_id=?",
+                    (client_order_id,),
+                ).fetchone():
+                    raise ReservationError(
+                        f"client_order_id already has an in-flight intent: {client_order_id}"
+                    )
+                db.execute(
+                    "INSERT INTO exposure_intents"
+                    "(client_order_id,kind,symbol,corr_group,position_id,notional,"
+                    "reservation_id,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                    (
+                        client_order_id,
+                        kind,
+                        symbol,
+                        corr_group,
+                        position_id,
+                        None if notional is None else str(notional),
+                        None,
+                        time.time(),
+                    ),
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+
+    def get_intent(self, client_order_id: str) -> dict | None:
+        with self._lock, closing(self._connect()) as db:
+            row = db.execute(
+                f"SELECT {self._INTENT_COLUMNS} FROM exposure_intents WHERE client_order_id=?",
+                (client_order_id,),
+            ).fetchone()
+        return None if row is None else self._intent_dict(row)
+
+    def list_intents(self) -> list[dict]:
+        with self._lock, closing(self._connect()) as db:
+            rows = db.execute(
+                f"SELECT {self._INTENT_COLUMNS} FROM exposure_intents ORDER BY created_at"
+            ).fetchall()
+        return [self._intent_dict(row) for row in rows]
+
+    def discard_intent(self, client_order_id: str) -> None:
+        """Idempotently drop an intent whose broker call is known not to have happened."""
+        with self._lock, closing(self._connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                db.execute(
+                    "DELETE FROM exposure_intents WHERE client_order_id=?",
+                    (client_order_id,),
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+
+    def has_order_accounting(self, order_id: str) -> bool:
+        """True when this broker order already has a commit, pending transfer or release."""
+        with self._lock, closing(self._connect()) as db:
+            for sql in (
+                "SELECT 1 FROM exposure_committed WHERE commit_id=?",
+                "SELECT 1 FROM exposure_pending WHERE order_id=?",
+                "SELECT 1 FROM exposure_releases WHERE release_id=?",
+            ):
+                if db.execute(sql, (order_id,)).fetchone():
+                    return True
+        return False
+
+    def committed_for_position(self, symbol: str, position_id: str) -> Decimal:
+        symbol = symbol.strip().upper()
+        with self._lock, closing(self._connect()) as db:
+            rows = db.execute(
+                "SELECT notional FROM exposure_committed WHERE symbol=? AND position_id=?",
+                (symbol, position_id),
+            ).fetchall()
+        return sum((Decimal(raw) for (raw,) in rows), Decimal("0"))
 
     def list_pending_releases(self) -> list[dict]:
         with self._lock, closing(self._connect()) as db:
@@ -569,6 +791,10 @@ class ExposureReservationStore:
                 )
                 db.execute(
                     "DELETE FROM exposure_pending WHERE reservation_id=?",
+                    (reservation_id,),
+                )
+                db.execute(
+                    "DELETE FROM exposure_intents WHERE reservation_id=?",
                     (reservation_id,),
                 )
                 db.commit()
