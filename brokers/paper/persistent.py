@@ -170,7 +170,7 @@ class PersistentPaperBroker(PaperBroker):
         for o in state["orders"]:
             result = self._order_from_dict(o)
             self._orders[result.order_id] = result
-            if result.status != OrderStatus.OPEN.value:
+            if result.status in {OrderStatus.FILLED.value, OrderStatus.CANCELLED.value}:
                 self._client_ids[result.client_order_id] = result
         self._client_requests = {
             cid: (v[0], Side(v[1]), Decimal(v[2]), Decimal(v[3]))
