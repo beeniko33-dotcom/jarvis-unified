@@ -46,6 +46,7 @@ class StatusApiTests(unittest.TestCase):
     def test_unknown_route_is_not_found(self):
         with self.assertRaises(HTTPError) as error:
             urlopen(self.base + "/execute", timeout=2)
+        error.exception.close()
         self.assertEqual(error.exception.code, 404)
 
     def test_self_check_endpoint(self):
