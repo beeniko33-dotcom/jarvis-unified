@@ -12,24 +12,29 @@ Honest tracking only. No marketing claims.
 
 ## Current status
 
-**Level 2 — Operational tooling — last confirmed on main.**
+**Level 2 — Operational tooling — confirmed on `main`.**
 
-This branch adds Level 3 measurement infrastructure. It does not yet qualify as Level 3: sustained multi-day evidence has not been collected or independently reviewed.
+Confirmed after CI-backed paper runtime, risk gate, kill switch, disabled live adapters, and merged persistent paper ledger / UTC risk work (PRs #12, #7).
 
-## Delivered foundation
+**Level 3 is not certified.** Synthetic stress (including 1,000-cycle harnesses), historical replay, and CI fixtures do **not** count as Level 3 evidence.
+
+**Level 4 is not started** as a certification target.
+
+## Delivered on main (Level 2+)
 
 - Paper-only config; kill switch engaged by default and not env-overridable
 - Central risk gate + ExecutionService
 - Paper broker with fills, realized PnL, mark-to-market equity, fees/slippage and JSONL audit ledger
-- Ledger now records post-fill balance, equity, realized PnL and open-position count
+- Restart-safe persistent paper ledger (SQLite WAL, hash-chained events, UTC-day accounting)
+- Peak-equity drawdown and per-symbol exposure controls
 - Localhost read-only status API and dashboard
 - Portfolio tracker and SignalIntent contract
 - Deriv/MT5 adapters disabled at construction
 - SSRF-safe scraper fetch foundation
 - Deterministic paper session runner and paper-ledger analytics report
-- Historical OHLCV replay engine with versioned SMA strategy, source SHA-256 provenance, durable SQLite state and hash-chained event records (on the research branch)
+- Unit/CI foundation diagnostic (`scripts/diagnose.py`)
 
-## Level 3 evidence gates
+## Level 3 evidence gates (all required)
 
 - [ ] At least 30 consecutive calendar days of timestamped paper ledgers
 - [ ] Signal-level attribution: strategy/version, data source, signal, entry/exit and rationale
@@ -37,15 +42,23 @@ This branch adds Level 3 measurement infrastructure. It does not yet qualify as 
 - [ ] Published win rate, expectancy, profit factor, maximum drawdown, slippage and rejected-entry rate
 - [ ] Out-of-sample review, including losing periods and data gaps
 - [ ] Zero unexplained positions and no live broker execution during validation
+- [ ] Provider-authenticated forward market-data path (or explicitly accepted trust model) — see issue #9
+- [ ] Persistent collector host with monitoring — see issue #11
 
 Run `python scripts/paper_report.py var/paper_ledger.jsonl --min-days 30` to enforce the minimum date-span and flat-position checks. A single deterministic sample is a smoke test, not Level 3 validation.
 
-## Remaining upgrades
+## Level 4 gates (after Level 3)
 
-- Durable broker-state recovery and ledger integrity/hash chaining
-- Signal and strategy attribution plus real market-data provenance
-- Daily loss accounting including unrealized PnL, daily reset/timezone policy, peak-equity drawdown, stale-price and correlated-exposure limits
-- Scraper history-preserving import and feature-by-feature regression against the original repository
-- Authenticated deployment, monitoring, incident response and independent security review (Level 4)
+- [ ] Hardened deployment (non-ephemeral host, secrets hygiene, supervised processes)
+- [ ] Operational monitoring, alerting, backup/restore drills
+- [ ] Incident response notes and kill-switch drills
+- [ ] Independent release review / security review
+- [ ] Explicit written approval before any live adapter enablement
+
+## Remaining engineering (not Level 3 by itself)
+
+- Merge Track 2 durability (PR #22) after independent review: partial fills, correlated reservations, stress harness
+- Forward-evidence gate + read-only collector (PRs #6 / #10) as **candidate** data until #9
+- Scraper history-preserving import (issue #1)
 
 Live trading remains locked. No performance or profit is guaranteed.
