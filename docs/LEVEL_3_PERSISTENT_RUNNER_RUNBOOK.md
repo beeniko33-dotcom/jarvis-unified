@@ -1,0 +1,104 @@
+# Level 3 persistent paper-only collector — operations runbook
+
+**Status: preparation only. No host has been provisioned and no deployment has been performed.** This runbook is for a future persistent runner after provenance implementation and independent review.
+
+## 1. Safety and scope
+
+- Run only the Deriv public EURUSD market-data WebSocket collector.
+- No account token, App ID, OTP, demo/real account endpoint, wallet, proposal, buy, sell or broker execution.
+- Keep all broker adapters disabled and the paper kill switch engaged.
+- Market-data observations are not fills or strategy performance. Maintain a separate paper execution ledger for fills, spread/cost assumptions, fees, slippage, positions and PnL.
+- Do not start the 30-day Level 3 clock until the provenance gate has been independently approved and the first authenticated observation is accepted.
+
+## 2. Host requirements
+
+- A continuously available Linux host or equivalent supervised runtime.
+- Persistent encrypted disk/volume for SQLite database, WAL files and append-only backup snapshots. Never use an ephemeral CI runner as the evidence host.
+- Dedicated unprivileged OS account; repository checkout and runtime dependencies pinned to a reviewed commit and lockfile.
+- UTC clock synchronization using a monitored time service. Alert on drift beyond the programme's approved tolerance.
+- Outbound network access restricted to DNS and the approved Deriv public WSS hostname/port. No inbound public listener is required for collection.
+- Disk capacity sized for raw payload retention, WAL growth and backups; alert before low-space conditions.
+- No secrets are required for the public market-data endpoint. Do not add broker credentials to this host.
+
+## 3. Process supervision
+
+Use a supervisor (for example systemd) with automatic restart on unexpected exit, bounded restart backoff and a clear stop/disable procedure. The service must run as the dedicated unprivileged user, use an explicit working directory, fixed reviewed command, persistent database path and restrictive file permissions.
+
+Example service policy (adapt and review before installation):
+
+```ini
+[Unit]
+Description=Jarvis Deriv public EURUSD paper-only market data collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jarvis-collector
+Group=jarvis-collector
+WorkingDirectory=/opt/jarvis-unified
+ExecStart=/opt/jarvis-venv/bin/python -m research.deriv_feed --duration-seconds 86400 --db /var/lib/jarvis/deriv_eurusd_forward.sqlite3
+Restart=on-failure
+RestartSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/jarvis
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+```
+
+The current collector is duration-bounded and may exit normally after its configured duration. A production service wrapper or reviewed loop must restart scheduled collection deliberately, record each run/session boundary and avoid overlapping writers. Do not assume the example unit alone provides a continuous 30-day process.
+
+## 4. Health, freshness and alerting
+
+Emit structured health records with host ID, commit SHA, process start, collector version, endpoint, session ID, connection state, last provider event time, last receive time, UTC clock offset, database path/size, WAL size, last successful backup and current provenance gate.
+
+Alert on:
+- process exit or repeated reconnects;
+- no tick within the approved freshness window;
+- missed UTC observation day;
+- TLS/certificate/hostname verification failure or unexpected peer change;
+- clock drift or future/stale provider timestamps;
+- broken audit hash chain or database integrity failure;
+- disk-space threshold, WAL growth or failed backup;
+- backup age beyond the approved interval;
+- unexpected binary/commit/configuration change;
+- any broker adapter or account endpoint becoming reachable/enabled.
+
+A heartbeat proves process liveness only. It is not a market observation and does not count toward coverage.
+
+## 5. Durable storage and backups
+
+- Keep SQLite WAL mode and FULL synchronous durability as configured by the reviewed store.
+- Use SQLite's supported online backup mechanism or a quiesced, consistent snapshot; do not copy only the main database while WAL writes are active.
+- Encrypt backups at rest, restrict access, retain immutable/append-only copies and record backup hashes, timestamps and source commit.
+- Perform a restore drill into a separate directory/database. Verify SQLite integrity, event-chain integrity, record counts, latest observation, configuration and provenance decisions.
+- A successful backup without a successful restore drill does not satisfy operational acceptance.
+- Never rewrite or backfill missing observation days. A missing day breaks the consecutive-day streak.
+
+## 6. Daily operator checklist
+
+1. Confirm the process is supervised and running the approved commit.
+2. Confirm TLS/session health and approved endpoint.
+3. Confirm fresh provider ticks and correct EURUSD symbol mapping.
+4. Confirm host clock synchronization and no stale/future timestamps.
+5. Confirm database integrity and event hash chain.
+6. Confirm verified vs unverified candidate counts and the provenance gate.
+7. Confirm backup completion and disk headroom.
+8. Record any outage, reconnect, missed day, configuration change or incident.
+9. Keep broker adapters disabled and verify zero trading actions.
+
+## 7. Acceptance before starting the 30-day clock
+
+- Provenance implementation merged only after explicit authorization and independently reviewed; this runbook itself does not authorize a merge.
+- Persistent host and storage are available and documented.
+- Supervision, clock sync, monitoring and alert routing are tested.
+- Backup and restore drill passes.
+- First real public Deriv tick is received through the reviewed authenticated session and accepted by the trusted verifier.
+- Independent reviewer signs the operational evidence package with host configuration, commit, session proof, raw observation digest and restore evidence.
+
+Until all conditions pass, the forward-validation day count remains zero. CI fixtures, replay, synthetic tests, process heartbeats and unverified candidates are not credited.

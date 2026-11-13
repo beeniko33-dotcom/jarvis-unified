@@ -42,3 +42,18 @@ with ledger events; distinct dates separated by gaps do not count as a run.
 ## Research replay engine
 
 See `docs/LEVEL_3_RESEARCH_ENGINE.md` for the historical-data replay workflow, CSV contract, strategy version, SQLite durability and event-chain checks. This supplements, but does not replace, the 30-day forward paper-validation requirements.
+
+
+## Forward evidence collector (new)
+
+The forward evidence collector stores externally sourced, timestamped paper observations
+in a durable SQLite database and calculates the uninterrupted UTC-day streak ending on the
+latest observation date. It rejects timezone-naive timestamps and configuration mismatches,
+deduplicates identical instrument/interval/timestamp observations, and verifies a SHA-256
+append-only chain.
+
+See `docs/LEVEL_3_FORWARD_VALIDATION.md`.
+
+The collector does not fetch market data or place orders. The operator must supply licensed,
+authorized provider observations and retain original provider payloads. A 30-day coverage-gate
+pass is not Level 3 certification. CI fixtures and historical replay do not count.
