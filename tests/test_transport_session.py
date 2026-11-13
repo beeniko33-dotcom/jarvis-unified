@@ -1,8 +1,6 @@
 """Adversarial invariants for the Issue #9 transport/session boundary."""
 from __future__ import annotations
 
-import json
-import ssl
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -13,6 +11,7 @@ from research.forward_validation import ForwardEvidenceStore
 from research.transport_session import (
     DERIV_PUBLIC_WS,
     _validate_deriv_endpoint,
+    TransportSessionRecord,
     assert_no_evidence_credit,
     build_deriv_public_session,
 )
@@ -57,21 +56,20 @@ class TransportSessionTests(unittest.TestCase):
     def test_session_json_copy_cannot_mutate_immutable_record(self):
         # This test asserts the record serializer's invariant. An altered JSON
         # copy is untrusted input and is not treated as a canonical record.
-        record = object.__new__(__import__(
-            "research.transport_session", fromlist=["TransportSessionRecord"]
-        ).TransportSessionRecord)
-        object.__setattr__(record, "session_id", "session-test")
-        object.__setattr__(record, "endpoint", DERIV_PUBLIC_WS)
-        object.__setattr__(record, "provider", "Deriv")
-        object.__setattr__(record, "started_at", "2026-11-13T12:00:00+00:00")
-        object.__setattr__(record, "tls_socket_observed", True)
-        object.__setattr__(record, "peer_certificate_present", True)
-        object.__setattr__(record, "peer_certificate_sha256", "abc")
-        object.__setattr__(record, "certificate_verification_mode", "CERT_REQUIRED")
-        object.__setattr__(record, "hostname_check_enabled", True)
-        object.__setattr__(record, "collector_identity", None)
-        object.__setattr__(record, "notes", "informational")
-        object.__setattr__(record, "evidence_credit", True)
+        record = TransportSessionRecord(
+            session_id="session-test",
+            endpoint=DERIV_PUBLIC_WS,
+            provider="Deriv",
+            started_at="2026-11-13T12:00:00+00:00",
+            tls_socket_observed=True,
+            peer_certificate_present=True,
+            peer_certificate_sha256="abc",
+            certificate_verification_mode="CERT_REQUIRED",
+            hostname_check_enabled=True,
+            collector_identity=None,
+            notes="informational",
+            evidence_credit=True,
+        )
         with self.assertRaises(AssertionError):
             assert_no_evidence_credit(record)
 
