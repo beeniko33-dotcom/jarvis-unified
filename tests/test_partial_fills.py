@@ -1,7 +1,9 @@
 from decimal import Decimal
+from pathlib import Path
+import tempfile
 import unittest
 
-from brokers.paper import PaperBroker
+from brokers.paper import PaperBroker, PersistentPaperBroker
 from core.models import OrderRequest, OrderStatus, Side
 
 
@@ -47,6 +49,42 @@ class PartialFillTests(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             self.broker.apply_partial_fill(opened.order_id, Decimal("4"))
+
+    def test_standard_retry_does_not_duplicate_partially_filled_working_order(self):
+        request = OrderRequest("EURUSD", Side.BUY, Decimal("5"), Decimal("1"), "same-id")
+        opened = self.broker.place_working_order(request)
+        partial = self.broker.apply_partial_fill(opened.order_id, Decimal("2"))
+
+        retried = self.broker.place_order(request)
+
+        self.assertEqual(retried.order_id, opened.order_id)
+        self.assertEqual(retried.status, OrderStatus.PARTIAL.value)
+        self.assertEqual(retried.filled_quantity, Decimal("2"))
+        self.assertEqual(self.broker.get_positions()[0].quantity, Decimal("2"))
+        self.assertEqual(len(self.broker.get_working_orders()), 1)
+
+        conflicting = OrderRequest(
+            "EURUSD", Side.BUY, Decimal("6"), Decimal("1"), "same-id"
+        )
+        with self.assertRaises(ValueError):
+            self.broker.place_order(conflicting)
+
+    def test_standard_retry_after_restart_does_not_duplicate_partial_fill(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "paper.sqlite3"
+            request = OrderRequest("EURUSD", Side.BUY, Decimal("5"), Decimal("1"), "restart-id")
+            first = PersistentPaperBroker(Decimal("1000"), database_path=database)
+            opened = first.place_working_order(request)
+            partial = first.apply_partial_fill(opened.order_id, Decimal("2"))
+
+            recovered = PersistentPaperBroker(Decimal("1000"), database_path=database)
+            retried = recovered.place_order(request)
+
+            self.assertEqual(retried.order_id, opened.order_id)
+            self.assertEqual(retried.status, OrderStatus.PARTIAL.value)
+            self.assertEqual(retried.filled_quantity, Decimal("2"))
+            self.assertEqual(recovered.get_positions()[0].quantity, Decimal("2"))
+            self.assertEqual(len(recovered.get_working_orders()), 1)
 
 
 if __name__ == "__main__":
