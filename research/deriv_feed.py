@@ -53,7 +53,6 @@ def build_tick_observation(
     *,
     deriv_symbol: str,
     received_at: datetime,
-    tls_verified: bool,
 ) -> dict:
     try:
         payload = json.loads(raw_message)
@@ -84,7 +83,7 @@ def build_tick_observation(
         "provider_event_id": f"{symbol}:{epoch}:{quote}",
         "collector_received_at": received_at.astimezone(timezone.utc).isoformat(),
         "transport_endpoint": DERIV_PUBLIC_WS,
-        "transport_security_claim": "tls_verified" if tls_verified else "unverified",
+        "transport_security_claim": "unverified",
         "raw_message": raw_message,
         "raw_message_sha256": raw_digest,
     }
@@ -160,7 +159,7 @@ def collect(duration_seconds: int, database: Path, timeout: int = 20) -> dict:
                 continue
             received = datetime.now(timezone.utc)
             item = build_tick_observation(
-                raw, deriv_symbol=symbol, received_at=received, tls_verified=True
+                raw, deriv_symbol=symbol, received_at=received
             )
             added = store.ingest(item)
             inserted += int(added)
