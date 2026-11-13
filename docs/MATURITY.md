@@ -14,25 +14,26 @@ Honest tracking only. No marketing claims.
 
 **Level 2 — Operational tooling — confirmed on `main`.**
 
-Confirmed after CI-backed paper runtime, risk gate, kill switch, disabled live adapters, and merged persistent paper ledger / UTC risk work (PRs #12, #7).
+As of 2026-11-13, `main` also includes Track 2 paper durability, forward-evidence storage, read-only Deriv collector code, fail-closed provenance hardening, and paper-prototype release documentation (merged PRs #22, #6, #10, #25–#28 and related).
 
-**Level 3 is not certified.** Synthetic stress (including 1,000-cycle harnesses), historical replay, and CI fixtures do **not** count as Level 3 evidence.
+**Level 3 is not certified.** Merged code does **not** equal verified forward days. Synthetic stress, historical replay, and CI fixtures do **not** count as Level 3 evidence. Unverified observations remain candidates only (BLOCKED_PROVENANCE until issue #9).
 
 **Level 4 is not started** as a certification target.
 
-## Delivered on main (Level 2+)
+## Delivered on main (Level 2 + engineering readiness)
 
 - Paper-only config; kill switch engaged by default and not env-overridable
 - Central risk gate + ExecutionService
 - Paper broker with fills, realized PnL, mark-to-market equity, fees/slippage and JSONL audit ledger
 - Restart-safe persistent paper ledger (SQLite WAL, hash-chained events, UTC-day accounting)
-- Peak-equity drawdown and per-symbol exposure controls
+- Partial fills, crash recovery, correlated exposure reservations (Track 2)
+- Peak-equity drawdown and per-symbol / correlated exposure controls
+- Forward-evidence store (candidates only; fail-closed against injectable verifiers)
+- Read-only Deriv EURUSD collector **code** (no host deployment claimed)
+- Fail-closed TLS claim handling (no caller-supplied verified transport)
 - Localhost read-only status API and dashboard
-- Portfolio tracker and SignalIntent contract
-- Deriv/MT5 adapters disabled at construction
-- SSRF-safe scraper fetch foundation
-- Deterministic paper session runner and paper-ledger analytics report
-- Unit/CI foundation diagnostic (`scripts/diagnose.py`)
+- Paper session runner, analytics report, foundation diagnostic
+- Paper-only prototype release documentation (PR #28)
 
 ## Level 3 evidence gates (all required)
 
@@ -42,10 +43,10 @@ Confirmed after CI-backed paper runtime, risk gate, kill switch, disabled live a
 - [ ] Published win rate, expectancy, profit factor, maximum drawdown, slippage and rejected-entry rate
 - [ ] Out-of-sample review, including losing periods and data gaps
 - [ ] Zero unexplained positions and no live broker execution during validation
-- [ ] Provider-authenticated forward market-data path (or explicitly accepted trust model) — see issue #9
-- [ ] Persistent collector host with monitoring — see issue #11
+- [ ] Provider-authenticated forward market-data path (or explicitly accepted trust model) — **issue #9**
+- [ ] Persistent collector host with monitoring — **issue #11**
 
-Run `python scripts/paper_report.py var/paper_ledger.jsonl --min-days 30` to enforce the minimum date-span and flat-position checks. A single deterministic sample is a smoke test, not Level 3 validation.
+Run `python scripts/paper_report.py var/paper_ledger.jsonl --min-days 30` for date-span checks. A smoke session is not Level 3 validation.
 
 ## Level 4 gates (after Level 3)
 
@@ -55,10 +56,11 @@ Run `python scripts/paper_report.py var/paper_ledger.jsonl --min-days 30` to enf
 - [ ] Independent release review / security review
 - [ ] Explicit written approval before any live adapter enablement
 
-## Remaining engineering (not Level 3 by itself)
+## Remaining (honest)
 
-- Merge Track 2 durability (PR #22) after independent review: partial fills, correlated reservations, stress harness
-- Forward-evidence gate + read-only collector (PRs #6 / #10) as **candidate** data until #9
-- Scraper history-preserving import (issue #1)
+- **#9** — real provider-specific verifier (or accepted trust model) before evidence credit
+- **#11** — provision persistent host; runbooks alone are not deployment
+- **#3** — 30 genuine forward-validation days + review
+- **#1** — history-preserving source import (separate track)
 
 Live trading remains locked. No performance or profit is guaranteed.
