@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Sequence
 
 
 def load_rows(path: Path) -> list[dict]:
@@ -19,6 +20,8 @@ def load_rows(path: Path) -> list[dict]:
                 row = json.loads(line)
             except json.JSONDecodeError as exc:
                 raise ValueError(f"invalid JSON on line {line_no}: {exc}") from exc
+            if not isinstance(row, dict):
+                raise ValueError(f"line {line_no} must contain a JSON object")
             required = {"ts", "status", "realized_pnl", "commission_paid", "equity", "balance", "open_positions"}
             missing = required.difference(row)
             if missing:
@@ -27,21 +30,55 @@ def load_rows(path: Path) -> list[dict]:
                     "use a ledger written by the Level 3-enabled paper broker"
                 )
             try:
-                datetime.fromisoformat(row["ts"])
-                Decimal(str(row["realized_pnl"]))
-                Decimal(str(row["equity"]))
-                Decimal(str(row["balance"]))
-                Decimal(str(row["commission_paid"]))
-            except (TypeError, ValueError, InvalidOperation) as exc:
+                _utc_timestamp(row["ts"])
+                for field in ("realized_pnl", "equity", "balance", "commission_paid"):
+                    value = Decimal(str(row[field]))
+                    if not value.is_finite():
+                        raise ValueError(f"{field} must be finite")
+                positions = row["open_positions"]
+                if isinstance(positions, bool) or int(positions) != positions or int(positions) < 0:
+                    raise ValueError("open_positions must be a non-negative integer")
+                slippage_fields = {"raw_price", "fill_price", "side", "quantity"}
+                present_slippage_fields = slippage_fields.intersection(row)
+                if present_slippage_fields and present_slippage_fields != slippage_fields:
+                    raise ValueError("slippage audit fields must be provided together")
+                if present_slippage_fields:
+                    raw_price = Decimal(str(row["raw_price"]))
+                    fill_price = Decimal(str(row["fill_price"]))
+                    quantity = Decimal(str(row["quantity"]))
+                    if (
+                        not raw_price.is_finite()
+                        or not fill_price.is_finite()
+                        or not quantity.is_finite()
+                        or raw_price <= 0
+                        or fill_price <= 0
+                        or quantity <= 0
+                        or row["side"] not in {"buy", "sell"}
+                    ):
+                        raise ValueError("invalid slippage audit values")
+            except (TypeError, ValueError, InvalidOperation, OverflowError) as exc:
                 raise ValueError(f"invalid audit values on line {line_no}") from exc
             rows.append(row)
     return rows
 
 
+def _utc_timestamp(value: object) -> datetime:
+    if not isinstance(value, str):
+        raise ValueError("timestamp must be a string")
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("timestamp must include a timezone offset")
+    return parsed.astimezone(timezone.utc)
+
+
 def summarize(rows: list[dict]) -> dict:
     if not rows:
         raise ValueError("ledger contains no filled-order records")
-    rows.sort(key=lambda row: row["ts"])
+
+    timestamps = [_utc_timestamp(row["ts"]) for row in rows]
+    if any(current < previous for previous, current in zip(timestamps, timestamps[1:])):
+        raise ValueError("ledger timestamps are out of order")
+
     realized_deltas: list[Decimal] = []
     previous_realized = Decimal("0")
     for row in rows:
@@ -71,11 +108,47 @@ def summarize(rows: list[dict]) -> dict:
     profit_factor = (
         str(gross_profit / gross_loss) if gross_loss else None
     )
-    session_days = sorted({datetime.fromisoformat(row["ts"]).date().isoformat() for row in rows})
+    session_days = sorted({timestamp.date() for timestamp in timestamps})
+    longest_streak = 0
+    current_streak = 0
+    previous_day = None
+    for day in session_days:
+        current_streak = (
+            current_streak + 1
+            if previous_day is not None and (day - previous_day).days == 1
+            else 1
+        )
+        longest_streak = max(longest_streak, current_streak)
+        previous_day = day
+
+    slippage_rows = [row for row in rows if "raw_price" in row]
+    slippage_cost = Decimal("0")
+    slippage_notional = Decimal("0")
+    for row in slippage_rows:
+        raw_price = Decimal(str(row["raw_price"]))
+        fill_price = Decimal(str(row["fill_price"]))
+        quantity = Decimal(str(row["quantity"]))
+        adverse_difference = fill_price - raw_price
+        if row["side"] == "sell":
+            adverse_difference = -adverse_difference
+        slippage_cost += adverse_difference * quantity
+        slippage_notional += raw_price * quantity
+    slippage_bps = (
+        str(slippage_cost / slippage_notional * Decimal("10000"))
+        if slippage_notional else None
+    )
+    attributed_fill_count = sum(
+        all(row.get(field) for field in ("strategy_id", "strategy_version", "quote_source"))
+        for row in rows
+    )
+
     return {
         "ledger_rows": len(rows),
-        "session_days": session_days,
+        "session_days": [day.isoformat() for day in session_days],
         "distinct_session_days": len(session_days),
+        "consecutive_session_days": longest_streak,
+        "calendar_span_days": (session_days[-1] - session_days[0]).days + 1,
+        "days_without_ledger_events": (session_days[-1] - session_days[0]).days + 1 - len(session_days),
         "realized_trade_events": len(realized_deltas),
         "wins": len(wins),
         "losses": len(losses),
@@ -88,6 +161,15 @@ def summarize(rows: list[dict]) -> dict:
         "gross_loss": str(gross_loss),
         "profit_factor": profit_factor,
         "max_equity_drawdown": str(max_drawdown),
+        "slippage_observations": len(slippage_rows),
+        "net_slippage_cost": str(slippage_cost) if slippage_rows else None,
+        "notional_weighted_slippage_bps": slippage_bps,
+        "attributed_fill_count": attributed_fill_count,
+        "attribution_coverage": str(Decimal(attributed_fill_count) / len(rows)),
+        "rejected_entry_rate": None,
+        "rejected_entry_rate_note": (
+            "Unavailable: this fill-only ledger does not record risk-rejected entries."
+        ),
         "ending_balance": str(rows[-1]["balance"]),
         "ending_equity": str(rows[-1]["equity"]),
         "open_positions_at_end": int(rows[-1]["open_positions"]),
@@ -97,12 +179,16 @@ def summarize(rows: list[dict]) -> dict:
     }
 
 
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("ledger", type=Path, nargs="?", default=Path("var/paper_ledger.jsonl"))
-    parser.add_argument("--min-days", type=int, default=1,
-                        help="fail unless the ledger spans at least this many UTC calendar days")
-    args = parser.parse_args()
+    parser.add_argument(
+        "--min-days",
+        type=int,
+        default=1,
+        help="fail unless the ledger has this many consecutive UTC calendar days with events",
+    )
+    args = parser.parse_args(argv)
     if args.min_days < 1:
         parser.error("--min-days must be at least 1")
     if not args.ledger.is_file():
@@ -112,10 +198,10 @@ def main() -> int:
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
     print(json.dumps(result, indent=2))
-    if result["distinct_session_days"] < args.min_days:
+    if result["consecutive_session_days"] < args.min_days:
         print(
-            f"NOT VALIDATED: need {args.min_days} distinct UTC days; "
-            f"found {result['distinct_session_days']}.",
+            f"NOT VALIDATED: need {args.min_days} consecutive UTC days with ledger events; "
+            f"longest run is {result['consecutive_session_days']} days.",
         )
         return 2
     if result["open_positions_at_end"] != 0:

@@ -216,12 +216,12 @@ def main() -> int:
     section("Summary")
     if all(results):
         print("  Foundation checks passed locally.")
-        print("  Level 2 still requires a green GitHub Actions run on main.")
+        print("  Level 2 CI gate: verify a green GitHub Actions run for the current main SHA; this local diagnostic cannot query GitHub.")
         print("  History import still requires: bash scripts/import_sources.sh")
         print("  Paper session (Level 3 prep): python scripts/paper_session.py --allow-entries")
         print("  Paper metrics: python scripts/paper_report.py var/paper_ledger.jsonl --min-days 30")
         return 0
-    print("  One or more checks failed. Fix before claiming Level 2.")
+    print("  One or more local foundation checks failed. Fix these before claiming foundation validation; Level 2 also requires green CI on the current main SHA.")
     return 1
 
 

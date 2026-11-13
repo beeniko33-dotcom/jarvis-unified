@@ -1,4 +1,4 @@
-from .broker import PaperBroker
-from .persistent import PersistentPaperBroker
+from .broker import PaperBroker, WorkingOrder
+from .persistent import CrashInjectedError, PersistentPaperBroker
 
-__all__ = ["PaperBroker", "PersistentPaperBroker"]
+__all__ = ["PaperBroker", "PersistentPaperBroker", "WorkingOrder", "CrashInjectedError"]

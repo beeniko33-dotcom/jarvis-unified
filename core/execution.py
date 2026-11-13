@@ -1,34 +1,131 @@
 """The only supported path from strategy orders to a broker adapter."""
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 from threading import RLock
+from uuid import uuid4
 
 from brokers.base import Broker
 from core.models import OrderRequest, OrderResult
-from core.risk import RiskEngine
+from core.risk import ExposureReservationStore, ReservationError, RiskEngine
+
+logger = logging.getLogger(__name__)
+
+
+class ReconciliationRequiredError(RuntimeError):
+    """Paper fill succeeded but durable exposure commit did not.
+
+    A pending transfer is written to SQLite *before* conversion is attempted, so
+    a restarted process can call reconcile_exposure() even if the first process
+    died mid-conversion. The temporary reservation is retained until conversion.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        order_result: OrderResult,
+        reservation_id: str,
+        symbol: str,
+        notional: Decimal,
+        corr_group: str | None,
+    ) -> None:
+        super().__init__(message)
+        self.order_result = order_result
+        self.reservation_id = reservation_id
+        self.symbol = symbol
+        self.notional = notional
+        self.corr_group = corr_group
+
+
+class PositionClosedReleaseFailedError(RuntimeError):
+    """The paper position closed successfully, but its exposure release did not.
+
+    Callers must treat this as *close succeeded, accounting pending* — not as a
+    failed close. The position is flat at the broker; the release is persisted
+    in ``exposure_pending_releases`` and retried by ``reconcile_exposure()``.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        order_result: OrderResult,
+        symbol: str,
+        position_id: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.order_result = order_result
+        self.symbol = symbol
+        self.position_id = position_id
 
 
 class ExecutionService:
-    def __init__(self, broker: Broker, risk: RiskEngine) -> None:
+    def __init__(
+        self,
+        broker: Broker,
+        risk: RiskEngine,
+        *,
+        reservations: ExposureReservationStore | None = None,
+    ) -> None:
         self.broker = broker
         self.risk = risk
-        # Serialize account snapshot -> risk decision -> broker submission. Without
-        # this lock concurrent callers can all pass using the same stale position count.
+        self.reservations = reservations
         self._submission_lock = RLock()
+        self._release_failures: list[dict] = []
+
+    @property
+    def release_failures(self) -> list[dict]:
+        with self._submission_lock:
+            return list(self._release_failures)
+
+    @property
+    def pending_reconciliation(self) -> list[dict]:
+        if self.reservations is None:
+            return []
+        return self.reservations.list_pending_transfers()
 
     def submit(self, order: OrderRequest) -> OrderResult:
-        """Submit only after a serialized, net-marked-PnL risk check."""
+        reservation_id: str | None = None
         with self._submission_lock:
             account = self.broker.get_account()
             unrealized_pnl = account.equity - account.balance
             positions = self.broker.get_positions()
             symbol = order.symbol.strip().upper()
+            notional = order.quantity * order.price
             symbol_exposure = sum(
-                (abs(position.quantity) * position.average_price
-                 for position in positions if position.symbol.upper() == symbol),
+                (
+                    abs(position.quantity) * position.average_price
+                    for position in positions
+                    if position.symbol.upper() == symbol
+                ),
                 Decimal("0"),
             )
+            group = self.risk.group_for_symbol(symbol)
+            correlated_exposure = Decimal("0")
+            if group and self.risk.limits.correlation_groups:
+                members = {m.upper() for m in self.risk.limits.correlation_groups[group]}
+                correlated_exposure = sum(
+                    (
+                        abs(position.quantity) * position.average_price
+                        for position in positions
+                        if position.symbol.upper() in members
+                    ),
+                    Decimal("0"),
+                )
+
+            reserved_symbol = Decimal("0")
+            reserved_group = Decimal("0")
+            committed_symbol = Decimal("0")
+            committed_group = Decimal("0")
+            if self.reservations is not None:
+                reserved_symbol = self.reservations.reserved_for_symbol(symbol)
+                committed_symbol = self.reservations.committed_for_symbol(symbol)
+                if group:
+                    reserved_group = self.reservations.reserved_for_group(group)
+                    committed_group = self.reservations.committed_for_group(group)
+
             decision = self.risk.evaluate(
                 order,
                 daily_realized_pnl=(
@@ -41,20 +138,244 @@ class ExecutionService:
                     else account.commission_paid
                 ),
                 open_positions=account.open_positions,
-                symbol_exposure=symbol_exposure,
+                symbol_exposure=symbol_exposure + committed_symbol,
+                reserved_symbol_notional=reserved_symbol,
+                correlated_exposure=correlated_exposure + committed_group,
+                reserved_group_notional=reserved_group,
                 current_equity=account.equity,
                 peak_equity=account.peak_equity,
             )
             if not decision.allowed:
                 raise PermissionError(f"order rejected by risk engine: {decision.reason}")
-            return self.broker.place_order(order)
+
+            if self.reservations is not None:
+                reservation_id = f"exec-{uuid4()}"
+                try:
+                    self.reservations.reserve(
+                        reservation_id,
+                        symbol,
+                        notional,
+                        corr_group=group,
+                        ttl_seconds=None,
+                        max_symbol_notional=self.risk.limits.max_symbol_exposure,
+                        max_group_notional=self.risk.limits.max_correlated_exposure,
+                        existing_symbol_exposure=symbol_exposure,
+                        existing_group_exposure=correlated_exposure,
+                    )
+                except ReservationError as exc:
+                    raise PermissionError(f"order rejected by risk engine: {exc}") from exc
+
+            try:
+                result = self.broker.place_order(order)
+            except Exception:
+                if reservation_id is not None and self.reservations is not None:
+                    try:
+                        self.reservations.release(reservation_id)
+                    except Exception as exc:
+                        self._release_failures.append(
+                            {
+                                "reservation_id": reservation_id,
+                                "symbol": symbol,
+                                "error": str(exc),
+                                "phase": "rollback",
+                            }
+                        )
+                        logger.warning(
+                            "reservation release failed id=%s symbol=%s error=%s",
+                            reservation_id,
+                            symbol,
+                            exc,
+                        )
+                raise
+
+            if self.reservations is not None and reservation_id is not None:
+                # 1) Persist intent BEFORE conversion so a crash mid-commit is recoverable.
+                try:
+                    self.reservations.record_pending_transfer(
+                        reservation_id=reservation_id,
+                        order_id=result.order_id,
+                        client_order_id=result.client_order_id,
+                        symbol=symbol,
+                        notional=notional,
+                        corr_group=group,
+                        error="pending conversion",
+                    )
+                except Exception as record_exc:
+                    self._release_failures.append(
+                        {
+                            "reservation_id": reservation_id,
+                            "order_id": result.order_id,
+                            "symbol": symbol,
+                            "error": str(record_exc),
+                            "phase": "record_pending_failed",
+                        }
+                    )
+                    logger.error(
+                        "failed to persist pending transfer id=%s error=%s",
+                        reservation_id,
+                        record_exc,
+                    )
+                    raise ReconciliationRequiredError(
+                        "paper fill succeeded but pending transfer could not be recorded; "
+                        "reservation retained — manual reconcile may be required",
+                        order_result=result,
+                        reservation_id=reservation_id,
+                        symbol=symbol,
+                        notional=notional,
+                        corr_group=group,
+                    ) from record_exc
+
+                # 2) Convert reservation → committed; clears pending in the same txn.
+                #    The commit is tagged with the position it belongs to so the
+                #    close path can release exactly this position's exposure.
+                try:
+                    self.reservations.commit_exposure(
+                        commit_id=result.order_id,
+                        symbol=symbol,
+                        notional=notional,
+                        corr_group=group,
+                        reservation_id=reservation_id,
+                        position_id=symbol,
+                    )
+                except Exception as exc:
+                    self._release_failures.append(
+                        {
+                            "reservation_id": reservation_id,
+                            "order_id": result.order_id,
+                            "symbol": symbol,
+                            "error": str(exc),
+                            "phase": "commit_exposure_kept_reservation",
+                        }
+                    )
+                    logger.error(
+                        "commit_exposure failed; pending transfer retained for reconciliation "
+                        "id=%s order_id=%s symbol=%s error=%s",
+                        reservation_id,
+                        result.order_id,
+                        symbol,
+                        exc,
+                    )
+                    raise ReconciliationRequiredError(
+                        "paper fill succeeded but durable exposure commit failed; "
+                        "pending transfer retained — run reconcile_exposure()",
+                        order_result=result,
+                        reservation_id=reservation_id,
+                        symbol=symbol,
+                        notional=notional,
+                        corr_group=group,
+                    ) from exc
+            return result
+
+    def reconcile_exposure(self) -> list[dict]:
+        """Complete pending reservation→committed transfers, including after restart."""
+        if self.reservations is None:
+            return []
+        reconciled: list[dict] = []
+        with self._submission_lock:
+            for item in self.reservations.list_pending_transfers():
+                try:
+                    self.reservations.commit_exposure(
+                        commit_id=item["order_id"],
+                        symbol=item["symbol"],
+                        notional=Decimal(item["notional"]),
+                        corr_group=item.get("corr_group"),
+                        reservation_id=item["reservation_id"],
+                        # Keep the position link submit() uses for its commits.
+                        # Omitting it writes a legacy symbol-wide row that can
+                        # never be released by position, so a crash-recovered
+                        # entry would permanently consume capacity.
+                        position_id=item.get("position_id") or item["symbol"],
+                    )
+                    reconciled.append(dict(item))
+                    logger.info(
+                        "reconciled exposure order_id=%s reservation_id=%s",
+                        item["order_id"],
+                        item["reservation_id"],
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "reconcile_exposure still failing order_id=%s error=%s",
+                        item["order_id"],
+                        exc,
+                    )
+        for item in self.reservations.list_pending_releases():
+            try:
+                # Retry with the notional that was recorded. Passing none means
+                # "release every commit for this position", which would
+                # over-release a queued partial close.
+                self.reservations.reduce_committed_for_position(
+                    release_id=item["release_id"],
+                    symbol=item["symbol"],
+                    position_id=item.get("position_id"),
+                    notional=Decimal(item["notional"]),
+                )
+                reconciled.append(dict(item))
+            except Exception as exc:
+                logger.warning(
+                    "reconcile_exposure still failing release_id=%s error=%s",
+                    item["release_id"], exc,
+                )
+        return reconciled
 
     def close_position(self, symbol: str, price: Decimal) -> OrderResult:
-        """Close an existing paper position; risk stops new entries, not risk-reducing exits."""
+        """Close a paper position and release the exposure it committed.
+
+        Raises ``PositionClosedReleaseFailedError`` when the broker close
+        succeeded but the durable release did not. That is deliberately a
+        distinct type from a failed close: the position *is* flat, and the
+        release is queued for ``reconcile_exposure()``.
+        """
         with self._submission_lock:
             if not price.is_finite() or price <= 0:
                 raise ValueError("close price must be a finite positive value")
-            positions = {position.symbol: position for position in self.broker.get_positions()}
-            if symbol not in positions:
-                raise ValueError(f"no open position for {symbol}")
-            return self.broker.close_position(symbol, price)
+            normalized = symbol.strip().upper()
+            positions = {position.symbol.upper(): position for position in self.broker.get_positions()}
+            position = positions.get(normalized)
+            if position is None:
+                raise ValueError(f"no open position for {normalized}")
+            result = self.broker.close_position(normalized, price)
+            if self.reservations is not None:
+                # Release what was actually committed for this position. The
+                # committed notional is authoritative: recomputing it from
+                # quantity x average_price drifts under slippage and can
+                # over- or under-release.
+                try:
+                    self.reservations.reduce_committed_for_position(
+                        release_id=result.order_id,
+                        symbol=normalized,
+                        position_id=normalized,
+                    )
+                except Exception as exc:
+                    # Record what is actually committed for this position, not a
+                    # recomputed quantity x average_price. A slippage-adjusted
+                    # average can sit either side of the committed notional, so a
+                    # recomputed bound would under- or over-release on retry.
+                    try:
+                        outstanding = self.reservations.committed_for_symbol(normalized)
+                    except Exception:
+                        outstanding = Decimal("0")
+                    try:
+                        self.reservations.record_pending_release(
+                            result.order_id,
+                            normalized,
+                            outstanding
+                            if outstanding > 0
+                            else abs(position.quantity) * position.average_price,
+                            str(exc),
+                            position_id=normalized,
+                        )
+                    except Exception as record_exc:
+                        self._release_failures.append({
+                            "release_id": result.order_id,
+                            "symbol": normalized,
+                            "error": str(record_exc),
+                            "phase": "close_release_record_failed",
+                        })
+                    raise PositionClosedReleaseFailedError(
+                        "position close succeeded but committed exposure release "
+                        "needs reconciliation",
+                        order_result=result,
+                        symbol=normalized,
+                        position_id=normalized,
+                    ) from exc
+            return result

@@ -13,14 +13,16 @@ The entry flag releases the in-memory paper risk gate for that one process only.
 
 ## What the report measures
 
-- Distinct UTC calendar days represented in the ledger
+- Consecutive UTC calendar days with ledger events (gaps are reported and break the run)
 - Realized PnL changes observed at fills
 - Win/loss event counts, win rate and expectancy
 - Gross profit/loss and profit factor when losses exist
 - Maximum observed equity drawdown from the recorded equity snapshots
+- Notional-weighted modeled slippage when raw and fill prices are present
 - Ending equity, balance and open-position count
 
 These are descriptive event-level metrics. Partial closes are separate realized events; this is not yet a strategy-level trade attribution engine. The report cannot establish signal quality without strategy IDs and independently verified market data.
+The fill-only ledger does not include rejected-entry decisions, so it reports rejected-entry rate as unavailable rather than assuming zero. Attribution coverage counts rows with strategy ID, strategy version, and quote source. The current broker does not persist those metadata fields, so fill rows are unattributed. The fill ledger also cannot prove market-data observation on a day without fills; preserve a separate timestamped daily data-quality/operations record for those days.
 
 ## Minimum evidence before claiming Level 3
 
@@ -33,6 +35,9 @@ These are descriptive event-level metrics. Partial closes are separate realized 
 
 A short deterministic sample is a smoke test, not sustained validation. No profit is guaranteed. A green CI run proves software checks, not trading performance.
 
+The report normalizes explicitly timezone-aware timestamps to UTC and rejects
+out-of-order events. `--min-days 30` requires a consecutive run of 30 UTC dates
+with ledger events; distinct dates separated by gaps do not count as a run.
 
 ## Research replay engine
 

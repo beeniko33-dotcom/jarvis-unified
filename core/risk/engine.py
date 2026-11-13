@@ -1,7 +1,7 @@
 """Central, fail-closed risk gate. Every new order must pass this layer."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 from threading import RLock
@@ -19,6 +19,9 @@ class RiskLimits:
     require_quote_metadata: bool = False
     max_symbol_exposure: Decimal | None = None
     max_peak_drawdown_pct: Decimal | None = None
+    # Map correlation group name -> frozenset of symbols in the group.
+    correlation_groups: dict[str, frozenset[str]] = field(default_factory=dict)
+    max_correlated_exposure: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +54,13 @@ class RiskEngine:
                     or limits.max_peak_drawdown_pct > 100
                 )
             )
+            or (
+                limits.max_correlated_exposure is not None
+                and (
+                    not limits.max_correlated_exposure.is_finite()
+                    or limits.max_correlated_exposure <= 0
+                )
+            )
         ):
             raise ValueError("risk limits must be finite and positive")
         self.limits = limits
@@ -72,6 +82,13 @@ class RiskEngine:
         with self._lock:
             self._halted = False
 
+    def group_for_symbol(self, symbol: str) -> str | None:
+        symbol = symbol.strip().upper()
+        for name, members in self.limits.correlation_groups.items():
+            if symbol in {m.upper() for m in members}:
+                return name
+        return None
+
     def evaluate(
         self,
         order: OrderRequest,
@@ -81,6 +98,9 @@ class RiskEngine:
         unrealized_pnl: Decimal = Decimal("0"),
         commission_paid: Decimal = Decimal("0"),
         symbol_exposure: Decimal = Decimal("0"),
+        reserved_symbol_notional: Decimal = Decimal("0"),
+        correlated_exposure: Decimal = Decimal("0"),
+        reserved_group_notional: Decimal = Decimal("0"),
         current_equity: Decimal | None = None,
         peak_equity: Decimal | None = None,
         now: datetime | None = None,
@@ -99,10 +119,24 @@ class RiskEngine:
                 or order.price <= 0
             ):
                 return RiskDecision(False, "quantity and price must be finite and positive")
-            pnl_values = (daily_realized_pnl, unrealized_pnl, commission_paid, symbol_exposure)
+            pnl_values = (
+                daily_realized_pnl,
+                unrealized_pnl,
+                commission_paid,
+                symbol_exposure,
+                reserved_symbol_notional,
+                correlated_exposure,
+                reserved_group_notional,
+            )
             if any(not value.is_finite() for value in pnl_values):
                 return RiskDecision(False, "risk and exposure inputs must be finite")
-            if commission_paid < 0 or symbol_exposure < 0:
+            if (
+                commission_paid < 0
+                or symbol_exposure < 0
+                or reserved_symbol_notional < 0
+                or correlated_exposure < 0
+                or reserved_group_notional < 0
+            ):
                 return RiskDecision(False, "commission and exposure cannot be negative")
             if not isinstance(open_positions, int) or open_positions < 0:
                 return RiskDecision(False, "open position count is invalid")
@@ -133,9 +167,16 @@ class RiskEngine:
                 return RiskDecision(False, "per-trade notional exceeds hard limit")
             if (
                 self.limits.max_symbol_exposure is not None
-                and symbol_exposure + notional > self.limits.max_symbol_exposure
+                and symbol_exposure + reserved_symbol_notional + notional
+                > self.limits.max_symbol_exposure
             ):
                 return RiskDecision(False, "per-symbol exposure limit exceeded")
+            if self.limits.max_correlated_exposure is not None:
+                if (
+                    correlated_exposure + reserved_group_notional + notional
+                    > self.limits.max_correlated_exposure
+                ):
+                    return RiskDecision(False, "correlated exposure limit exceeded")
             if self.limits.max_peak_drawdown_pct is not None:
                 if current_equity is None or peak_equity is None:
                     return RiskDecision(False, "peak-equity drawdown data is required")

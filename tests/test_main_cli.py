@@ -80,6 +80,22 @@ class MainCliTests(unittest.TestCase):
         self.assertEqual(payload["mode"], "paper")
         self.assertEqual(payload["broker"], "paper")
 
+    def test_demo_prints_simulated_trade_snapshot(self):
+        buffer = io.StringIO()
+        with patch.dict(os.environ, {}, clear=True):
+            with redirect_stdout(buffer):
+                main(["--demo"])
+
+        payload = json.loads(buffer.getvalue().splitlines()[-1])
+        self.assertTrue(payload["demo"])
+        self.assertEqual(payload["mode"], "paper")
+        self.assertEqual(payload["broker"], "paper")
+        self.assertEqual(payload["approved_order"]["symbol"], "AAPL")
+        self.assertEqual(payload["closed_order"]["symbol"], "AAPL")
+        self.assertFalse(payload["rejected_order"]["allowed"])
+        self.assertEqual(payload["account"]["open_positions"], 0)
+        self.assertEqual(payload["summary"]["open_positions"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

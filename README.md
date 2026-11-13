@@ -16,7 +16,7 @@ The repository consolidates the core application, Deriv execution research, sign
 
 **Last confirmed baseline: Level 2 — Operational tooling.**
 
-The `level-3-paper-validation` branch adds fill-level account snapshots and ledger analytics. The `level-3-research-engine` branch adds a restart-safe SQLite historical-data paper replay engine, a versioned SMA reference strategy, source-data hashing and a hash-chained event audit. These are Level 3 preparation, not a Level 3 performance claim. This is Level 3 preparation, not a Level 3 performance claim. Level 3 requires sustained multi-day evidence and review.
+The `level-3-paper-validation` branch adds fill-level account snapshots and ledger analytics. The `level-3-research-engine` branch adds a restart-safe SQLite historical-data paper replay engine, a versioned SMA reference strategy, source-data hashing and a hash-chained event audit. These are Level 3 preparation, not a Level 3 performance claim. Level 3 requires sustained multi-day evidence and review.
 
 ## Quick start
 
@@ -25,11 +25,14 @@ python main.py --check
 python main.py --health
 python main.py --summary
 python main.py --report
+python main.py --demo
 python -m unittest discover -s tests -v
 python scripts/diagnose.py
 python scripts/paper_session.py --allow-entries --ledger var/paper_ledger.jsonl
 python scripts/paper_report.py var/paper_ledger.jsonl --min-days 30
 ```
+
+`--demo` runs one risk-gated in-memory paper entry, demonstrates a rejected oversized order, closes the demo position, and leaves the kill switch engaged. It does not create forward-validation evidence.
 
 ## Architecture and safety
 
