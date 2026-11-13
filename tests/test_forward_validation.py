@@ -90,6 +90,48 @@ class ForwardValidationTests(unittest.TestCase):
         self.assertEqual(report["latest_consecutive_verified_utc_day_streak"], 1)
         self.assertEqual(report["level_3_forward_evidence_gate"], "NOT_MET")
 
+    def test_report_fails_closed_when_latest_verified_observation_goes_stale(self):
+        self.store.close()
+        self.store = self.make_store(verifier=lambda item: True)
+        self.store.ingest(self.item())
+        self.assertEqual(self.store.report(1)["level_3_forward_evidence_gate"], "PASS")
+        self.now += timedelta(minutes=11)
+        report = self.store.report(1)
+        self.assertFalse(report["latest_verified_observation_fresh"])
+        self.assertEqual(report["level_3_forward_evidence_gate"], "BLOCKED_STALE")
+        self.assertFalse(report["level_3_certification"])
+
+    def test_concurrent_store_instances_preserve_one_hash_chain(self):
+        from concurrent.futures import ThreadPoolExecutor
+        database = Path(self.tmp.name) / "concurrent.sqlite3"
+        barrier = __import__("threading").Barrier(2)
+
+        def append(offset):
+            store = ForwardEvidenceStore(
+                database, instrument="EURUSD", provider="ExampleFeed", interval="1h",
+                strategy_id="sma-crossover-long", strategy_version="1.0.0",
+                provenance_verifier=lambda item: True, clock=self.clock,
+            )
+            try:
+                barrier.wait()
+                return store.ingest(self.item(self.now - timedelta(seconds=offset)))
+            finally:
+                store.close()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(append, (0, 1)))
+        check = ForwardEvidenceStore(
+            database, instrument="EURUSD", provider="ExampleFeed", interval="1h",
+            strategy_id="sma-crossover-long", strategy_version="1.0.0",
+            provenance_verifier=lambda item: True, clock=self.clock,
+        )
+        try:
+            self.assertEqual(results, [True, True])
+            self.assertTrue(check.verify_chain())
+            self.assertEqual(check.report(1)["verified_observation_count"], 2)
+        finally:
+            check.close()
+
     def test_duplicate_is_idempotent(self):
         self.assertTrue(self.store.ingest(self.item()))
         self.assertFalse(self.store.ingest(self.item()))

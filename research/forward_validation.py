@@ -147,25 +147,32 @@ class ForwardEvidenceStore:
         item["ingested_at"] = now.isoformat(timespec="microseconds")
         item["provenance_verified"] = verified
         item["evidence_class"] = "verified_forward_candidate" if verified else "unverified_candidate"
-        previous = self.db.execute(
-            "SELECT record_hash FROM observations ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-        prev_hash = previous[0] if previous else "GENESIS"
         payload = json.dumps(item, sort_keys=True, separators=(",", ":"))
-        digest = hashlib.sha256((prev_hash + "|" + payload).encode()).hexdigest()
         try:
-            with self.db:
-                self.db.execute(
-                    """INSERT INTO observations(observed_at,ingested_at,utc_day,instrument,provider,
-                    source,interval,strategy_id,strategy_version,price,provenance_verified,payload,
-                    previous_hash,record_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (item["observed_at"], item["ingested_at"], item["utc_day"], item["instrument"],
-                     item["provider"], item["source"], item["interval"], item["strategy_id"],
-                     item["strategy_version"], item["price"], int(verified), payload, prev_hash, digest),
-                )
+            # Acquire the SQLite write reservation before reading the chain tail.
+            # This serializes tail selection and append across independent processes.
+            self.db.execute("BEGIN IMMEDIATE")
+            previous = self.db.execute(
+                "SELECT record_hash FROM observations ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            prev_hash = previous[0] if previous else "GENESIS"
+            digest = hashlib.sha256((prev_hash + "|" + payload).encode()).hexdigest()
+            self.db.execute(
+                """INSERT INTO observations(observed_at,ingested_at,utc_day,instrument,provider,
+                source,interval,strategy_id,strategy_version,price,provenance_verified,payload,
+                previous_hash,record_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (item["observed_at"], item["ingested_at"], item["utc_day"], item["instrument"],
+                 item["provider"], item["source"], item["interval"], item["strategy_id"],
+                 item["strategy_version"], item["price"], int(verified), payload, prev_hash, digest),
+            )
+            self.db.commit()
         except sqlite3.IntegrityError as exc:
+            self.db.rollback()
             if "UNIQUE constraint failed: observations.instrument, observations.interval, observations.observed_at" in str(exc):
                 return False
+            raise
+        except Exception:
+            self.db.rollback()
             raise
         return True
 
@@ -188,6 +195,18 @@ class ForwardEvidenceStore:
             "SELECT DISTINCT utc_day FROM observations WHERE provenance_verified=1 ORDER BY utc_day"
         )]
         latest = days[-1] if days else None
+        latest_verified = self.db.execute(
+            "SELECT observed_at FROM observations WHERE provenance_verified=1 ORDER BY observed_at DESC LIMIT 1"
+        ).fetchone()
+        now = self.clock()
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("collector clock must return a timezone-aware datetime")
+        now = now.astimezone(timezone.utc)
+        latest_age = now - datetime.fromisoformat(latest_verified[0]) if latest_verified else None
+        latest_is_fresh = bool(
+            latest_age is not None
+            and -self.future_tolerance <= latest_age <= self.max_observation_age
+        )
         streak = 0
         expected = datetime.fromisoformat(latest).date() if latest else None
         for day in reversed(days):
@@ -202,8 +221,15 @@ class ForwardEvidenceStore:
             "SELECT COUNT(*) FROM observations WHERE provenance_verified=1"
         ).fetchone()[0]
         unverified_count = total - verified_count
-        ready = bool(valid_chain and verified_count and streak >= required_days)
-        gate = "PASS" if ready else ("BLOCKED_PROVENANCE" if not verified_count else "NOT_MET")
+        ready = bool(valid_chain and verified_count and latest_is_fresh and streak >= required_days)
+        if not valid_chain:
+            gate = "BLOCKED_CHAIN"
+        elif not verified_count:
+            gate = "BLOCKED_PROVENANCE"
+        elif not latest_is_fresh:
+            gate = "BLOCKED_STALE"
+        else:
+            gate = "PASS" if streak >= required_days else "NOT_MET"
         return {
             "evidence_class": "provider_verified_forward_paper_candidates_only",
             "configuration": self.config,
@@ -219,6 +245,9 @@ class ForwardEvidenceStore:
             "ingestion_time_is_collector_generated": True,
             "provider_signature_or_equivalent_verifier_configured": self.provenance_verifier is not None,
             "missing_days_break_streak": True,
+            "latest_verified_observation_age_seconds": latest_age.total_seconds() if latest_age is not None else None,
+            "latest_verified_observation_fresh": latest_is_fresh,
+            "maximum_verified_observation_age_seconds": self.max_observation_age.total_seconds(),
             "event_chain_valid": valid_chain,
             "level_3_forward_evidence_gate": gate,
             "level_3_certification": False,
