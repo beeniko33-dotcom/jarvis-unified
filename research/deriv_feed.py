@@ -19,8 +19,8 @@ from pathlib import Path
 from typing import Any
 
 from research.forward_validation import ForwardEvidenceStore
+from research.transport_session import DERIV_PUBLIC_WS, build_deriv_public_session
 
-DERIV_PUBLIC_WS = "wss://api.derivws.com/trading/v1/options/ws/public"
 PROVIDER = "Deriv"
 INSTRUMENT = "EURUSD"
 SOURCE = "deriv-public-wss-tick-v1"
@@ -53,6 +53,7 @@ def build_tick_observation(
     *,
     deriv_symbol: str,
     received_at: datetime,
+    transport_session: dict,
 ) -> dict:
     try:
         payload = json.loads(raw_message)
@@ -70,6 +71,17 @@ def build_tick_observation(
         raise ValueError("collector receive time must be timezone-aware")
     observed = datetime.fromtimestamp(epoch, timezone.utc)
     raw_digest = hashlib.sha256(raw_message.encode("utf-8")).hexdigest()
+    if not isinstance(transport_session, dict):
+        raise ValueError("an established transport session record is required")
+    session_id = transport_session.get("session_id")
+    if (
+        not session_id
+        or transport_session.get("endpoint") != DERIV_PUBLIC_WS
+        or transport_session.get("provider") != PROVIDER
+        or transport_session.get("tls_socket_observed") is not True
+        or transport_session.get("evidence_credit") is not False
+    ):
+        raise ValueError("transport session record is missing required socket binding")
     return {
         "observed_at": observed.isoformat(),
         "instrument": INSTRUMENT,
@@ -83,6 +95,8 @@ def build_tick_observation(
         "provider_event_id": f"{symbol}:{epoch}:{quote}",
         "collector_received_at": received_at.astimezone(timezone.utc).isoformat(),
         "transport_endpoint": DERIV_PUBLIC_WS,
+        "transport_session_id": session_id,
+        "transport_session": transport_session,
         "transport_security_claim": "unverified",
         "raw_message": raw_message,
         "raw_message_sha256": raw_digest,
@@ -98,6 +112,16 @@ def validate_deriv_observation_binding(item: dict) -> bool:
             or item.get("source") != SOURCE
             or item.get("interval") != INTERVAL
             or item.get("transport_endpoint") != DERIV_PUBLIC_WS
+        ):
+            return False
+        session = item["transport_session"]
+        if (
+            not isinstance(session, dict)
+            or session.get("session_id") != item.get("transport_session_id")
+            or session.get("endpoint") != DERIV_PUBLIC_WS
+            or session.get("provider") != PROVIDER
+            or session.get("tls_socket_observed") is not True
+            or session.get("evidence_credit") is not False
         ):
             return False
         raw = item["raw_message"]
@@ -129,6 +153,7 @@ def collect(duration_seconds: int, database: Path, timeout: int = 20) -> dict:
 
     # websocket-client validates the certificate chain and hostname. No token,
     # account authorization, proposal, buy, sell, or account endpoint is used.
+    session_started_at = datetime.now(timezone.utc)
     ws = websocket.create_connection(
         DERIV_PUBLIC_WS,
         timeout=timeout,
@@ -145,6 +170,12 @@ def collect(duration_seconds: int, database: Path, timeout: int = 20) -> dict:
     )
     inserted = duplicates = 0
     try:
+        tls_socket = getattr(ws, "sock", None)
+        session_record = build_deriv_public_session(
+            endpoint=DERIV_PUBLIC_WS,
+            tls_socket=tls_socket,
+            started_at=session_started_at,
+        ).to_dict()
         ws.send(json.dumps({"active_symbols": "brief", "req_id": 1}))
         symbols_response = json.loads(ws.recv())
         if symbols_response.get("msg_type") != "active_symbols":
@@ -159,7 +190,8 @@ def collect(duration_seconds: int, database: Path, timeout: int = 20) -> dict:
                 continue
             received = datetime.now(timezone.utc)
             item = build_tick_observation(
-                raw, deriv_symbol=symbol, received_at=received
+                raw, deriv_symbol=symbol, received_at=received,
+                transport_session=session_record,
             )
             added = store.ingest(item)
             inserted += int(added)
