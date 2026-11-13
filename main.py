@@ -3,11 +3,14 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import asdict
+from decimal import Decimal
 from typing import Sequence
 
-from core.config import Settings
-from core.risk import RiskEngine, RiskLimits
 from brokers.paper import PaperBroker
+from core.config import Settings
+from core.execution import ExecutionService
+from core.models import OrderRequest, Side
+from core.risk import RiskEngine, RiskLimits
 
 APP_VERSION = "0.2.0"
 
@@ -46,6 +49,70 @@ def build_summary_payload(broker, settings, risk) -> dict:
         "open_positions": len(status["positions"]),
         "balance": status["account"]["balance"],
         "equity": status["account"]["equity"],
+        "version": APP_VERSION,
+    }
+
+
+def build_demo_payload(broker, settings, risk) -> dict:
+    execution = ExecutionService(broker, risk)
+    if risk.halted:
+        risk.release_kill_switch(explicit_operator_action=True)
+
+    approved_order = OrderRequest(
+        symbol="AAPL",
+        side=Side.BUY,
+        quantity=Decimal("0.02"),
+        price=Decimal("100.00"),
+        client_order_id="demo-buy-001",
+    )
+    approved = execution.submit(approved_order)
+
+    rejected_order = OrderRequest(
+        symbol="MSFT",
+        side=Side.BUY,
+        quantity=Decimal("200"),
+        price=Decimal("1000.00"),
+        client_order_id="demo-reject-001",
+    )
+    rejected = {"allowed": False, "reason": "not attempted"}
+    try:
+        execution.submit(rejected_order)
+    except PermissionError as exc:
+        rejected = {"allowed": False, "reason": str(exc)}
+
+    closed = execution.close_position(approved.symbol, approved.fill_price)
+    risk.engage_kill_switch()
+    account = broker.get_account()
+    return {
+        "ok": True,
+        "demo": True,
+        "version": APP_VERSION,
+        "mode": settings.mode,
+        "broker": "paper",
+        "kill_switch": risk.halted,
+        "approved_order": {
+            "order_id": approved.order_id,
+            "symbol": approved.symbol,
+            "side": approved.side.value,
+            "quantity": str(approved.quantity),
+            "fill_price": str(approved.fill_price),
+            "created_at": approved.created_at.isoformat(),
+        },
+        "closed_order": {
+            "order_id": closed.order_id,
+            "symbol": closed.symbol,
+            "side": closed.side.value,
+            "quantity": str(closed.quantity),
+            "fill_price": str(closed.fill_price),
+        },
+        "rejected_order": rejected,
+        "account": {
+            "balance": str(account.balance),
+            "equity": str(account.equity),
+            "realized_pnl": str(account.realized_pnl),
+            "open_positions": account.open_positions,
+        },
+        "summary": build_summary_payload(broker, settings, risk),
     }
 
 
@@ -63,6 +130,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--status", action="store_true", help="print a JSON status snapshot without starting the API")
     parser.add_argument("--version", action="store_true", help="print the application version")
     parser.add_argument("--report", action="store_true", help="print a combined version + health + summary snapshot")
+    parser.add_argument("--demo", action="store_true", help="execute a paper-trading demo and print a richer snapshot")
     parser.add_argument("--serve", action="store_true", help="start localhost read-only status API")
     parser.add_argument("--host", help="bind address for status API; must remain localhost-only")
     parser.add_argument("--port", type=int, help="port for status API")
@@ -93,6 +161,10 @@ def main(argv: Sequence[str] | None = None) -> None:
         report["version"] = APP_VERSION
         report["ok"] = True
         print(json.dumps(report, default=str))
+        return
+    if args.demo:
+        print_banner()
+        print(json.dumps(build_demo_payload(broker, settings, risk), default=str))
         return
     if args.status:
         print_banner()

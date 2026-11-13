@@ -27,7 +27,7 @@ class ExposureReservationStore:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
         with closing(self._connect()) as db:
-            db.execute("PRAGMA journal_mode=WAL")
+            self._enable_wal(db)
             db.execute("PRAGMA synchronous=FULL")
             db.execute(
                 """CREATE TABLE IF NOT EXISTS exposure_reservations (
@@ -119,6 +119,22 @@ class ExposureReservationStore:
         db = sqlite3.connect(self.database_path, timeout=30, isolation_level=None)
         db.execute("PRAGMA busy_timeout=30000")
         return db
+
+    @staticmethod
+    def _enable_wal(db: sqlite3.Connection) -> None:
+        deadline = time.monotonic() + 30
+        delay = 0.01
+        while True:
+            try:
+                db.execute("PRAGMA journal_mode=WAL")
+                return
+            except sqlite3.OperationalError as exc:
+                message = str(exc).lower()
+                is_lock_error = "locked" in message or "busy" in message
+                if not is_lock_error or time.monotonic() >= deadline:
+                    raise
+                time.sleep(delay)
+                delay = min(delay * 2, 0.1)
 
     def _purge_expired(self, db: sqlite3.Connection, now: float) -> None:
         db.execute(

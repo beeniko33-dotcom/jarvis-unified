@@ -25,6 +25,13 @@ class StatusApiTests(unittest.TestCase):
         self.server.server_close()
         self.thread.join(timeout=2)
 
+    def test_root_endpoint(self):
+        with urlopen(self.base + "/", timeout=2) as response:
+            self.assertEqual(response.status, 200)
+            payload = json.loads(response.read())
+            self.assertTrue(payload["ok"])
+            self.assertIn("/health", payload["routes"])
+
     def test_health_endpoint(self):
         with urlopen(self.base + "/health", timeout=2) as response:
             self.assertEqual(response.status, 200)

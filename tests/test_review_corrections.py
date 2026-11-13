@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import sqlite3
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -74,6 +75,19 @@ class AtomicReservationTests(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def test_wal_setup_retries_transient_database_lock(self):
+        connection = mock.Mock()
+        connection.execute.side_effect = [
+            sqlite3.OperationalError("database is locked"),
+            None,
+        ]
+
+        with mock.patch("core.risk.reservations.time.sleep") as sleep:
+            ExposureReservationStore._enable_wal(connection)
+
+        self.assertEqual(connection.execute.call_count, 2)
+        sleep.assert_called_once_with(0.01)
 
     def test_atomic_capacity_rejects_over_limit_under_contention(self):
         store = ExposureReservationStore(self.db)
