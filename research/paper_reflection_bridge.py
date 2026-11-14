@@ -54,7 +54,9 @@ def _summary(event_type: str, data: dict[str, Any]) -> str:
         facts.append(f"{key}={value if value is not None else 'unknown'}")
     if event_type == "paper_ledger_event":
         for key in ("realized_delta", "commission_delta"):
-            if key not in data:
+            # A value may have arrived through the metadata allowlist above, so
+            # test the rendered facts rather than only the top-level dict.
+            if not any(fact.startswith(f"{key}=") for fact in facts):
                 facts.append(f"{key}=unknown")
     suffix = "; ".join(facts) if facts else "no additional fields recorded"
     return f"Recorded {label}; {suffix}"
