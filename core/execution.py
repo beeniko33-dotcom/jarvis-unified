@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from decimal import Decimal
 from threading import RLock
 from uuid import uuid4
@@ -85,6 +86,12 @@ class ExecutionService:
         self.observation_journal = observation_journal
         self._submission_lock = RLock()
         self._release_failures: list[dict] = []
+        # Durable identity for this process's in-flight reservations. Another
+        # process can then tell a live submission from a dead one instead of
+        # guessing from age.
+        self._owner_id = f"exec-owner-{uuid4()}"
+        if self.reservations is not None:
+            self.reservations.register_owner(self._owner_id)
 
     @property
     def release_failures(self) -> list[dict]:
@@ -219,6 +226,7 @@ class ExecutionService:
                         max_group_notional=self.risk.limits.max_correlated_exposure,
                         existing_symbol_exposure=symbol_exposure,
                         existing_group_exposure=correlated_exposure,
+                        owner_id=self._owner_id,
                     )
                 except ReservationError as exc:
                     rejected = dict(observation)
@@ -231,7 +239,7 @@ class ExecutionService:
                     raise PermissionError(f"order rejected by risk engine: {exc}") from exc
 
             try:
-                result = self.broker.place_order(order)
+                result = self._place_order_with_heartbeat(order)
             except Exception as broker_exc:
                 failed = dict(observation)
                 failed["error_type"] = type(broker_exc).__name__
@@ -357,6 +365,35 @@ class ExecutionService:
                     ) from exc
             return result
 
+    def _place_order_with_heartbeat(self, order: OrderRequest) -> OrderResult:
+        """Call the broker while keeping this process's in-flight lease alive.
+
+        A broker call can legitimately take longer than the lease window. Without
+        a heartbeat another process would see an expired lease and reclaim the
+        reservation while the order is still in flight, which would let a second
+        order consume the same capacity. The heartbeat runs only for the duration
+        of the call and is always stopped, including on exception.
+        """
+        if self.reservations is None:
+            return self.broker.place_order(order)
+        stop = threading.Event()
+        interval = max(0.05, self.reservations.LEASE_SECONDS / 3.0)
+
+        def beat() -> None:
+            while not stop.wait(interval):
+                try:
+                    self.reservations.heartbeat(self._owner_id)
+                except Exception as exc:  # never let a heartbeat kill the order
+                    logger.warning("reservation heartbeat failed: %s", exc)
+
+        thread = threading.Thread(target=beat, name="reservation-heartbeat", daemon=True)
+        thread.start()
+        try:
+            return self.broker.place_order(order)
+        finally:
+            stop.set()
+            thread.join(timeout=5.0)
+
     def reconcile_exposure(self) -> list[dict]:
         """Complete pending reservation→committed transfers, including after restart."""
         if self.reservations is None:
@@ -366,8 +403,9 @@ class ExecutionService:
             # Reclaim reservations that can never be converted: a process that
             # died between place_order() and record_pending_transfer() leaves a
             # reservation with no pending transfer and no commit, which nothing
-            # else would ever clear. Only reservations older than the grace
-            # period are touched, so an in-flight order is never reclaimed.
+            # else would ever clear. Reclamation requires an expired in-flight
+            # lease *and* a confirmed-dead owner, so a slow submission that is
+            # still running is never reclaimed by another process.
             try:
                 for reservation_id in self.reservations.reclaim_orphaned_reservations():
                     logger.warning(
