@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from research.experience_store import Experience, ExperienceStore
+from research.experience_store import Experiment, ExperienceStore
 
 
 @dataclass(frozen=True)
