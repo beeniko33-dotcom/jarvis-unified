@@ -138,5 +138,51 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual(service.broker.get_account().open_positions, 2)
 
 
+
+    def test_nested_research_lineage_is_propagated_and_untrusted_metadata_is_dropped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = ExecutionObservationJournal(Path(tmp) / "observations.sqlite")
+            service = ExecutionService(self.broker, self.risk, observation_journal=journal)
+            self.risk.release_kill_switch(explicit_operator_action=True)
+            order = OrderRequest(
+                "SOLUSD", Side.BUY, Decimal("0.1"), Decimal("10"), "lineage-order",
+                metadata={
+                    "research_lineage": {
+                        "strategy_id": "momentum-v2",
+                        "strategy_version": "2.1",
+                        "experiment_id": "exp-42",
+                        "data_hash": "a" * 64,
+                        "quote_timestamp": "2026-11-14T12:00:00+00:00",
+                        "signal_context_hash": "not-a-digest",
+                        "signal_id": "sig-7",
+                    },
+                    "api_key": "must-never-be-journaled",
+                    "arbitrary": "untrusted free text",
+                },
+            )
+            service.submit(order)
+            events = journal.list_events()
+            decision = events[0]["data"]
+            self.assertEqual(decision["strategy_id"], "momentum-v2")
+            self.assertEqual(decision["experiment_id"], "exp-42")
+            self.assertEqual(decision["signal_id"], "sig-7")
+            self.assertEqual(decision["data_hash"], "a" * 64)
+            self.assertIsNone(decision.get("signal_context_hash"))
+            self.assertEqual(
+                decision["metadata"],
+                {"research_lineage": {
+                    "strategy_id": "momentum-v2",
+                    "strategy_version": "2.1",
+                    "experiment_id": "exp-42",
+                    "data_hash": "a" * 64,
+                    "quote_timestamp": "2026-11-14T12:00:00+00:00",
+                    "signal_id": "sig-7",
+                }},
+            )
+            rendered = str(events)
+            self.assertNotIn("must-never-be-journaled", rendered)
+            self.assertNotIn("untrusted free text", rendered)
+            self.assertTrue(journal.verify())
+
 if __name__ == "__main__":
     unittest.main()

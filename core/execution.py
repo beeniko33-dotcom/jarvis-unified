@@ -14,6 +14,47 @@ from research.execution_observations import ExecutionObservationJournal
 
 logger = logging.getLogger(__name__)
 
+_LINEAGE_FIELDS = frozenset({
+    "strategy_id", "strategy_version", "strategy_config_hash", "experiment_id",
+    "signal_id", "signal_type", "signal_context_hash", "data_source_id", "data_hash",
+    "quote_source", "quote_timestamp",
+})
+_HASH_FIELDS = frozenset({"strategy_config_hash", "signal_context_hash", "data_hash"})
+_SECRET_MARKERS = ("secret", "password", "token", "private_key", "api_key", "authorization", "bearer")
+
+
+def _safe_order_metadata(metadata: object) -> tuple[dict, dict]:
+    """Extract bounded research lineage; never journal arbitrary order metadata."""
+    if not isinstance(metadata, dict):
+        return {}, {}
+    nested = metadata.get("research_lineage")
+    source = nested if isinstance(nested, dict) else metadata
+    lineage = {}
+    for key, raw in source.items():
+        if key not in _LINEAGE_FIELDS or not isinstance(raw, str):
+            continue
+        value = raw.strip()
+        lowered = value.lower()
+        if not value or len(value) > 128 or any(marker in lowered for marker in _SECRET_MARKERS):
+            continue
+        if key in _HASH_FIELDS:
+            if not (8 <= len(value) <= 128 and all(ch in "0123456789abcdefABCDEF" for ch in value)):
+                continue
+        elif key == "quote_timestamp":
+            from datetime import datetime
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if parsed.tzinfo is None or parsed.utcoffset() is None:
+                continue
+        elif not all(ch.isalnum() or ch in "_-.:/" for ch in value):
+            continue
+        lineage[key] = value
+    safe = {"research_lineage": lineage} if lineage else {}
+    return safe, lineage
+
+
 
 class ReconciliationRequiredError(RuntimeError):
     """Paper fill succeeded but durable exposure commit did not.
@@ -189,6 +230,7 @@ class ExecutionService:
                 current_equity=account.equity,
                 peak_equity=account.peak_equity,
             )
+            safe_metadata, lineage = _safe_order_metadata(order.metadata)
             observation = {
                 "client_order_id": order.client_order_id,
                 "symbol": symbol,
@@ -196,13 +238,18 @@ class ExecutionService:
                 "quantity": str(order.quantity),
                 "requested_price": str(order.price),
                 "notional": str(notional),
-                "strategy_id": order.metadata.get("strategy_id"),
-                "strategy_version": order.metadata.get("strategy_version"),
-                "strategy_config_hash": order.metadata.get("strategy_config_hash"),
-                "experiment_id": order.metadata.get("experiment_id"),
-                "quote_source": order.metadata.get("quote_source"),
-                "quote_timestamp": order.metadata.get("quote_timestamp"),
-                "metadata": dict(order.metadata),
+                "strategy_id": lineage.get("strategy_id"),
+                "strategy_version": lineage.get("strategy_version"),
+                "strategy_config_hash": lineage.get("strategy_config_hash"),
+                "experiment_id": lineage.get("experiment_id"),
+                "signal_id": lineage.get("signal_id"),
+                "signal_type": lineage.get("signal_type"),
+                "signal_context_hash": lineage.get("signal_context_hash"),
+                "data_source_id": lineage.get("data_source_id"),
+                "data_hash": lineage.get("data_hash"),
+                "quote_source": lineage.get("quote_source"),
+                "quote_timestamp": lineage.get("quote_timestamp"),
+                "metadata": safe_metadata,
                 "risk_reason": decision.reason,
             }
             self._record_observation(
