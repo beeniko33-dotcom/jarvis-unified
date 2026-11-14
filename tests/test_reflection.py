@@ -22,6 +22,33 @@ class ReflectionStoreTests(unittest.TestCase):
             self.assertEqual(result.facts[0]["source_ref"], "chat://feedback/1")
             self.assertEqual(store.get(result.reflection_id), result)
 
+    def test_replaying_same_session_events_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ReflectionStore(Path(tmp) / "learning.sqlite3")
+            events = [
+                SessionEvent("entry-1", "2026-11-14T10:00:00Z", "paper_entry",
+                             "Paper entry accepted", "ledger://event/1"),
+                SessionEvent("exit-1", "2026-11-14T10:05:00Z", "paper_exit",
+                             "Paper exit closed at a loss", "ledger://event/2"),
+            ]
+            first = store.build(session_id="session-replay", events=events)
+            second = store.build(session_id="session-replay", events=reversed(events))
+            self.assertEqual(first.reflection_id, second.reflection_id)
+            self.assertEqual(first.created_at, second.created_at)
+            self.assertEqual(store.list_for_session("session-replay"), [first])
+
+    def test_changed_source_fact_creates_distinct_reflection_revision(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ReflectionStore(Path(tmp) / "learning.sqlite3")
+            first = store.build(session_id="session-revision", events=[
+                SessionEvent("e1", "2026-11-14T10:00:00Z", "paper", "Original fact", "ledger://1")
+            ])
+            second = store.build(session_id="session-revision", events=[
+                SessionEvent("e1", "2026-11-14T10:00:00Z", "paper", "Corrected fact", "ledger://1")
+            ])
+            self.assertNotEqual(first.reflection_id, second.reflection_id)
+            self.assertEqual(len(store.list_for_session("session-revision")), 2)
+
     def test_repeated_event_type_is_only_a_hypothesis(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = ReflectionStore(Path(tmp) / "learning.sqlite3")
