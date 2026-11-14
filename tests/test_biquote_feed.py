@@ -108,6 +108,11 @@ class BiquoteFeedTests(unittest.TestCase):
                 self.assertEqual(report["level_3_forward_evidence_gate"], "BLOCKED_PROVENANCE")
                 self.assertFalse(report["level_3_certification"])
                 self.assertTrue(store.verify_chain())
+                import json
+                stored = json.loads(store.db.execute("SELECT payload FROM observations").fetchone()[0])
+                self.assertIs(stored["provenance_verified"], False)
+                self.assertIs(stored["evidence_credit"], False)
+                self.assertEqual(stored["evidence_class"], "unverified_candidate")
             finally:
                 store.close()
 
