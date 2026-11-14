@@ -109,18 +109,22 @@ A heartbeat proves process liveness only. It is not a market observation and doe
 - A successful backup without a successful restore drill does not satisfy operational acceptance.
 - Never rewrite or backfill missing observation days. A missing day breaks the consecutive-day streak.
 
-## 6. Daily operator checklist
+## 6. Daily operator evidence checklist
 
-1. Confirm the process is supervised and running the approved commit.
-2. Confirm TLS/session health and approved endpoint.
-3. Confirm fresh provider ticks and correct EURUSD symbol mapping.
-4. Confirm host clock synchronization and no stale/future timestamps.
-5. Confirm database integrity and event hash chain.
-6. Confirm verified vs unverified candidate counts and the provenance gate.
-7. Confirm backup completion and disk headroom.
-8. Record any outage, reconnect, missed day, configuration change or incident.
-9. Keep broker adapters disabled and verify zero trading actions.
-10. Optionally run `--health` and archive the JSON snapshot with the daily log.
+For every UTC day, retain a timestamped record containing:
+
+1. **Process identity:** host ID, supervisor PID, collector PID, repository commit SHA, Python version, collector command and config hash.
+2. **Session boundaries:** session ID, UTC start/end, exit code, status, restart count and lock owner.
+3. **Feed freshness:** endpoint, instrument, last provider event timestamp, last receive timestamp, age of last tick and stale/future/reconnect counts.
+4. **Clock:** NTP source, measured UTC offset and synchronization status.
+5. **Storage:** database size, WAL size, free disk space, configured headroom threshold and SQLite/hash-chain integrity result.
+6. **Backup:** backup path/identifier, UTC completion time, SHA-256 backup hash, source commit and last successful restore-drill result/date.
+7. **Provenance:** provider verification status, verified/unverified candidate counts and current evidence gate.
+8. **Actions:** explicit count of broker/account requests, proposals, orders and wallet actions; expected value is **zero**.
+9. **Incidents:** outage, reconnect, missed day, configuration change, lock recovery, process crash or alert and the operator response.
+10. **Archive:** save the supervisor `--health` JSON and the signed/controlled daily operations record with the collector logs.
+
+A process heartbeat is not a market observation. A backup hash is not a restore result. A restore result is not provider provenance. Keep these evidence classes separate.
 
 ## 7. Acceptance before starting the 30-day clock
 
