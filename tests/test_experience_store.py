@@ -3,7 +3,9 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from research.experience_store import ExperienceStore, chronological_split
+from research.experience_store import (
+    ExperienceStore, chronological_split, purged_chronological_split,
+)
 
 
 class ExperienceStoreTests(unittest.TestCase):
@@ -96,6 +98,28 @@ class ExperienceStoreTests(unittest.TestCase):
         })
         self.assertLess(timestamps[split["train"][-1]], timestamps[split["validation"][0]])
         self.assertLess(timestamps[split["validation"][-1]], timestamps[split["test"][0]])
+
+
+    def test_purged_chronological_split_leaves_gaps_between_partitions(self):
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        timestamps = [(start + timedelta(days=i)).isoformat() for i in range(20)]
+        split = purged_chronological_split(timestamps, purge_count=2)
+        self.assertEqual(split["train"], list(range(0, 10)))
+        self.assertEqual(split["validation"], list(range(12, 14)))
+        self.assertEqual(split["test"], list(range(16, 20)))
+        self.assertEqual(split["purged"], [10, 11, 14, 15])
+        all_used = split["train"] + split["validation"] + split["test"] + split["purged"]
+        self.assertEqual(sorted(all_used), list(range(20)))
+        self.assertEqual(len(all_used), len(set(all_used)))
+
+    def test_purged_split_rejects_invalid_or_excessive_gap(self):
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        timestamps = [(start + timedelta(days=i)).isoformat() for i in range(10)]
+        for invalid in (-1, 1.5, True):
+            with self.assertRaises(ValueError):
+                purged_chronological_split(timestamps, purge_count=invalid)
+        with self.assertRaisesRegex(ValueError, "leaves an empty"):
+            purged_chronological_split(timestamps, purge_count=3)
 
     def test_rejects_unsorted_timestamps_and_nan_metrics(self):
         start = datetime(2026, 1, 1, tzinfo=timezone.utc)

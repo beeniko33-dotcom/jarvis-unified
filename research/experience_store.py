@@ -359,3 +359,36 @@ def chronological_split(
         "validation": list(range(train_end, validation_end)),
         "test": list(range(validation_end, n)),
     }
+
+
+def purged_chronological_split(
+    timestamps: list[str], *, train_fraction: float = 0.6,
+    validation_fraction: float = 0.2, purge_count: int = 1,
+) -> dict[str, list[int]]:
+    """Chronological partitions with explicit purge gaps at both boundaries.
+
+    The purged samples reduce leakage from overlapping labels/lookback windows.
+    This sample-count gap is not a substitute for a domain-specific time embargo.
+    """
+    if isinstance(purge_count, bool) or not isinstance(purge_count, int) or purge_count < 0:
+        raise ValueError("purge_count must be a non-negative integer")
+    base = chronological_split(
+        timestamps, train_fraction=train_fraction,
+        validation_fraction=validation_fraction,
+    )
+    train_end = len(base["train"])
+    validation_end = train_end + len(base["validation"])
+    if purge_count == 0:
+        return {**base, "purged": []}
+    if purge_count >= train_end or purge_count >= len(base["validation"]):
+        raise ValueError("purge_count leaves an empty train or validation partition")
+    purged = (
+        list(range(train_end - purge_count, train_end))
+        + list(range(validation_end - purge_count, validation_end))
+    )
+    return {
+        "train": list(range(0, train_end - purge_count)),
+        "validation": list(range(train_end, validation_end - purge_count)),
+        "test": list(range(validation_end, len(timestamps))),
+        "purged": purged,
+    }
