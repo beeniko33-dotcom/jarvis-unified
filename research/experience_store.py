@@ -223,14 +223,13 @@ class ExperienceStore:
         return item
 
     def list(self, *, data_status: str | None = None) -> list[Experiment]:
-        sql = "SELECT * FROM research_experiments"
+        where = ""
         params: tuple[str, ...] = ()
         if data_status is not None:
             if data_status not in _ALLOWED_DATA_STATUSES:
                 raise ValueError("unknown data_status")
-            sql += " WHERE data_status=?"
+            where = " WHERE e.data_status=?"
             params = (data_status,)
-        sql += """ ORDER BY created_at,experiment_id"""
         with closing(self._connect()) as db:
             rows = db.execute(
                 """SELECT e.*,
@@ -240,7 +239,7 @@ class ExperienceStore:
                         ORDER BY v.verification_id DESC LIMIT 1
                     ), e.evidence_status) AS current_evidence_status
                     FROM research_experiments e"""
-                + ("" if " WHERE " not in sql else sql[sql.index(" WHERE "):]),
+                + where + " ORDER BY e.created_at,e.experiment_id",
                 params,
             ).fetchall()
         return [self._from_row(row) for row in rows]
