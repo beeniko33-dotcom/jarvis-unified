@@ -3,7 +3,9 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from research.experience_store import (\n    ExperienceStore, chronological_split, purged_chronological_split,\n)
+from research.experience_store import (
+    ExperienceStore, chronological_split, purged_chronological_split,
+)
 
 
 class ExperienceStoreTests(unittest.TestCase):
