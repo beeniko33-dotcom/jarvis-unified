@@ -145,6 +145,15 @@ def main(argv: Sequence[str] | None = None) -> None:
                         help="delete a saved personal preference")
     parser.add_argument("--personality-context", action="store_true",
                         help="print Jarvis core personality plus saved preference context")
+    parser.add_argument("--learning-db", default="var/learning/observations.sqlite3",
+                        help="SQLite path for the tamper-evident paper learning journal")
+    parser.add_argument("--paper-ledger-db",
+                        help="path to an existing persistent paper broker ledger")
+    learning_actions = parser.add_mutually_exclusive_group()
+    learning_actions.add_argument("--import-paper-ledger", action="store_true",
+                                  help="verify and import a paper ledger into the learning journal")
+    learning_actions.add_argument("--paper-outcomes", action="store_true",
+                                  help="print loss-inclusive paper outcome analytics")
     args = parser.parse_args(argv)
     if args.memory_list or args.remember or args.forget or args.personality_context:
         from dataclasses import asdict
@@ -165,6 +174,28 @@ def main(argv: Sequence[str] | None = None) -> None:
         if args.personality_context:
             print(build_personality_context(memory))
             return
+
+    if args.import_paper_ledger or args.paper_outcomes:
+        from pathlib import Path
+        from research.execution_observations import ExecutionObservationJournal
+
+        journal = ExecutionObservationJournal(args.learning_db)
+        if args.import_paper_ledger:
+            if not args.paper_ledger_db:
+                parser.error("--import-paper-ledger requires --paper-ledger-db")
+            from dataclasses import asdict
+            from research.paper_ledger_importer import import_paper_ledger
+
+            result = import_paper_ledger(args.paper_ledger_db, journal)
+            print(json.dumps(asdict(result), indent=2, default=str))
+            return
+        if not Path(args.learning_db).is_file():
+            parser.error("--paper-outcomes requires an existing --learning-db")
+        from research.paper_outcomes import build_paper_outcome_report
+
+        report = build_paper_outcome_report(journal)
+        print(json.dumps(report.to_dict(), indent=2, default=str))
+        return
 
     settings = Settings.from_env()
     broker, risk = build_runtime(settings)
