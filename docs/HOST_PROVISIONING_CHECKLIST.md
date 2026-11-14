@@ -1,10 +1,12 @@
 # Persistent host provisioning checklist — Issue #11
 
-**Status:** checklist only. No cloud account, VM, or collector process is created by this document.
+**Status:** checklist only. No cloud account, VM, or collector process is created by this document. The Deriv parser now recognizes the current catalog response; a successful subscription check at market open and provenance review are still required.
 
 Pairs with `docs/LEVEL_3_PERSISTENT_RUNNER_RUNBOOK.md` and the Issue #9 trust model. Market-data on this host remains **candidate** evidence until provenance policy is accepted.
 
 ## 1. Provider preference
+
+The host provider below is separate from the market-data provider. The market-data source and instrument must be confirmed before enabling a persistent collector.
 
 | Preference | Notes |
 |------------|--------|
@@ -18,7 +20,7 @@ Operator performs these steps in the Oracle console / CLI (not automated here):
 
 1. Create / select a **Always Free** compute instance (Ubuntu 22.04+ or Oracle Linux).
 2. Attach **block volume**; mount under e.g. `/var/lib/jarvis` (XFS/ext4).
-3. Open **egress only** as needed for DNS + `api.derivws.com:443`; no public inbound for the collector.
+3. Open **egress only** for DNS and the selected provider's documented endpoint on port 443; no public inbound for the collector.
 4. Create unprivileged user `jarvis-collector`.
 5. Install CPython 3.11.18, clone the repo at a **reviewed commit**, create a venv, then install `python -m pip install "pip==26.3" -r requirements-market-data.lock`. The full CI/test dependency set is `requirements-lock.txt`; do not install test tooling on the production collector unless needed.
 6. Enable **chrony** or systemd-timesyncd; document NTP sources.
@@ -27,16 +29,18 @@ Operator performs these steps in the Oracle console / CLI (not automated here):
 9. Schedule **daily backup** of SQLite (online backup API or consistent snapshot) to a second path or object storage.
 10. Run **restore drill** once before claiming ops readiness.
 
-## 3. Smoke tests on host (after provision)
+## 3. Smoke tests on host (after provider selection and provision)
 
 ```bash
 # Paper foundation (no market-data required)
 python scripts/diagnose.py
 python main.py --check
 
-# Short read-only collect (candidate evidence only)
+# Deriv only: run after its public catalog advertises canonical FRXEURUSD.
 python -m research.deriv_feed --duration-seconds 120 --db /var/lib/jarvis/deriv_eurusd_forward.sqlite3
 ```
+
+As of 2026-11-14, the read-only Deriv catalog returned 95 active symbols and included EUR/USD as `underlying_symbol=frxEURUSD`. The parser now accepts both the legacy and current field names. A read-only subscription attempt returned `MarketIsClosed` and the provider response stated the market would reopen at `2026-11-16 00:00:00`; repeat the subscription smoke test after reopening before scheduling a collector or provisioning a 30-day run. Public tick provenance remains unverified, so this does not remove the Issue #9 gate.
 
 Confirm:
 

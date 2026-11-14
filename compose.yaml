@@ -1,0 +1,35 @@
+services:
+  jarvis:
+    build: .
+    command: ["python", "main.py", "--serve", "--container-bind"]
+    ports:
+      - "127.0.0.1:${STATUS_PORT:-8787}:8787"
+    environment:
+      JARVIS_MODE: paper
+      KILL_SWITCH: "true"
+      STATUS_HOST: 127.0.0.1
+      STATUS_PORT: "8787"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.getenv('STATUS_PORT', '8787') + '/health', timeout=2).read()"
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  telegram:
+    build: .
+    command: ["python", "-m", "apps.telegram.bot"]
+    profiles: ["telegram"]
+    depends_on:
+      jarvis:
+        condition: service_healthy
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      JARVIS_STATUS_URL: http://jarvis:8787/health
+    restart: unless-stopped

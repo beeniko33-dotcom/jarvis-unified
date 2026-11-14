@@ -68,6 +68,7 @@ class ResolverValidatorAgreementTests(unittest.TestCase):
         for entry in (
             [{"symbol": "frxEURUSD", "display_name": "EUR/USD"}],
             [{"symbol": "frxEURUSD", "display_name": "EUR/USD", "market": "forex"}],
+            [{"underlying_symbol": "frxEURUSD", "underlying_symbol_name": "EUR/USD"}],
         ):
             symbol = resolve_eurusd_symbol(entry)
             item = build_tick_observation(

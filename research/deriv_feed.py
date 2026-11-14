@@ -37,11 +37,18 @@ def resolve_eurusd_symbol(active_symbols: Any) -> str:
     for entry in active_symbols:
         if not isinstance(entry, dict):
             continue
-        symbol = entry.get("symbol")
-        if not isinstance(symbol, str) or not symbol.strip():
+        symbol_codes = []
+        for key in ("symbol", "underlying_symbol"):
+            value = entry.get(key)
+            if isinstance(value, str) and value.strip():
+                symbol_codes.append(value.strip())
+        if len({code.upper() for code in symbol_codes}) > 1:
+            raise ValueError("Deriv active_symbols entry has conflicting symbol codes")
+        if not symbol_codes:
             continue
-        code = symbol.strip()
-        display = str(entry.get("display_name", "")).replace("/", "").replace(" ", "").upper()
+        code = symbol_codes[0]
+        display_name = entry.get("display_name") or entry.get("underlying_symbol_name", "")
+        display = str(display_name).replace("/", "").replace(" ", "").upper()
         if code.upper() == "FRXEURUSD":
             matches.append(code)
         elif display == "EURUSD":

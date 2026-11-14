@@ -57,3 +57,12 @@ See `docs/LEVEL_3_FORWARD_VALIDATION.md`.
 The collector does not fetch market data or place orders. The operator must supply licensed,
 authorized provider observations and retain original provider payloads. A 30-day coverage-gate
 pass is not Level 3 certification. CI fixtures and historical replay do not count.
+
+## Current Deriv public-feed limitation
+
+On 2026-11-14, a read-only smoke check against Deriv's documented public WebSocket returned an
+`active_symbols` catalog with 95 entries but no canonical `FRXEURUSD` symbol. The collector
+therefore failed closed before subscribing to ticks. The documented [`active_symbols`](https://developers.deriv.com/docs/data/active-symbols/)
+and [`ticks`](https://developers.deriv.com/docs/data/ticks/) requests require an active symbol;
+do not substitute another instrument or claim evidence until EUR/USD is actually listed and
+the provider-provenance gate in issue #9 is independently resolved.

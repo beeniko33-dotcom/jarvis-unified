@@ -14,8 +14,10 @@ python -m unittest discover -s tests -v
 python scripts/diagnose.py
 python main.py --report
 python main.py --serve
-# Open apps/dashboard/index.html in a browser
+# Open http://127.0.0.1:8787/dashboard in a browser or install it as a PWA
 ```
+
+`docker compose up --build` starts the same local-only status API and dashboard. The container's port must remain published to `127.0.0.1` only. Stop any existing process on port 8787 first. Add `--profile telegram` only after setting `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`; the bot exposes only fixed, paper-only health information to the allowlisted chat.
 
 ## Controlled paper validation
 

@@ -1,27 +1,24 @@
-# Scraper package integration boundary
+# Scraper package
 
-This directory is reserved for the history-preserving import of the complete legitimate `advanced-scraper` codebase. Do not replace it with a reduced toy scraper. Preserve supported CLI workflows, parsers, crawl scheduling, storage backends, content extraction, media metadata, normalization, and plugin interfaces after an inventory and compatibility pass.
+This independent package provides a deliberately narrow, allowlisted public-page metadata workflow. It is not a trading dependency and does not import or execute the original `advanced-scraper` runtime.
 
-## Current foundation (pre-import)
+## Current functionality
 
-`safe_fetch.py` provides an SSRF-hardened HTTP(S) fetch primitive:
+- `safe_fetch.py` retrieves one public HTTP(S) page using the address validated during DNS resolution. The CLI requires explicit exact-host allowlist entries, including any redirect destinations.
+- `extract.py` returns only bounded page title, meta description, and headings; it does not return or persist page bodies or extract personal identities.
 
-- Scheme allowlist: `http`, `https` only
-- Blocks loopback, private, link-local, multicast, reserved, and cloud-metadata ranges
-- DNS resolution validation + redirect revalidation
-- Timeouts, max response size, max redirects
-- No shell, no local module execution, no credentialed URLs
+The fetcher allows standard HTTP/HTTPS ports only, rejects embedded credentials and non-public destinations, revalidates every redirect against the allowlist, and bounds total time (including DNS resolution and connection attempts), response bytes, and redirect count. It tries each validated address in order while time remains. Allowlisting does not permit private or loopback addresses. Compressed responses are rejected rather than expanded without a decompression limit.
 
-Use this module as the only network entry point when exposing any remote fetch API later.
+Run one authorized-page extraction with:
 
-## Security contract for network fetching
+```bash
+python -m packages.scraper --allow-host example.com https://example.com
+```
 
-- Support broad public-web crawling and extraction, subject to site terms, robots policy where applicable, and configured rate limits.
-- Permit only explicitly supported URL schemes (normally HTTP/HTTPS).
-- Resolve hostnames and reject loopback, private, link-local, multicast, reserved, and cloud-metadata destinations, including IPv4-mapped IPv6.
-- Revalidate every redirect and every DNS resolution to mitigate rebinding.
-- Bound connect/read timeouts, response bytes, decompression ratio, redirect count, concurrency, and per-host request rate.
-- Never expose arbitrary local module execution, shell commands, exploit testing, brute-force, flooding, or reverse-shell functions through a remote API.
-- Keep the standalone local CLI and legitimate extraction features independently usable.
+Repeat `--allow-host` for each exact hostname that may receive a request, including redirect destinations. The command prints JSON metadata only. Respect the target site's terms and applicable robots policy; this package does not implement crawling or robots-policy handling.
 
-The original `advanced-scraper` repository remains untouched. Import its Git history in a separate migration step after file-by-file capability and dependency review.
+## Migration boundary
+
+The original repository remains unchanged and is not imported as executable code. Its CLI includes credential/OTP brute-force and directory-enumeration functionality, spoofed forwarding headers, and personal-data extraction. Those features are outside Jarvis's supported scraper surface. Its API's current main revision requires a bearer token and defaults to loopback, but its scraping methods bypass this package's SSRF protections; the upstream security document describes a different, older API. See `docs/SCRAPER.md` before proposing additional migration.
+
+Use `safe_fetch_url` as the only network entry point for future Jarvis extraction work. Crawling, robots-policy handling, and remote API exposure are not implemented.

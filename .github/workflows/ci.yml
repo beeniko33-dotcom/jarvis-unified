@@ -56,3 +56,12 @@ jobs:
 
       - name: Run foundation diagnostic
         run: python scripts/diagnose.py
+
+      - name: Build and smoke-test the local container
+        run: |
+          docker compose up -d --build --wait
+          docker compose exec -T jarvis python -c "import json, urllib.request; base='http://127.0.0.1:8787'; assert json.loads(urllib.request.urlopen(base+'/health').read())['ok']; features=json.loads(urllib.request.urlopen(base+'/features').read()); assert features['read_only'] and features['execution_mode']=='paper_only'; dashboard=urllib.request.urlopen(base+'/dashboard'); assert dashboard.status==200 and dashboard.read(); print('container health, feature inventory, and dashboard ok')"
+
+      - name: Stop the local container
+        if: always()
+        run: docker compose down

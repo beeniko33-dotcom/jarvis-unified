@@ -120,10 +120,13 @@ def build_demo_payload(broker, settings, risk) -> dict:
     }
 
 
-def print_banner() -> None:
+def print_banner(*, container_bind: bool = False) -> None:
     print("Jarvis Unified")
     print("Paper-first broker-agnostic trading runtime")
-    print("Status: safe / read-only / localhost-only")
+    if container_bind:
+        print("Status: safe / read-only / bind-all; publish the container port to localhost only")
+    else:
+        print("Status: safe / read-only / localhost-only")
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -135,7 +138,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--version", action="store_true", help="print the application version")
     parser.add_argument("--report", action="store_true", help="print a combined version + health + summary snapshot")
     parser.add_argument("--demo", action="store_true", help="execute a paper-trading demo and print a richer snapshot")
-    parser.add_argument("--serve", action="store_true", help="start localhost read-only status API")
+    parser.add_argument("--serve", action="store_true", help="start read-only status API")
+    parser.add_argument(
+        "--container-bind",
+        action="store_true",
+        help="allow a container-interface bind; publish the port to localhost only",
+    )
     parser.add_argument("--host", help="bind address for status API; must remain localhost-only")
     parser.add_argument("--port", type=int, help="port for status API")
 
@@ -184,6 +192,38 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--reflection-db", default="var/learning/reflections.sqlite3",
                         help="SQLite path for factual session reflection history")
     args = parser.parse_args(argv)
+    if args.container_bind:
+        other_actions = (
+            args.check,
+            args.health,
+            args.summary,
+            args.status,
+            args.version,
+            args.report,
+            args.demo,
+            args.memory_list,
+            args.remember,
+            args.forget,
+            args.personality_context,
+            args.import_paper_ledger,
+            args.paper_outcomes,
+            args.paper_reflections,
+            args.shadow_review,
+            args.shadow_history,
+            args.shadow_decision,
+            args.experiment_list,
+            args.experiment_verify,
+            args.experiment_verify_sources,
+            args.experiment_compare,
+        )
+        if (
+            not args.serve
+            or args.host is not None
+            or args.port is not None
+            or any(other_actions)
+        ):
+            raise ValueError("--container-bind requires --serve as the only action")
+
     if args.memory_list or args.remember or args.forget or args.personality_context:
         from dataclasses import asdict
         from core.learning.memory_store import MemoryStore
@@ -297,10 +337,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     settings = Settings.from_env()
     broker, risk = build_runtime(settings)
 
-    host = args.host or settings.status_host
+    host = "0.0.0.0" if args.container_bind else args.host or settings.status_host
     port = args.port if args.port is not None else settings.status_port
-    if host not in {"127.0.0.1", "localhost"}:
-        raise ValueError("Status API may only bind to localhost until authentication and TLS are configured")
+    if not args.container_bind and host not in {"127.0.0.1", "localhost"}:
+        raise ValueError(
+            "Status API may only bind to localhost until authentication and TLS are configured"
+        )
 
     if args.check:
         print_banner()
@@ -330,14 +372,14 @@ def main(argv: Sequence[str] | None = None) -> None:
         print(json.dumps(build_status_payload(broker, settings, risk), default=str))
         return
     if args.serve:
-        print_banner()
+        print_banner(container_bind=args.container_bind)
         from apps.api.status import serve
 
         def status():
             return build_status_payload(broker, settings, risk)
 
         try:
-            serve(host, port, status)
+            serve(host, port, status, allow_container_bind=args.container_bind)
         except RuntimeError as exc:
             raise SystemExit(str(exc)) from exc
         return

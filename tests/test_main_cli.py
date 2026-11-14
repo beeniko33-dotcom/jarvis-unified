@@ -94,10 +94,11 @@ class MainCliTests(unittest.TestCase):
     def test_serve_accepts_custom_host_and_port(self):
         seen = {}
 
-        def fake_serve(host, port, provider):
+        def fake_serve(host, port, provider, *, allow_container_bind=False):
             seen["host"] = host
             seen["port"] = port
             seen["status"] = provider()
+            seen["allow_container_bind"] = allow_container_bind
 
         with patch.dict(os.environ, {}, clear=True):
             with patch("apps.api.status.serve", fake_serve):
@@ -106,6 +107,33 @@ class MainCliTests(unittest.TestCase):
         self.assertEqual(seen["host"], "localhost")
         self.assertEqual(seen["port"], 9001)
         self.assertEqual(seen["status"]["broker"], "paper")
+        self.assertFalse(seen["allow_container_bind"])
+
+    def test_container_bind_requires_serve_and_is_explicit(self):
+        seen = {}
+
+        def fake_serve(host, port, provider, *, allow_container_bind=False):
+            seen["host"] = host
+            seen["allow_container_bind"] = allow_container_bind
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("apps.api.status.serve", fake_serve):
+                main(["--serve", "--container-bind"])
+
+        self.assertEqual(seen["host"], "0.0.0.0")
+        self.assertTrue(seen["allow_container_bind"])
+
+    def test_container_bind_rejects_non_serve_actions(self):
+        for action in (
+            ["--check"],
+            ["--memory-list"],
+            ["--experiment-list"],
+            ["--paper-outcomes"],
+            ["--port", "8788"],
+        ):
+            with self.subTest(action=action), patch.dict(os.environ, {}, clear=True):
+                with self.assertRaisesRegex(ValueError, "only action"):
+                    main(["--serve", "--container-bind", *action])
 
     def test_status_prints_json_snapshot(self):
         buffer = io.StringIO()
