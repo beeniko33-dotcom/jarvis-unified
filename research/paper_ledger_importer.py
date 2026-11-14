@@ -45,7 +45,7 @@ def _order_summary(order: dict) -> dict:
     keys = (
         "order_id", "client_order_id", "symbol", "side", "quantity",
         "fill_price", "status", "created_at", "filled_quantity",
-        "remaining_quantity",
+        "remaining_quantity", "metadata",
     )
     return {key: order.get(key) for key in keys}
 
@@ -54,7 +54,7 @@ def _working_summary(order: dict) -> dict:
     keys = (
         "order_id", "client_order_id", "symbol", "side", "quantity",
         "limit_price", "filled_quantity", "average_fill_price", "status",
-        "created_at", "applied_fill_ids",
+        "created_at", "applied_fill_ids", "metadata",
     )
     return {key: order.get(key) for key in keys}
 
