@@ -145,12 +145,21 @@ class ForwardEvidenceStore:
             raise ValueError("observation timestamp is in the future")
         if age > self.max_observation_age:
             raise ValueError("stale/backfilled observation rejected; only fresh observations may be ingested")
+        # Trust-bearing fields are controlled exclusively by this store. Strip any
+        # caller-supplied flags before persisting the payload; a forged JSON boolean
+        # must not survive as an apparently authoritative field.
+        for trust_field in (
+            "verified", "provenance_verified", "evidence_credit",
+            "tls_verified", "evidence_class",
+        ):
+            item.pop(trust_field, None)
         # No trusted provider verifier is implemented yet. Never accept a public
         # callback here: arbitrary caller code could return True and mint evidence.
         verified = False
         item["ingested_at"] = now.isoformat(timespec="microseconds")
         item["provenance_verified"] = verified
-        item["evidence_class"] = "verified_forward_candidate" if verified else "unverified_candidate"
+        item["evidence_credit"] = False
+        item["evidence_class"] = "unverified_candidate"
         payload = json.dumps(item, sort_keys=True, separators=(",", ":"))
         try:
             # Acquire the SQLite write reservation before reading the chain tail.
