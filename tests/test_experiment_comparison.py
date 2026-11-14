@@ -85,7 +85,7 @@ class ExperimentComparisonTests(unittest.TestCase):
         self.assertEqual(result["status"], "mismatch")
         report = compare_experiments(self.store, left.experiment_id, right.experiment_id)
         self.assertFalse(report.comparable)
-        self.assertIn("source_journal_hash_mismatch", report.reasons)
+        self.assertIn("source_references_not_independently_verified", report.reasons)
 
     def test_dataset_and_time_mismatch_are_explicit(self):
         left = self.record("left", {}, {"pnl": 1})
