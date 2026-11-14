@@ -60,13 +60,20 @@ A file checksum only proves that a file has not changed relative to a trusted ch
 
 Before evidence credit: implement provider-specific verification; test positive, invalid signature, tampering, replay, stale, wrong instrument, key rotation/revocation and raw-payload binding; retain raw artifacts; obtain independent technical review; obtain explicit owner approval for the selected provider and any paid commitment.
 
-## Implemented candidate adapter\n\n`research/biquote_feed.py` subscribes to the documented public SignalR hub (rather than polling REST), validates EURUSD bid/ask/mid, provider timestamp, source label, `marketState`, `stale` and `quoteAgeSeconds`, and preserves the decoded event as canonical JSON plus a SHA-256 digest of that serialization. It does not retain original WebSocket wire bytes; the digest is an integrity/deduplication aid, not provider-origin authentication. It rejects closed/stale/malformed quotes and writes only to the existing unverified candidate store. The store strips caller-supplied trust flags and forces `provenance_verified=false` and `evidence_credit=false`.\n\nRun with `pip install -e '.[market-data]'` and `python -m research.biquote_feed --duration-seconds 3600`. This is a bounded candidate collector, not a 30-day evidence runner.\n\n## Current next steps
+## Implemented candidate adapter
+
+`research/biquote_feed.py` subscribes to the documented public SignalR hub (rather than polling REST), validates EURUSD bid/ask/mid, provider timestamp, source label, `marketState`, `stale` and `quoteAgeSeconds`, and preserves the decoded event as canonical JSON plus a SHA-256 digest of that serialization. It does not retain original WebSocket wire bytes; the digest is an integrity/deduplication aid, not provider-origin authentication. It rejects closed/stale/malformed quotes and writes only to the existing unverified candidate store. The store strips caller-supplied trust flags and forces `provenance_verified=false` and `evidence_credit=false`.
+
+Run with `pip install -e '.[market-data]'` and `python -m research.biquote_feed --duration-seconds 3600`. This is a bounded candidate collector, not a 30-day evidence runner.
+
+## Current next steps
 
 - [ ] Request written technical and licence answers from free candidate provider(s), without creating an account or agreeing to terms on the owner's behalf.
 - [ ] Biquote's published terms permit product use and storage at no cost, but disclaim accuracy, completeness, timeliness and availability and provide no SLA. Verify EURUSD metadata, source label, quote timestamp, stale flag and quote age on actual responses before use. Do not expose its raw feed as a public data product.
 - [ ] Treat the API's example `source: MetaTrader 5 (Broker 1)` and symbol catalogue `source: MT5` as provider-supplied metadata, not independently authenticated lineage.
 - [ ] Do not automatically scrape FXCM or Dukascopy historical data until permissions and terms are resolved.
-- [ ] Build candidate adapter and adversarial tests only after the existing collector interfaces and storage schema are reviewed against this contract.
+- [x] Implement the isolated candidate adapter and deterministic offline validation tests; CI and live event compatibility still require confirmation.
+- [ ] Before enabling collection, add/verify bounded queue saturation, reconnect/resubscribe, duplicate/replay, restart/recovery and shutdown tests against the actual SignalR client.
 - [ ] Keep the 30-day evidence clock stopped until the signed/auditable provider path and operational controls pass independent review.
 
 ## References
