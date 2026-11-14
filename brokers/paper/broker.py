@@ -29,6 +29,7 @@ class WorkingOrder:
     status: str = OrderStatus.OPEN.value
     created_at: datetime = field(default_factory=_utc_now)
     applied_fill_ids: set[str] = field(default_factory=set)
+    metadata: dict = field(default_factory=dict)
 
     @property
     def remaining_quantity(self) -> Decimal:
@@ -227,6 +228,7 @@ class PaperBroker:
                 OrderStatus.FILLED.value,
                 filled_quantity=order.quantity,
                 remaining_quantity=Decimal("0"),
+                metadata=dict(order.metadata),
             )
             self._orders[result.order_id] = result
             self._client_ids[order.client_order_id] = result
@@ -269,6 +271,7 @@ class PaperBroker:
                 side=order.side,
                 quantity=order.quantity,
                 limit_price=order.price,
+                metadata=dict(order.metadata),
             )
             self._working[order_id] = working
             result = OrderResult(
@@ -281,6 +284,7 @@ class PaperBroker:
                 OrderStatus.OPEN.value,
                 filled_quantity=Decimal("0"),
                 remaining_quantity=order.quantity,
+                metadata=dict(order.metadata),
             )
             self._orders[order_id] = result
             return result
@@ -353,6 +357,7 @@ class PaperBroker:
                 working.status,
                 filled_quantity=working.filled_quantity,
                 remaining_quantity=working.remaining_quantity,
+                metadata=dict(working.metadata),
             )
             self._orders[order_id] = result
             if fill_id is not None:
@@ -388,6 +393,7 @@ class PaperBroker:
                 OrderStatus.CANCELLED.value,
                 filled_quantity=working.filled_quantity,
                 remaining_quantity=working.remaining_quantity,
+                metadata=dict(working.metadata),
             )
             self._orders[order_id] = result
             self._working.pop(order_id, None)
@@ -416,6 +422,7 @@ class PaperBroker:
                     w.status,
                     w.created_at,
                     set(w.applied_fill_ids),
+                    dict(w.metadata),
                 )
                 for w in self._working.values()
             ]
