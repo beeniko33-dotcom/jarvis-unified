@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import sqlite3
+import time
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -92,8 +93,9 @@ class ForwardEvidenceStore:
         self.max_observation_age = max_observation_age
         self.future_tolerance = future_tolerance
         database.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(database)
-        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db = sqlite3.connect(database, timeout=30, isolation_level=None)
+        self.db.execute("PRAGMA busy_timeout=30000")
+        self._enable_wal(self.db)
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.executescript("""
         CREATE TABLE IF NOT EXISTS observations(
@@ -126,6 +128,22 @@ class ForwardEvidenceStore:
             raise ValueError("database configuration mismatch; use a separate database per validation run")
         self.db.execute("INSERT OR IGNORE INTO metadata VALUES('configuration', ?)", (encoded,))
         self.db.commit()
+
+    @staticmethod
+    def _enable_wal(db):
+        """journal_mode=WAL needs a brief exclusive lock and ignores busy_timeout."""
+        deadline = time.monotonic() + 30
+        delay = 0.01
+        while True:
+            try:
+                db.execute("PRAGMA journal_mode=WAL")
+                return
+            except sqlite3.OperationalError as exc:
+                message = str(exc).lower()
+                if ("locked" not in message and "busy" not in message) or time.monotonic() >= deadline:
+                    raise
+                time.sleep(delay)
+                delay = min(delay * 2, 0.1)
 
     def close(self):
         self.db.close()
