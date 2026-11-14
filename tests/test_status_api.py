@@ -43,6 +43,16 @@ class StatusApiTests(unittest.TestCase):
             self.assertEqual(payload["mode"], "paper")
             self.assertTrue(payload["kill_switch"])
 
+    def test_features_endpoint_is_read_only_and_paper_only(self):
+        with urlopen(self.base + "/features", timeout=2) as response:
+            payload = json.loads(response.read())
+            self.assertEqual(response.status, 200)
+            self.assertTrue(payload["read_only"])
+            self.assertEqual(payload["execution_mode"], "paper_only")
+            ids = {item["id"] for item in payload["features"]}
+            self.assertIn("kill_switch", ids)
+            self.assertIn("demo_live_execution", ids)
+
     def test_unknown_route_is_not_found(self):
         with self.assertRaises(HTTPError) as error:
             urlopen(self.base + "/execute", timeout=2)

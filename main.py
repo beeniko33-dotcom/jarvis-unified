@@ -30,10 +30,13 @@ def build_runtime(settings: Settings):
 
 
 def build_status_payload(broker, settings, risk) -> dict:
+    from core.feature_registry import feature_state_inventory
+
     account = broker.get_account()
     return {
         "mode": settings.mode,
         "broker": "paper",
+        "feature_inventory": feature_state_inventory(),
         "kill_switch": risk.halted,
         "account": asdict(account),
         "positions": [asdict(p) for p in broker.get_positions()],
