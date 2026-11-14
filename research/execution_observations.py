@@ -147,14 +147,19 @@ class ExecutionObservationJournal:
             ).fetchone()
         return row is not None
 
-    def list_events(self, *, limit: int = 100) -> list[dict[str, Any]]:
+    def list_events(
+        self, *, limit: int = 100, after_seq: int = 0
+    ) -> list[dict[str, Any]]:
         if not isinstance(limit, int) or limit < 1 or limit > 10000:
             raise ValueError("limit must be between 1 and 10000")
+        if not isinstance(after_seq, int) or after_seq < 0:
+            raise ValueError("after_seq must be a non-negative integer")
         with closing(self._connect()) as db:
             rows = db.execute(
                 """SELECT seq,event_id,schema_version,occurred_at,event_type,payload,
-                previous_hash,event_hash FROM execution_observations ORDER BY seq LIMIT ?""",
-                (limit,),
+                previous_hash,event_hash FROM execution_observations
+                WHERE seq>? ORDER BY seq LIMIT ?""",
+                (after_seq, limit),
             ).fetchall()
         return [{
             "seq": row[0], "event_id": row[1], "schema_version": row[2],
