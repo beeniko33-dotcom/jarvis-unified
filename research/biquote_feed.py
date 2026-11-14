@@ -1,6 +1,6 @@
 """Biquote SignalR EURUSD candidate collector.
 
-This feed is indicative and aggregated. This module records candidate-only observations;
+This feed is indicative and aggregated. It records candidate-only observations;
 it cannot authenticate individual ticks and never grants Level 3 evidence credit.
 """
 from __future__ import annotations
@@ -8,8 +8,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import threading
+import queue
 import time
+import threading
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -21,6 +22,7 @@ INSTRUMENT = "EURUSD"
 SOURCE_PREFIX = "biquote-signalr:"
 STRATEGY_ID = "sma-crossover-long"
 STRATEGY_VERSION = "1.0.0"
+MAX_PENDING_TICKS = 10_000
 
 
 def _utc_datetime(value: Any, field: str) -> datetime:
@@ -52,28 +54,24 @@ def build_tick_observation(
     max_quote_age_seconds: int = 120,
     future_tolerance_seconds: int = 30,
 ) -> dict:
-    """Validate a Biquote event's shape/freshness; never authenticate its origin."""
+    """Validate an event's shape and freshness; never authenticate its origin."""
     if not isinstance(tick, dict):
         raise ValueError("Biquote tick must be a JSON object")
     if tick.get("symbol") != INSTRUMENT:
         raise ValueError("Biquote symbol must be exactly EURUSD")
-
     source = tick.get("source")
     if not isinstance(source, str) or not source.strip():
         raise ValueError("Biquote source metadata is required")
-
     if tick.get("stale") is not False:
         raise ValueError("stale or unspecified Biquote quote rejected")
     if tick.get("marketState") != "open":
         raise ValueError("Biquote market must be open for forward candidate ingestion")
-
     try:
         quote_age = Decimal(str(tick["quoteAgeSeconds"]))
     except (KeyError, InvalidOperation, TypeError, ValueError) as exc:
         raise ValueError("quoteAgeSeconds is required and must be numeric") from exc
     if not quote_age.is_finite() or quote_age < 0 or quote_age > max_quote_age_seconds:
         raise ValueError("Biquote quote is stale or has invalid quote age")
-
     observed = _utc_datetime(tick.get("timestamp"), "timestamp")
     if not isinstance(received_at, datetime) or received_at.tzinfo is None or received_at.utcoffset() is None:
         raise ValueError("collector receive time must be timezone-aware")
@@ -83,15 +81,16 @@ def build_tick_observation(
         raise ValueError("Biquote timestamp is too far in the future")
     if age > max_quote_age_seconds:
         raise ValueError("Biquote timestamp is stale")
-
     bid = _positive_decimal(tick.get("bid"), "bid")
     ask = _positive_decimal(tick.get("ask"), "ask")
     mid = _positive_decimal(tick.get("mid"), "mid")
     if ask < bid or not bid <= mid <= ask:
         raise ValueError("Biquote bid/ask/mid relationship is invalid")
 
-    raw_payload = json.dumps(tick, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    digest = hashlib.sha256(raw_payload.encode("utf-8")).hexdigest()
+    # This is a canonical JSON serialization digest, not a hash of original
+    # WebSocket wire bytes and not proof of provider origin.
+    canonical_payload = json.dumps(tick, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    digest = hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
     return {
         "observed_at": observed.isoformat(timespec="microseconds"),
         "instrument": INSTRUMENT,
@@ -110,7 +109,7 @@ def build_tick_observation(
         "quote_age_seconds_at_source": str(quote_age),
         "market_state": "open",
         "provider_event_id": None,
-        "raw_payload": raw_payload,
+        "raw_payload": canonical_payload,
         "raw_payload_sha256": digest,
         "trust_classification": "candidate_unverified",
         "evidence_credit": False,
@@ -124,14 +123,17 @@ def collect(
     *,
     max_quote_age_seconds: int = 120,
 ) -> dict:
-    """Collect public Biquote SignalR events for a bounded session."""
+    """Collect public Biquote SignalR events for a bounded session.
+
+    SignalR callbacks run outside the collector's main thread. They only enqueue
+    bounded events; all SQLite access stays on the main thread.
+    """
     if duration_seconds < 1:
         raise ValueError("duration_seconds must be positive")
     try:
         from signalrcore.hub_connection_builder import HubConnectionBuilder
     except ImportError as exc:
         raise RuntimeError("Install optional dependency: pip install -e '.[market-data]'") from exc
-
     from research.forward_validation import ForwardEvidenceStore
 
     store = ForwardEvidenceStore(
@@ -144,15 +146,25 @@ def collect(
         max_observation_age=timedelta(seconds=max_quote_age_seconds),
         future_tolerance=timedelta(seconds=30),
     )
-    stop_at = time.monotonic() + duration_seconds
-    finished = threading.Event()
+    pending: queue.Queue = queue.Queue(maxsize=MAX_PENDING_TICKS)
     lock = threading.Lock()
-    counts = {"inserted": 0, "duplicates": 0, "rejected": 0, "received": 0}
+    counts = {
+        "inserted": 0, "duplicates": 0, "rejected": 0,
+        "received": 0, "dropped_queue_full": 0,
+    }
     connection = None
+    report = None
 
     def on_tick(tick):
         with lock:
             counts["received"] += 1
+        try:
+            pending.put_nowait(tick)
+        except queue.Full:
+            with lock:
+                counts["dropped_queue_full"] += 1
+
+    def process_tick(tick):
         try:
             item = build_tick_observation(
                 tick,
@@ -167,7 +179,7 @@ def collect(
                 counts["rejected"] += 1
 
     def subscribe():
-        # SignalR's on_open callback also runs after a successful reconnect.
+        # on_open is called after initial connection and successful reconnect.
         connection.send("Subscribe", [INSTRUMENT])
 
     connection = (
@@ -183,29 +195,44 @@ def collect(
     )
     connection.on("ReceiveTick", on_tick)
     connection.on_open(subscribe)
+    stop_at = time.monotonic() + duration_seconds
     try:
         connection.start()
         while time.monotonic() < stop_at:
-            time.sleep(min(0.5, max(0.0, stop_at - time.monotonic())))
-        finished.set()
+            remaining = max(0.0, stop_at - time.monotonic())
+            try:
+                tick = pending.get(timeout=min(0.5, remaining))
+            except queue.Empty:
+                continue
+            process_tick(tick)
+        connection.stop()
+        connection = None
+        # Drain events already delivered before closing the store.
+        while True:
+            try:
+                process_tick(pending.get_nowait())
+            except queue.Empty:
+                break
     finally:
-        finished.set()
-        try:
-            connection.stop()
-        finally:
-            report = store.report(30)
-            with lock:
-                report.update(counts)
-            report.update({
-                "collector": "Biquote public SignalR read-only",
-                "instrument": INSTRUMENT,
-                "trust_classification": "candidate_unverified",
-                "evidence_credit": False,
-                "trading_actions": 0,
-                "account_authentication_used": False,
-                "level_3_certification": False,
-            })
-            store.close()
+        if connection is not None:
+            try:
+                connection.stop()
+            except Exception:
+                pass
+        report = store.report(30)
+        with lock:
+            report.update(counts)
+        report.update({
+            "collector": "Biquote public SignalR read-only",
+            "instrument": INSTRUMENT,
+            "trust_classification": "candidate_unverified",
+            "evidence_credit": False,
+            "trading_actions": 0,
+            "account_authentication_used": False,
+            "level_3_certification": False,
+            "queue_capacity": MAX_PENDING_TICKS,
+        })
+        store.close()
     return report
 
 
@@ -217,13 +244,14 @@ def main() -> int:
     args = parser.parse_args()
     if args.duration_seconds < 1 or args.max_quote_age_seconds < 1:
         parser.error("duration and max quote age must be positive")
-    report = collect(
+    result = collect(
         args.duration_seconds,
         args.db,
         max_quote_age_seconds=args.max_quote_age_seconds,
     )
-    print(json.dumps(report, indent=2))
-    return 0 if report.get("event_chain_valid") else 1
+    print(json.dumps(result, indent=2))
+    # A valid empty hash chain is not proof the collector received usable data.
+    return 0 if result.get("event_chain_valid") and result.get("inserted", 0) > 0 else 1
 
 
 if __name__ == "__main__":
