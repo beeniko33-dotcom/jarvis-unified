@@ -73,7 +73,11 @@ class MainCliTests(unittest.TestCase):
             history_after = io.StringIO()
             with redirect_stdout(history_after):
                 main(["--shadow-history", "--shadow-db", str(shadow_db)])
-            decisions = json.loads(history_after.getvalue())["candidate_history"][0]["owner_reviews"]
+            reviewed = next(
+                item for item in json.loads(history_after.getvalue())["candidate_history"]
+                if item["candidate_id"] == candidate_id
+            )
+            decisions = reviewed["owner_reviews"]
             self.assertEqual(decisions[0]["decision"], "needs_more_evidence")
 
     def test_serve_accepts_custom_host_and_port(self):
