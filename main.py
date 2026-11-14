@@ -134,7 +134,38 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--serve", action="store_true", help="start localhost read-only status API")
     parser.add_argument("--host", help="bind address for status API; must remain localhost-only")
     parser.add_argument("--port", type=int, help="port for status API")
+
+    parser.add_argument("--memory-db", default="var/learning/memory.sqlite3",
+                        help="SQLite path for personal learning memories")
+    parser.add_argument("--memory-list", action="store_true",
+                        help="list saved personal preferences as JSON")
+    parser.add_argument("--remember", nargs=3, metavar=("CATEGORY", "KEY", "CONTENT"),
+                        help="explicitly save a personal preference")
+    parser.add_argument("--forget", nargs=2, metavar=("CATEGORY", "KEY"),
+                        help="delete a saved personal preference")
+    parser.add_argument("--personality-context", action="store_true",
+                        help="print Jarvis core personality plus saved preference context")
     args = parser.parse_args(argv)
+    if args.memory_list or args.remember or args.forget or args.personality_context:
+        from dataclasses import asdict
+        from core.learning.memory_store import MemoryStore
+        from core.learning.personality import build_personality_context
+
+        memory = MemoryStore(args.memory_db)
+        if args.remember:
+            item = memory.put(*args.remember, source="explicit_user_feedback", confidence=1.0)
+            print(json.dumps(asdict(item), indent=2))
+            return
+        if args.forget:
+            print(json.dumps({"deleted": memory.delete(*args.forget)}))
+            return
+        if args.memory_list:
+            print(memory.export_json())
+            return
+        if args.personality_context:
+            print(build_personality_context(memory))
+            return
+
     settings = Settings.from_env()
     broker, risk = build_runtime(settings)
 
