@@ -146,6 +146,25 @@ def _summary(event_type: str, data: dict[str, Any]) -> str:
             # test the rendered facts rather than only the top-level dict.
             if not any(fact.startswith(f"{key}=") for fact in facts):
                 facts.append(f"{key}=unknown")
+    # Ledger imports carry per-order lineage under each order record. Keep the
+    # association explicit rather than attributing session-level results to an entry.
+    orders = data.get("orders")
+    if isinstance(orders, list):
+        for order in orders:
+            if not isinstance(order, dict):
+                continue
+            order_id = _render_lineage("order_id", order.get("order_id"))
+            order_metadata = order.get("metadata")
+            lineage = order_metadata.get("research_lineage") if isinstance(order_metadata, dict) else None
+            if not isinstance(lineage, dict):
+                continue
+            rendered = [
+                f"{key}={_render_lineage(key, value)}"
+                for key, value in lineage.items()
+                if key in _HASH_FIELDS or key in _IDENTIFIER_FIELDS
+            ]
+            if rendered:
+                facts.append(f"order_lineage[{order_id}]: " + ", ".join(rendered))
     suffix = "; ".join(facts) if facts else "no additional fields recorded"
     return f"Recorded {label}; {suffix}"
 

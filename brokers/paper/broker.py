@@ -16,6 +16,43 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+_LINEAGE_KEYS = frozenset({
+    "strategy_id", "strategy_version", "strategy_config_hash", "experiment_id",
+    "signal_id", "signal_type", "signal_context_hash", "data_source_id", "data_hash",
+    "quote_source", "quote_timestamp",
+})
+_SECRET_MARKERS = ("secret", "password", "token", "private_key", "api_key", "authorization", "bearer")
+
+
+def _paper_metadata(metadata: dict) -> dict:
+    """Persist only bounded, non-secret research lineage; never arbitrary metadata."""
+    lineage = metadata.get("research_lineage") if isinstance(metadata, dict) else None
+    if not isinstance(lineage, dict):
+        return {}
+    safe = {}
+    for key, value in lineage.items():
+        if key not in _LINEAGE_KEYS or not isinstance(value, str):
+            continue
+        value = value.strip()
+        lowered = value.lower()
+        if not value or len(value) > 128 or any(marker in lowered for marker in _SECRET_MARKERS):
+            continue
+        if key in {"strategy_config_hash", "signal_context_hash", "data_hash"}:
+            if not (8 <= len(value) <= 128 and all(ch in "0123456789abcdefABCDEF" for ch in value)):
+                continue
+        elif key == "quote_timestamp":
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if parsed.tzinfo is None or parsed.utcoffset() is None:
+                continue
+        elif not all(ch.isalnum() or ch in "_-.:/" for ch in value):
+            continue
+        safe[key] = value
+    return {"research_lineage": safe} if safe else {}
+
+
 @dataclass
 class WorkingOrder:
     order_id: str
@@ -29,6 +66,7 @@ class WorkingOrder:
     status: str = OrderStatus.OPEN.value
     created_at: datetime = field(default_factory=_utc_now)
     applied_fill_ids: set[str] = field(default_factory=set)
+    metadata: dict = field(default_factory=dict)
 
     @property
     def remaining_quantity(self) -> Decimal:
@@ -227,6 +265,7 @@ class PaperBroker:
                 OrderStatus.FILLED.value,
                 filled_quantity=order.quantity,
                 remaining_quantity=Decimal("0"),
+                metadata=_paper_metadata(order.metadata),
             )
             self._orders[result.order_id] = result
             self._client_ids[order.client_order_id] = result
@@ -269,6 +308,7 @@ class PaperBroker:
                 side=order.side,
                 quantity=order.quantity,
                 limit_price=order.price,
+                metadata=_paper_metadata(order.metadata),
             )
             self._working[order_id] = working
             result = OrderResult(
@@ -281,6 +321,7 @@ class PaperBroker:
                 OrderStatus.OPEN.value,
                 filled_quantity=Decimal("0"),
                 remaining_quantity=order.quantity,
+                metadata=_paper_metadata(order.metadata),
             )
             self._orders[order_id] = result
             return result
@@ -353,6 +394,7 @@ class PaperBroker:
                 working.status,
                 filled_quantity=working.filled_quantity,
                 remaining_quantity=working.remaining_quantity,
+                metadata=dict(working.metadata),
             )
             self._orders[order_id] = result
             if fill_id is not None:
@@ -388,6 +430,7 @@ class PaperBroker:
                 OrderStatus.CANCELLED.value,
                 filled_quantity=working.filled_quantity,
                 remaining_quantity=working.remaining_quantity,
+                metadata=dict(working.metadata),
             )
             self._orders[order_id] = result
             self._working.pop(order_id, None)
@@ -416,6 +459,7 @@ class PaperBroker:
                     w.status,
                     w.created_at,
                     set(w.applied_fill_ids),
+                    dict(w.metadata),
                 )
                 for w in self._working.values()
             ]

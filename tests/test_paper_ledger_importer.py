@@ -8,6 +8,8 @@ from pathlib import Path
 from brokers.paper import PersistentPaperBroker
 from core.models import OrderRequest, Side
 from research.execution_observations import ExecutionObservationJournal
+from research.paper_reflection_bridge import build_paper_reflections
+from research.reflection import ReflectionStore
 from research.paper_ledger_importer import (
     PaperLedgerImportError,
     import_paper_ledger,
@@ -88,6 +90,76 @@ class PaperLedgerImporterTests(unittest.TestCase):
     def test_missing_source_is_rejected(self):
         with self.assertRaises(PaperLedgerImportError):
             import_paper_ledger(self.root / "missing.sqlite", self.journal)
+
+
+    def test_research_lineage_survives_restart_import_and_reflection_without_secrets(self):
+        metadata = {
+            "research_lineage": {
+                "strategy_id": "momentum-v2",
+                "quote_timestamp": "2026-11-14T15:40:00+00:00",
+                "signal_context_hash": "not-a-valid-hash",
+                "strategy_version": "2.1",
+                "strategy_config_hash": "a" * 64,
+                "experiment_id": "exp-2026-11",
+                "data_hash": "b" * 64,
+            },
+            "api_key": "must-not-persist",
+        }
+        broker = PersistentPaperBroker(
+            Decimal("1000"), database_path=self.root / "lineage.sqlite"
+        )
+        result = broker.place_order(
+            OrderRequest("SOLUSD", Side.BUY, Decimal("1"), Decimal("100"), "lineage-1",
+                         metadata=metadata)
+        )
+        self.assertEqual(result.metadata["research_lineage"]["strategy_id"], "momentum-v2")
+        self.assertNotIn("api_key", result.metadata)
+        self.assertEqual(result.metadata["research_lineage"]["quote_timestamp"], "2026-11-14T15:40:00+00:00")
+        self.assertNotIn("signal_context_hash", result.metadata["research_lineage"])
+
+        restored = PersistentPaperBroker(
+            Decimal("1000"), database_path=self.root / "lineage.sqlite"
+        )
+        self.assertEqual(
+            restored._orders[result.order_id].metadata["research_lineage"]["experiment_id"],
+            "exp-2026-11",
+        )
+        self.assertTrue(restored.verify_ledger())
+
+        journal = ExecutionObservationJournal(self.root / "lineage-learning.sqlite")
+        import_paper_ledger(self.root / "lineage.sqlite", journal)
+        reflections = build_paper_reflections(
+            journal, ReflectionStore(self.root / "lineage-reflections.sqlite")
+        )
+        statements = " ".join(fact["statement"] for item in reflections for fact in item.facts)
+        self.assertIn("strategy_id=momentum-v2", statements)
+        self.assertIn("experiment_id=exp-2026-11", statements)
+        self.assertIn("strategy_config_hash=" + "a" * 64, statements)
+        self.assertNotIn("must-not-persist", statements)
+
+    def test_working_order_lineage_survives_partial_fill_and_restart(self):
+        broker = PersistentPaperBroker(
+            Decimal("1000"), database_path=self.root / "working-lineage.sqlite"
+        )
+        opened = broker.place_working_order(
+            OrderRequest(
+                "SOLUSD", Side.BUY, Decimal("2"), Decimal("100"), "working-lineage",
+                metadata={"research_lineage": {"strategy_id": "breakout-v1"}, "access_token": "do-not-store"},
+            )
+        )
+        broker.apply_partial_fill(opened.order_id, Decimal("1"), fill_id="fill-a")
+        restored = PersistentPaperBroker(
+            Decimal("1000"), database_path=self.root / "working-lineage.sqlite"
+        )
+        self.assertEqual(
+            restored._orders[opened.order_id].metadata["research_lineage"]["strategy_id"],
+            "breakout-v1",
+        )
+        self.assertNotIn("access_token", restored._orders[opened.order_id].metadata)
+        self.assertEqual(
+            restored.get_working_orders()[0].metadata["research_lineage"]["strategy_id"],
+            "breakout-v1",
+        )
 
 
 if __name__ == "__main__":

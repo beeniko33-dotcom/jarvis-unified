@@ -19,7 +19,7 @@ from typing import Callable
 
 from core.models import AccountSnapshot, OrderRequest, OrderResult, OrderStatus, Position, Side
 from core.sqlite_wal import enable_wal
-from .broker import PaperBroker, WorkingOrder
+from .broker import PaperBroker, WorkingOrder, _paper_metadata
 
 
 class CrashInjectedError(RuntimeError):
@@ -121,6 +121,7 @@ class PersistentPaperBroker(PaperBroker):
             "remaining_quantity": str(
                 o.remaining_quantity if o.remaining_quantity is not None else "0"
             ),
+            "metadata": o.metadata,
         }
 
     def _order_from_dict(self, o: dict) -> OrderResult:
@@ -130,6 +131,7 @@ class PersistentPaperBroker(PaperBroker):
             o["status"], _dt(o["created_at"]),
             filled_quantity=Decimal(o.get("filled_quantity", o["quantity"])),
             remaining_quantity=Decimal(o.get("remaining_quantity", "0")),
+            metadata=_paper_metadata(o.get("metadata", {})),
         )
 
     def _snapshot(self) -> dict:
@@ -151,6 +153,7 @@ class PersistentPaperBroker(PaperBroker):
                 "average_fill_price": str(w.average_fill_price),
                 "status": w.status, "created_at": w.created_at.isoformat(),
                 "applied_fill_ids": sorted(w.applied_fill_ids),
+                "metadata": w.metadata,
             } for w in self._working.values()],
             "fill_results": {
                 fid: {"order_id": order_id, **self._order_to_dict(result)}
@@ -200,6 +203,7 @@ class PersistentPaperBroker(PaperBroker):
                 status=w["status"],
                 created_at=_dt(w["created_at"]),
                 applied_fill_ids=set(w.get("applied_fill_ids", [])),
+                metadata=_paper_metadata(w.get("metadata", {})),
             )
             self._working[wo.order_id] = wo
         self._fill_results = {}
