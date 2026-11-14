@@ -109,6 +109,14 @@ class ExecutionService:
         )
 
     def submit(self, order: OrderRequest) -> OrderResult:
+        if (
+            self.observation_journal is not None
+            and self.observation_journal.has_event(f"decision:{order.client_order_id}")
+        ):
+            raise PermissionError(
+                "client_order_id already has an execution observation; "
+                "reconcile the prior attempt and use a new ID for a new order"
+            )
         reservation_id: str | None = None
         with self._submission_lock:
             account = self.broker.get_account()
