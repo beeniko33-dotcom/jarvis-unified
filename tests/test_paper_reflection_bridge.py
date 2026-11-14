@@ -63,6 +63,29 @@ class PaperReflectionBridgeTests(unittest.TestCase):
         self.assertIn("paper ledger paper_close", ledger_fact["statement"])
         self.assertIn("realized_delta=-1.25", ledger_fact["statement"])
 
+    def test_reflection_preserves_explicit_strategy_and_experiment_metadata(self):
+        self.journal.append(
+            event_id="decision-1", event_type="risk_approved",
+            data={
+                "client_order_id": "client-1",
+                "strategy_id": "sma-reference",
+                "strategy_version": "2.1",
+                "strategy_config_hash": "a" * 64,
+                "experiment_id": "experiment-123",
+                "quote_source": "deriv-candidate",
+                "quote_timestamp": "2026-11-10T12:00:00+00:00",
+                "metadata": {"signal_id": "signal-77", "signal_type": "entry"},
+            },
+            occurred_at=self.day_one,
+        )
+        reflection = build_paper_reflections(self.journal, self.store)[0]
+        statement = reflection.facts[0]["statement"]
+        self.assertIn("strategy_id=sma-reference", statement)
+        self.assertIn("strategy_version=2.1", statement)
+        self.assertIn("experiment_id=experiment-123", statement)
+        self.assertIn("signal_id=signal-77", statement)
+        self.assertIn("quote_source=deriv-candidate", statement)
+
     def test_replay_is_idempotent_and_does_not_duplicate_reflections(self):
         self.journal.append(
             event_id="risk-1", event_type="risk_approved",

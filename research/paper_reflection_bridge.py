@@ -36,16 +36,27 @@ def _summary(event_type: str, data: dict[str, Any]) -> str:
         "symbol", "side", "quantity", "filled_quantity", "remaining_quantity",
         "result_status", "status", "reason", "risk_reason", "order_id",
         "client_order_id", "realized_delta", "commission_delta",
-        "source_event_seq", "source_utc_day",
+        "source_event_seq", "source_utc_day", "strategy_id", "strategy_version",
+        "strategy_config_hash", "experiment_id", "quote_source", "quote_timestamp",
+        "signal_id", "signal_type", "signal_context_hash", "data_source_id",
+        "data_hash",
     )
     facts = []
+    metadata = data.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
     for key in fields:
         if key in data:
             value = data[key]
-            facts.append(f"{key}={value if value is not None else 'unknown'}")
+        elif key in metadata:
+            value = metadata[key]
+        else:
+            continue
+        facts.append(f"{key}={value if value is not None else 'unknown'}")
     if event_type == "paper_ledger_event":
         for key in ("realized_delta", "commission_delta"):
-            if key not in data:
+            # A value may have arrived through the metadata allowlist above, so
+            # test the rendered facts rather than only the top-level dict.
+            if not any(fact.startswith(f"{key}=") for fact in facts):
                 facts.append(f"{key}=unknown")
     suffix = "; ".join(facts) if facts else "no additional fields recorded"
     return f"Recorded {label}; {suffix}"
