@@ -18,6 +18,7 @@ from uuid import uuid4
 from typing import Callable
 
 from core.models import AccountSnapshot, OrderRequest, OrderResult, OrderStatus, Position, Side
+from core.sqlite_wal import enable_wal
 from .broker import PaperBroker, WorkingOrder
 
 
@@ -53,7 +54,7 @@ class PersistentPaperBroker(PaperBroker):
         )
         self._peak_equity = Decimal(starting_balance)
         with closing(self._connect()) as db:
-            db.execute("PRAGMA journal_mode=WAL")
+            enable_wal(db)
             db.execute("PRAGMA synchronous=FULL")
             db.execute("""CREATE TABLE IF NOT EXISTS paper_state (
                 singleton INTEGER PRIMARY KEY CHECK(singleton=1), payload TEXT NOT NULL)""")
