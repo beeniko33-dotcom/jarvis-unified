@@ -46,7 +46,10 @@ class ExecutionServiceTests(unittest.TestCase):
             self.assertEqual(journal.list_events()[0]["event_type"], "risk_rejected")
             self.assertEqual(self.broker.get_account().open_positions, 0)
             self.risk.release_kill_switch(explicit_operator_action=True)
-            result = service.submit(self.order)
+            retry_with_new_identity = OrderRequest(
+                "EURUSD", Side.BUY, Decimal("0.1"), Decimal("10"), "order-1-retry"
+            )
+            result = service.submit(retry_with_new_identity)
             events = journal.list_events()
             self.assertEqual([e["event_type"] for e in events],
                              ["risk_rejected", "risk_approved", "broker_order_result"])
