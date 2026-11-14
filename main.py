@@ -155,6 +155,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                                   help="verify and import a paper ledger into the learning journal")
     learning_actions.add_argument("--paper-outcomes", action="store_true",
                                   help="print loss-inclusive paper outcome analytics")
+    learning_actions.add_argument("--paper-reflections", action="store_true",
+                                  help="build factual reflections from verified learning-journal events")
     learning_actions.add_argument("--shadow-review", action="store_true",
                                   help="generate evidence-linked, advisory-only learning candidates")
     learning_actions.add_argument("--shadow-history", action="store_true",
@@ -176,6 +178,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--shadow-notes", default="", help="optional note for an owner review decision")
     parser.add_argument("--shadow-db", default="var/learning/shadow_candidates.sqlite3",
                         help="SQLite path for persistent shadow recommendation history")
+    parser.add_argument("--reflection-db", default="var/learning/reflections.sqlite3",
+                        help="SQLite path for factual session reflection history")
     args = parser.parse_args(argv)
     if args.memory_list or args.remember or args.forget or args.personality_context:
         from dataclasses import asdict
@@ -224,8 +228,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             print(json.dumps(report.to_dict(), indent=2, default=str))
             return
 
-    if (args.import_paper_ledger or args.paper_outcomes or args.shadow_review
-            or args.shadow_history or args.shadow_decision):
+    if (args.import_paper_ledger or args.paper_outcomes or args.paper_reflections
+            or args.shadow_review or args.shadow_history or args.shadow_decision):
         from pathlib import Path
         from research.execution_observations import ExecutionObservationJournal
         from research.shadow_advisor import ShadowCandidateStore
@@ -248,8 +252,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             return
         if args.import_paper_ledger and not args.paper_ledger_db:
             parser.error("--import-paper-ledger requires --paper-ledger-db")
-        if (args.paper_outcomes or args.shadow_review) and not Path(args.learning_db).is_file():
-            parser.error("paper analytics require an existing --learning-db")
+        if (args.paper_outcomes or args.paper_reflections or args.shadow_review) and not Path(args.learning_db).is_file():
+            parser.error("paper learning reports require an existing --learning-db")
         journal = ExecutionObservationJournal(args.learning_db)
         if args.import_paper_ledger:
             from dataclasses import asdict
@@ -260,6 +264,19 @@ def main(argv: Sequence[str] | None = None) -> None:
             return
         from research.paper_outcomes import build_paper_outcome_report
 
+        if args.paper_reflections:
+            from dataclasses import asdict
+            from research.paper_reflection_bridge import build_paper_reflections
+            from research.reflection import ReflectionStore
+
+            reflections = build_paper_reflections(
+                journal, ReflectionStore(args.reflection_db)
+            )
+            print(json.dumps({
+                "reflection_count": len(reflections),
+                "reflections": [asdict(item) for item in reflections],
+            }, indent=2, default=str))
+            return
         report = build_paper_outcome_report(journal)
         if args.shadow_review:
             from research.shadow_advisor import generate_shadow_candidates
