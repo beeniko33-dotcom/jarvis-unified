@@ -52,13 +52,16 @@ class OrphanedReservationTests(unittest.TestCase):
         self.assertEqual(store.committed_for_symbol("EURUSD"), Decimal("0"))
 
         # Restart and reconcile. The orphan must be reclaimed, not left forever.
-        # Age the row first: a real restart happens well after the grace period,
-        # and a fresh reservation must never be reclaimed (see the other test).
+        # A real crash leaves the owner process gone and its lease lapsed, so
+        # reproduce that durable state: drop the owner row and expire the lease.
+        # Age alone is deliberately *not* enough (see test_reservation_lease_repro).
         import sqlite3
         db = sqlite3.connect(self.db)
         db.execute(
-            "UPDATE exposure_reservations SET created_at = created_at - 3600"
+            "UPDATE exposure_reservations SET created_at = created_at - 3600,"
+            " lease_expires_at = lease_expires_at - 3600"
         )
+        db.execute("DELETE FROM reservation_owners")
         db.commit()
         db.close()
 
