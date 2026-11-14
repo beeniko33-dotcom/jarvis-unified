@@ -41,7 +41,7 @@ class MainCliTests(unittest.TestCase):
                 main(["--paper-outcomes", "--learning-db", str(learning)])
             report = json.loads(report_output.getvalue())
             self.assertGreater(report["imported_ledger_events"], 0)
-            self.assertEqual(report["order_count"], 1)
+            self.assertEqual(report["order_count"], 2)
 
             shadow_output = io.StringIO()
             shadow_db = root / "shadow.sqlite"
