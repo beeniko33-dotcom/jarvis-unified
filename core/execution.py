@@ -9,6 +9,7 @@ from uuid import uuid4
 from brokers.base import Broker
 from core.models import OrderRequest, OrderResult
 from core.risk import ExposureReservationStore, ReservationError, RiskEngine
+from research.execution_observations import ExecutionObservationJournal
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,14 @@ class ReconciliationRequiredError(RuntimeError):
         self.symbol = symbol
         self.notional = notional
         self.corr_group = corr_group
+
+
+class ExecutionObservationPersistenceError(RuntimeError):
+    """The paper broker action completed but its learning observation did not persist."""
+
+    def __init__(self, message: str, *, order_result: OrderResult) -> None:
+        super().__init__(message)
+        self.order_result = order_result
 
 
 class PositionClosedReleaseFailedError(RuntimeError):
@@ -68,10 +77,12 @@ class ExecutionService:
         risk: RiskEngine,
         *,
         reservations: ExposureReservationStore | None = None,
+        observation_journal: ExecutionObservationJournal | None = None,
     ) -> None:
         self.broker = broker
         self.risk = risk
         self.reservations = reservations
+        self.observation_journal = observation_journal
         self._submission_lock = RLock()
         self._release_failures: list[dict] = []
 
@@ -86,9 +97,28 @@ class ExecutionService:
             return []
         return self.reservations.list_pending_transfers()
 
+    def _record_observation(self, event_id: str, event_type: str, data: dict) -> None:
+        if self.observation_journal is None:
+            return
+        # JSON round-trip with string fallback preserves Decimal/datetime metadata
+        # without silently dropping values or making assumptions about their schema.
+        import json
+        safe_data = json.loads(json.dumps(data, default=str, sort_keys=True))
+        self.observation_journal.append(
+            event_id=event_id, event_type=event_type, data=safe_data
+        )
+
     def submit(self, order: OrderRequest) -> OrderResult:
         reservation_id: str | None = None
         with self._submission_lock:
+            if (
+                self.observation_journal is not None
+                and self.observation_journal.has_event(f"decision:{order.client_order_id}")
+            ):
+                raise PermissionError(
+                    "client_order_id already has an execution observation; "
+                    "reconcile the prior attempt and use a new ID for a new order"
+                )
             account = self.broker.get_account()
             unrealized_pnl = account.equity - account.balance
             positions = self.broker.get_positions()
@@ -145,6 +175,27 @@ class ExecutionService:
                 current_equity=account.equity,
                 peak_equity=account.peak_equity,
             )
+            observation = {
+                "client_order_id": order.client_order_id,
+                "symbol": symbol,
+                "side": order.side.value if hasattr(order.side, "value") else str(order.side),
+                "quantity": str(order.quantity),
+                "requested_price": str(order.price),
+                "notional": str(notional),
+                "strategy_id": order.metadata.get("strategy_id"),
+                "strategy_version": order.metadata.get("strategy_version"),
+                "strategy_config_hash": order.metadata.get("strategy_config_hash"),
+                "experiment_id": order.metadata.get("experiment_id"),
+                "quote_source": order.metadata.get("quote_source"),
+                "quote_timestamp": order.metadata.get("quote_timestamp"),
+                "metadata": dict(order.metadata),
+                "risk_reason": decision.reason,
+            }
+            self._record_observation(
+                f"decision:{order.client_order_id}",
+                "risk_approved" if decision.allowed else "risk_rejected",
+                observation,
+            )
             if not decision.allowed:
                 raise PermissionError(f"order rejected by risk engine: {decision.reason}")
 
@@ -163,11 +214,24 @@ class ExecutionService:
                         existing_group_exposure=correlated_exposure,
                     )
                 except ReservationError as exc:
+                    rejected = dict(observation)
+                    rejected["risk_reason"] = str(exc)
+                    self._record_observation(
+                        f"reservation-rejected:{order.client_order_id}",
+                        "reservation_rejected",
+                        rejected,
+                    )
                     raise PermissionError(f"order rejected by risk engine: {exc}") from exc
 
             try:
                 result = self.broker.place_order(order)
-            except Exception:
+            except Exception as broker_exc:
+                failed = dict(observation)
+                failed["error_type"] = type(broker_exc).__name__
+                failed["error"] = str(broker_exc)
+                self._record_observation(
+                    f"broker-error:{order.client_order_id}", "broker_submission_error", failed
+                )
                 if reservation_id is not None and self.reservations is not None:
                     try:
                         self.reservations.release(reservation_id)
@@ -187,6 +251,26 @@ class ExecutionService:
                             exc,
                         )
                 raise
+
+            try:
+                filled = dict(observation)
+                filled.update({
+                    "order_id": result.order_id,
+                    "result_status": result.status,
+                    "fill_price": str(result.fill_price),
+                    "filled_quantity": str(result.filled_quantity),
+                    "remaining_quantity": str(result.remaining_quantity),
+                    "created_at": result.created_at.isoformat(),
+                })
+                self._record_observation(
+                    f"broker-result:{result.client_order_id}", "broker_order_result", filled
+                )
+            except Exception as exc:
+                raise ExecutionObservationPersistenceError(
+                    "paper broker action completed but its observation was not persisted; "
+                    "reconcile against the broker ledger before retrying",
+                    order_result=result,
+                ) from exc
 
             if self.reservations is not None and reservation_id is not None:
                 # 1) Persist intent BEFORE conversion so a crash mid-commit is recoverable.
@@ -334,6 +418,28 @@ class ExecutionService:
             if position is None:
                 raise ValueError(f"no open position for {normalized}")
             result = self.broker.close_position(normalized, price)
+            try:
+                self._record_observation(
+                    f"position-close:{result.order_id}",
+                    "position_close_result",
+                    {
+                        "order_id": result.order_id,
+                        "client_order_id": result.client_order_id,
+                        "symbol": normalized,
+                        "requested_price": str(price),
+                        "fill_price": str(result.fill_price),
+                        "quantity": str(result.quantity),
+                        "filled_quantity": str(result.filled_quantity),
+                        "status": result.status,
+                        "created_at": result.created_at.isoformat(),
+                    },
+                )
+            except Exception as exc:
+                raise ExecutionObservationPersistenceError(
+                    "paper position close completed but its observation was not persisted; "
+                    "reconcile against the broker ledger before retrying",
+                    order_result=result,
+                ) from exc
             if self.reservations is not None:
                 # Release what was actually committed for this position. The
                 # committed notional is authoritative: recomputing it from
