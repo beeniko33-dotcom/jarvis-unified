@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -46,7 +47,7 @@ class ExperienceStoreTests(unittest.TestCase):
                     start_at=start.isoformat(), end_at=(start + timedelta(days=1)).isoformat(),
                     metrics={},
                 )
-            with store._connect() as db:
+            with closing(store._connect()) as connection, connection as db:
                 db.execute(
                     "UPDATE research_experiments SET config_json=? WHERE experiment_id=?",
                     ('{"window":999}', item.experiment_id),
@@ -65,7 +66,7 @@ class ExperienceStoreTests(unittest.TestCase):
                 data_status="historical", start_at=start.isoformat(),
                 end_at=(start + timedelta(days=1)).isoformat(), metrics={"pnl": 0},
             )
-            with store._connect() as db:
+            with closing(store._connect()) as connection, connection as db:
                 db.execute(
                     "UPDATE research_experiments SET config_json=NULL WHERE experiment_id=?",
                     (item.experiment_id,),

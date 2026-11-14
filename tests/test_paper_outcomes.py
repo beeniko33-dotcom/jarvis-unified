@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -101,7 +102,7 @@ class PaperOutcomeAnalyticsTests(unittest.TestCase):
             OrderRequest("EURUSD", Side.BUY, Decimal("0.1"), Decimal("10"), "entry-1")
         )
         import_paper_ledger(self.source, self.journal)
-        with sqlite3.connect(self.journal.path) as db:
+        with closing(sqlite3.connect(self.journal.path)) as connection, connection as db:
             db.execute(
                 "UPDATE execution_observations SET payload=? WHERE seq=1",
                 ('{"tampered":true}',),

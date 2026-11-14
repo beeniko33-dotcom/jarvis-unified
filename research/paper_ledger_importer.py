@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 from research.execution_observations import ExecutionObservationJournal
 

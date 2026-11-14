@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -66,7 +67,7 @@ class ExecutionObservationJournalTests(unittest.TestCase):
             event_id="decision-1", event_type="risk_rejected",
             data={"reason": "original"}, occurred_at=self.when,
         )
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as connection, connection as db:
             db.execute(
                 "UPDATE execution_observations SET payload=? WHERE event_id=?",
                 ('{"tampered":true}', "decision-1"),

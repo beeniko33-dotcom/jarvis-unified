@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -113,7 +114,7 @@ class PaperReflectionBridgeTests(unittest.TestCase):
             event_id="risk-1", event_type="risk_approved", data={},
             occurred_at=self.day_one,
         )
-        with sqlite3.connect(self.journal_path) as db:
+        with closing(sqlite3.connect(self.journal_path)) as connection, connection as db:
             db.execute("UPDATE execution_observations SET payload='{}' WHERE event_id='risk-1'")
         with self.assertRaises(PaperReflectionBridgeError):
             build_paper_reflections(self.journal, self.store)

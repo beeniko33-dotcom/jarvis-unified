@@ -80,6 +80,62 @@ class StatusApiTests(unittest.TestCase):
                 self.assertIn(content_type, response.headers["Content-Type"])
                 self.assertGreater(len(response.read()), 0)
 
+    def test_query_string_does_not_break_routing(self):
+        # An installed PWA can be launched as /dashboard?source=pwa.
+        with urlopen(self.base + "/dashboard?source=pwa", timeout=2) as response:
+            self.assertEqual(response.status, 200)
+            self.assertIn("text/html", response.headers["Content-Type"])
+        with urlopen(self.base + "/health?probe=1", timeout=2) as response:
+            self.assertEqual(json.loads(response.read()), {"ok": True})
+        with self.assertRaises(HTTPError) as error:
+            urlopen(self.base + "/execute?x=/health", timeout=2)
+        error.exception.close()
+        self.assertEqual(error.exception.code, 404)
+
+    def test_png_icons_are_real_pngs_with_declared_sizes(self):
+        import struct
+
+        manifest = json.loads(self._get("/manifest.webmanifest"))
+        png_icons = [icon for icon in manifest["icons"] if icon["type"] == "image/png"]
+        self.assertTrue({"any", "maskable"} <= {icon["purpose"] for icon in png_icons})
+        for icon in png_icons:
+            with self.subTest(src=icon["src"]):
+                body = self._get(icon["src"])
+                self.assertEqual(body[:8], b"\x89PNG\r\n\x1a\n")
+                width, height = struct.unpack(">II", body[16:24])
+                self.assertEqual(f"{width}x{height}", icon["sizes"])
+        apple = self._get("/icons/apple-touch-icon.png")
+        self.assertEqual(apple[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertIn('href="/icons/apple-touch-icon.png"', self._get("/dashboard").decode())
+
+    def test_every_manifest_icon_and_shell_entry_is_served(self):
+        import re
+
+        manifest = json.loads(self._get("/manifest.webmanifest"))
+        for icon in manifest["icons"]:
+            with self.subTest(icon=icon["src"]):
+                self.assertGreater(len(self._get(icon["src"])), 0)
+        worker = self._get("/service-worker.js").decode()
+        shell = re.findall(r"'(/[^']*)'", worker.split("APP_SHELL = [", 1)[1].split("];", 1)[0])
+        self.assertIn("/dashboard", shell)
+        for path in shell:
+            with self.subTest(shell=path):
+                self.assertGreater(len(self._get(path)), 0)
+
+    def test_service_worker_never_caches_live_endpoints(self):
+        import re
+
+        worker = self._get("/service-worker.js").decode()
+        shell = re.findall(r"'(/[^']*)'", worker.split("APP_SHELL = [", 1)[1].split("];", 1)[0])
+        for live in ("/health", "/status", "/features", "/self-check", "/"):
+            self.assertNotIn(live, shell)
+        # Requests outside the shell must fall through to the network untouched.
+        self.assertIn("!APP_SHELL.includes(url.pathname)) return;", worker)
+
+    def _get(self, path):
+        with urlopen(self.base + path, timeout=2) as response:
+            return response.read()
+
     def test_serve_reports_port_in_use(self):
         occupied = ThreadingHTTPServer(("127.0.0.1", 0), StatusHandler)
         port = occupied.server_port

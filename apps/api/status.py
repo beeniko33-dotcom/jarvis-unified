@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlsplit
 
 
 _DASHBOARD_DIR = Path(__file__).resolve().parents[1] / "dashboard"
@@ -13,6 +14,10 @@ _STATIC_ASSETS = {
     "/manifest.webmanifest": (_DASHBOARD_DIR / "manifest.webmanifest", "application/manifest+json"),
     "/service-worker.js": (_DASHBOARD_DIR / "service-worker.js", "text/javascript; charset=utf-8"),
     "/icon.svg": (_DASHBOARD_DIR / "icon.svg", "image/svg+xml"),
+    "/icons/icon-192.png": (_DASHBOARD_DIR / "icons" / "icon-192.png", "image/png"),
+    "/icons/icon-512.png": (_DASHBOARD_DIR / "icons" / "icon-512.png", "image/png"),
+    "/icons/icon-maskable-512.png": (_DASHBOARD_DIR / "icons" / "icon-maskable-512.png", "image/png"),
+    "/icons/apple-touch-icon.png": (_DASHBOARD_DIR / "icons" / "apple-touch-icon.png", "image/png"),
 }
 
 
@@ -20,8 +25,11 @@ class StatusHandler(BaseHTTPRequestHandler):
     status_provider: Callable[[], dict] = lambda: {}
 
     def do_GET(self) -> None:
-        if self.path in _STATIC_ASSETS:
-            asset_path, content_type = _STATIC_ASSETS[self.path]
+        # Route on the path alone: an installed PWA may be launched with a query string
+        # (for example /dashboard?source=pwa), and routing the raw target would 404 it.
+        route = urlsplit(self.path).path
+        if route in _STATIC_ASSETS:
+            asset_path, content_type = _STATIC_ASSETS[route]
             body = asset_path.read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", content_type)
@@ -31,18 +39,18 @@ class StatusHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
-        if self.path not in {"/", "/health", "/status", "/self-check", "/features"}:
+        if route not in {"/", "/health", "/status", "/self-check", "/features"}:
             self.send_error(404)
             return
 
-        if self.path == "/health":
+        if route == "/health":
             payload = {"ok": True}
-        elif self.path == "/features":
+        elif route == "/features":
             from core.feature_registry import feature_state_inventory
             payload = feature_state_inventory()
-        elif self.path == "/self-check":
+        elif route == "/self-check":
             payload = {"ok": True, "status": "healthy", "mode": "paper", "kill_switch": True}
-        elif self.path == "/":
+        elif route == "/":
             payload = {
                 "ok": True,
                 "service": "jarvis-unified",

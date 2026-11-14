@@ -6,8 +6,13 @@
   <meta name="theme-color" content="#0b1020" />
   <title>Jarvis Unified — Status</title>
   <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Jarvis" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
   <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="/icon.svg" />
+  <link rel="icon" href="/icons/icon-192.png" sizes="192x192" type="image/png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
   <style>
     :root { color-scheme: dark; font-family: ui-sans-serif, system-ui, sans-serif; }
     body { margin: 0; background: #0b1020; color: #e8eefc; }
@@ -47,6 +52,7 @@
       <div class="row"><span class="label">Balance</span><span id="balance">—</span></div>
       <div class="row"><span class="label">Equity</span><span id="equity">—</span></div>
       <div class="row"><span class="label">Open positions</span><span id="positions">—</span></div>
+      <div class="row"><span class="label">Last updated</span><span id="updated">never</span></div>
     </div>
 
     <button id="refresh" type="button">Refresh</button>
@@ -55,6 +61,18 @@
   <script>
     const base = window.location.origin;
     document.getElementById('apiBase').textContent = base;
+
+    const FIELDS = ['mode', 'broker', 'kill', 'balance', 'equity', 'positions'];
+
+    // Never leave values from an earlier successful poll on screen once the API stops
+    // answering: a stale balance or kill-switch state on a status page is misleading.
+    function clearStatus() {
+      for (const id of FIELDS) {
+        const el = document.getElementById(id);
+        el.textContent = '—';
+        el.className = '';
+      }
+    }
 
     async function load() {
       const healthEl = document.getElementById('health');
@@ -67,6 +85,7 @@
       } catch {
         healthEl.textContent = 'unavailable';
         healthEl.className = 'err';
+        clearStatus();
         return;
       }
       try {
@@ -76,21 +95,29 @@
         document.getElementById('mode').textContent = s.mode || '—';
         document.getElementById('broker').textContent = s.broker || '—';
         const kill = document.getElementById('kill');
-        kill.textContent = String(s.kill_switch);
-        kill.className = s.kill_switch ? 'warn' : 'ok';
+        if (typeof s.kill_switch === 'boolean') {
+          kill.textContent = s.kill_switch ? 'engaged' : 'released';
+          kill.className = s.kill_switch ? 'warn' : 'ok';
+        } else {
+          kill.textContent = '—';
+          kill.className = '';
+        }
         const acct = s.account || {};
         document.getElementById('balance').textContent = acct.balance ?? '—';
         document.getElementById('equity').textContent = acct.equity ?? '—';
-        document.getElementById('positions').textContent = (s.positions || []).length;
+        document.getElementById('positions').textContent = Array.isArray(s.positions) ? s.positions.length : '—';
+        document.getElementById('updated').textContent = new Date().toLocaleTimeString();
       } catch {
+        clearStatus();
         document.getElementById('mode').textContent = 'unavailable';
+        document.getElementById('mode').className = 'err';
       }
     }
     document.getElementById('refresh').addEventListener('click', load);
     load();
     setInterval(load, 5000);
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/service-worker.js');
+      navigator.serviceWorker.register('/service-worker.js').catch(() => {});
     }
   </script>
 </body>

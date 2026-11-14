@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -181,8 +182,12 @@ def check_tests() -> bool:
         print(result.stdout)
         print(result.stderr)
         return False
-    lines = [line for line in result.stderr.splitlines() if " ... ok" in line or " ... FAIL" in line]
-    ok(f"unittest discover passed ({len(lines)} cases reported)")
+    match = re.search(r"^Ran (\d+) tests? in", result.stderr, re.MULTILINE)
+    if match is None:
+        fail("unittest finished without reporting a test count")
+        print(result.stderr)
+        return False
+    ok(f"unittest discover passed ({match.group(1)} tests)")
     return True
 
 

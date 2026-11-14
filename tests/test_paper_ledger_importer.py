@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -68,7 +69,7 @@ class PaperLedgerImporterTests(unittest.TestCase):
         self.assertEqual(snapshot["balance"] is not None, True)
 
     def test_corrupt_source_chain_is_rejected_before_any_import(self):
-        with sqlite3.connect(self.source) as db:
+        with closing(sqlite3.connect(self.source)) as connection, connection as db:
             db.execute(
                 "UPDATE paper_events SET payload=? WHERE seq=2",
                 ('{"tampered":true}',),
@@ -78,7 +79,7 @@ class PaperLedgerImporterTests(unittest.TestCase):
         self.assertEqual(self.journal.list_events(), [])
 
     def test_snapshot_tail_mismatch_is_rejected_before_any_import(self):
-        with sqlite3.connect(self.source) as db:
+        with closing(sqlite3.connect(self.source)) as connection, connection as db:
             db.execute(
                 "UPDATE paper_state SET payload=? WHERE singleton=1",
                 ('{"balance":"999"}',),
