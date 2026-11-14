@@ -131,7 +131,7 @@ class PersistentPaperBroker(PaperBroker):
             o["status"], _dt(o["created_at"]),
             filled_quantity=Decimal(o.get("filled_quantity", o["quantity"])),
             remaining_quantity=Decimal(o.get("remaining_quantity", "0")),
-            metadata=o.get("metadata", {}) if isinstance(o.get("metadata", {}), dict) else {},
+            metadata=_paper_metadata(o.get("metadata", {})),
         )
 
     def _snapshot(self) -> dict:
@@ -203,7 +203,7 @@ class PersistentPaperBroker(PaperBroker):
                 status=w["status"],
                 created_at=_dt(w["created_at"]),
                 applied_fill_ids=set(w.get("applied_fill_ids", [])),
-                metadata=w.get("metadata", {}) if isinstance(w.get("metadata", {}), dict) else {},
+                metadata=_paper_metadata(w.get("metadata", {})),
             )
             self._working[wo.order_id] = wo
         self._fill_results = {}
