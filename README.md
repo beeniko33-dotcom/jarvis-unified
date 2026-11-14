@@ -30,7 +30,11 @@ python -m unittest discover -s tests -v
 python scripts/diagnose.py
 python scripts/paper_session.py --allow-entries --ledger var/paper_ledger.jsonl
 python scripts/paper_report.py var/paper_ledger.jsonl --min-days 30
+python main.py --import-paper-ledger --paper-ledger-db var/paper/paper.sqlite --learning-db var/learning/observations.sqlite3
+python main.py --paper-outcomes --learning-db var/learning/observations.sqlite3
 ```
+
+The learning commands import an existing persistent paper-broker SQLite ledger into a separate, hash-chained learning journal, then print loss-inclusive outcome analytics. The importer opens the source ledger read-only and rejects broken hash chains or snapshot mismatches before importing. Repeated imports are idempotent. Reports retain realized P&L and commissions separately, show net results after costs, and calculate drawdown only when source snapshots contain the required marks and account data. P&L is attributed to ledger events and UTC days, not individual entry orders where the source ledger cannot prove that allocation.
 
 `--demo` runs one risk-gated in-memory paper entry, demonstrates a rejected oversized order, closes the demo position, and leaves the kill switch engaged. It does not create forward-validation evidence.
 
