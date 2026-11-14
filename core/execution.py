@@ -418,6 +418,28 @@ class ExecutionService:
             if position is None:
                 raise ValueError(f"no open position for {normalized}")
             result = self.broker.close_position(normalized, price)
+            try:
+                self._record_observation(
+                    f"position-close:{result.order_id}",
+                    "position_close_result",
+                    {
+                        "order_id": result.order_id,
+                        "client_order_id": result.client_order_id,
+                        "symbol": normalized,
+                        "requested_price": str(price),
+                        "fill_price": str(result.fill_price),
+                        "quantity": str(result.quantity),
+                        "filled_quantity": str(result.filled_quantity),
+                        "status": result.status,
+                        "created_at": result.created_at.isoformat(),
+                    },
+                )
+            except Exception as exc:
+                raise ExecutionObservationPersistenceError(
+                    "paper position close completed but its observation was not persisted; "
+                    "reconcile against the broker ledger before retrying",
+                    order_result=result,
+                ) from exc
             if self.reservations is not None:
                 # Release what was actually committed for this position. The
                 # committed notional is authoritative: recomputing it from
