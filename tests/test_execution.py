@@ -1,11 +1,14 @@
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
+import tempfile
+from pathlib import Path
 import unittest
 
 from brokers.paper import PaperBroker
 from core.execution import ExecutionService
 from core.models import OrderRequest, Side
 from core.risk import RiskEngine, RiskLimits
+from research.execution_observations import ExecutionObservationJournal
 
 
 class ExecutionServiceTests(unittest.TestCase):
@@ -34,6 +37,31 @@ class ExecutionServiceTests(unittest.TestCase):
         self.assertEqual(result.status, "filled")
         self.assertEqual(self.broker.get_account().open_positions, 1)
 
+    def test_journal_records_rejected_and_approved_execution_decisions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = ExecutionObservationJournal(Path(tmp) / "observations.sqlite")
+            service = ExecutionService(self.broker, self.risk, observation_journal=journal)
+            with self.assertRaises(PermissionError):
+                service.submit(self.order)
+            self.assertEqual(journal.list_events()[0]["event_type"], "risk_rejected")
+            self.assertEqual(self.broker.get_account().open_positions, 0)
+            self.risk.release_kill_switch(explicit_operator_action=True)
+            result = service.submit(self.order)
+            events = journal.list_events()
+            self.assertEqual([e["event_type"] for e in events],
+                             ["risk_rejected", "risk_approved", "broker_order_result"])
+            self.assertEqual(events[-1]["data"]["order_id"], result.order_id)
+            self.assertTrue(journal.verify())
+
+    def test_journal_preserves_missing_strategy_provenance_as_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = ExecutionObservationJournal(Path(tmp) / "observations.sqlite")
+            service = ExecutionService(self.broker, self.risk, observation_journal=journal)
+            self.risk.release_kill_switch(explicit_operator_action=True)
+            service.submit(self.order)
+            decision = journal.list_events()[0]
+            self.assertIsNone(decision["data"]["strategy_id"])
+            self.assertIsNone(decision["data"]["experiment_id"])
     def test_unrealized_loss_blocks_new_entry(self):
         self.risk = RiskEngine(RiskLimits(Decimal("5"), Decimal("0.5"), 2, True))
         self.service = ExecutionService(self.broker, self.risk)
