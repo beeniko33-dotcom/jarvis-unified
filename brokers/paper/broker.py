@@ -40,6 +40,13 @@ def _paper_metadata(metadata: dict) -> dict:
         if key in {"strategy_config_hash", "signal_context_hash", "data_hash"}:
             if not (8 <= len(value) <= 128 and all(ch in "0123456789abcdefABCDEF" for ch in value)):
                 continue
+        elif key == "quote_timestamp":
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if parsed.tzinfo is None or parsed.utcoffset() is None:
+                continue
         elif not all(ch.isalnum() or ch in "_-.:/" for ch in value):
             continue
         safe[key] = value
