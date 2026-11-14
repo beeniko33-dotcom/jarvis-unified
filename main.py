@@ -1,8 +1,9 @@
 """Jarvis Unified entrypoint. Paper mode only at this maturity level."""
 from __future__ import annotations
 import argparse
+import dataclasses
 import json
-from dataclasses import asdict, asdict as dataclass_asdict
+from dataclasses import asdict
 from decimal import Decimal
 from typing import Sequence
 
@@ -202,7 +203,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         store = ExperienceStore(args.experience_db)
         if args.experiment_list:
             print(json.dumps({
-                "experiments": [dataclass_asdict(item) for item in store.list()],
+                "experiments": [dataclasses.asdict(item) for item in store.list()],
             }, indent=2, default=str))
             return
         if args.experiment_verify:
