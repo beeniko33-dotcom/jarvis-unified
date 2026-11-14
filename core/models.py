@@ -41,6 +41,7 @@ class OrderResult:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     filled_quantity: Decimal | None = None
     remaining_quantity: Decimal | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Frozen dataclass: use object.__setattr__ for derived defaults.
