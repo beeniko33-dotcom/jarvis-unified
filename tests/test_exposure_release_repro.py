@@ -21,7 +21,6 @@ from pathlib import Path
 
 from brokers.paper import PaperBroker
 from core.execution import ExecutionService
-from core.models import OrderRequest, Side
 from core.risk import ExposureReservationStore, RiskEngine, RiskLimits
 
 

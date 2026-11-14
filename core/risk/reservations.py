@@ -11,7 +11,6 @@ import os
 import socket
 import sqlite3
 import time
-import uuid
 from contextlib import closing
 from decimal import Decimal
 from pathlib import Path
