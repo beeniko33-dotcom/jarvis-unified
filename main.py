@@ -154,6 +154,10 @@ def main(argv: Sequence[str] | None = None) -> None:
                                   help="verify and import a paper ledger into the learning journal")
     learning_actions.add_argument("--paper-outcomes", action="store_true",
                                   help="print loss-inclusive paper outcome analytics")
+    learning_actions.add_argument("--shadow-review", action="store_true",
+                                  help="generate evidence-linked, advisory-only learning candidates")
+    parser.add_argument("--shadow-db", default="var/learning/shadow_candidates.sqlite3",
+                        help="SQLite path for persistent shadow recommendation history")
     args = parser.parse_args(argv)
     if args.memory_list or args.remember or args.forget or args.personality_context:
         from dataclasses import asdict
@@ -175,14 +179,14 @@ def main(argv: Sequence[str] | None = None) -> None:
             print(build_personality_context(memory))
             return
 
-    if args.import_paper_ledger or args.paper_outcomes:
+    if args.import_paper_ledger or args.paper_outcomes or args.shadow_review:
         from pathlib import Path
         from research.execution_observations import ExecutionObservationJournal
 
         if args.import_paper_ledger and not args.paper_ledger_db:
             parser.error("--import-paper-ledger requires --paper-ledger-db")
-        if args.paper_outcomes and not Path(args.learning_db).is_file():
-            parser.error("--paper-outcomes requires an existing --learning-db")
+        if (args.paper_outcomes or args.shadow_review) and not Path(args.learning_db).is_file():
+            parser.error("paper analytics require an existing --learning-db")
         journal = ExecutionObservationJournal(args.learning_db)
         if args.import_paper_ledger:
             from dataclasses import asdict
@@ -194,6 +198,19 @@ def main(argv: Sequence[str] | None = None) -> None:
         from research.paper_outcomes import build_paper_outcome_report
 
         report = build_paper_outcome_report(journal)
+        if args.shadow_review:
+            from research.shadow_advisor import (
+                ShadowCandidateStore, generate_shadow_candidates,
+            )
+
+            store = ShadowCandidateStore(args.shadow_db)
+            candidates = generate_shadow_candidates(report, store)
+            print(json.dumps({
+                "report": report.to_dict(),
+                "candidates": [item.to_dict() for item in candidates],
+                "candidate_history": store.list_candidates(),
+            }, indent=2, default=str))
+            return
         print(json.dumps(report.to_dict(), indent=2, default=str))
         return
 
