@@ -8,6 +8,7 @@ COPY apps/ ./apps/
 COPY brokers/ ./brokers/
 COPY core/ ./core/
 COPY packages/ ./packages/
+COPY research/ ./research/
 COPY scripts/ ./scripts/
 COPY main.py ./
 
