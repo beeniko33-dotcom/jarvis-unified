@@ -77,7 +77,7 @@ def _utc_now_iso() -> str:
 
 
 def _session_id() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + f"-{os.getpid()}"
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + f"-{os.getpid()}"
 
 
 def _pid_is_alive(pid: int) -> bool:
