@@ -538,6 +538,45 @@ class ExposureReservationStore:
             for row in rows
         ]
 
+    def reclaim_orphaned_reservations(
+        self, *, older_than_seconds: float = 300.0
+    ) -> list[str]:
+        """Delete reservations that can never be converted or released.
+
+        ``submit()`` creates its reservation with ``ttl_seconds=None`` so a slow
+        broker call is not purged mid-flight. The cost is that a process which
+        dies between ``place_order()`` and ``record_pending_transfer()`` leaves
+        a reservation with no pending transfer and no commit — nothing will ever
+        clear it, and it consumes capacity forever.
+
+        A reservation is only reclaimed when it is older than the grace period
+        *and* has no pending transfer, so an in-flight order is never touched.
+        Returns the reclaimed reservation ids.
+        """
+        if older_than_seconds < 0:
+            raise ReservationError("older_than_seconds must be non-negative")
+        cutoff = time.time() - float(older_than_seconds)
+        with self._lock, closing(self._connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                rows = db.execute(
+                    "SELECT reservation_id FROM exposure_reservations "
+                    "WHERE created_at < ? AND reservation_id NOT IN "
+                    "(SELECT reservation_id FROM exposure_pending)",
+                    (cutoff,),
+                ).fetchall()
+                reclaimed = [row[0] for row in rows]
+                for reservation_id in reclaimed:
+                    db.execute(
+                        "DELETE FROM exposure_reservations WHERE reservation_id=?",
+                        (reservation_id,),
+                    )
+                db.commit()
+                return reclaimed
+            except Exception:
+                db.rollback()
+                raise
+
     def release_committed(self, commit_id: str) -> None:
         with self._lock, closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")

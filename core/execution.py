@@ -363,6 +363,23 @@ class ExecutionService:
             return []
         reconciled: list[dict] = []
         with self._submission_lock:
+            # Reclaim reservations that can never be converted: a process that
+            # died between place_order() and record_pending_transfer() leaves a
+            # reservation with no pending transfer and no commit, which nothing
+            # else would ever clear. Only reservations older than the grace
+            # period are touched, so an in-flight order is never reclaimed.
+            try:
+                for reservation_id in self.reservations.reclaim_orphaned_reservations():
+                    logger.warning(
+                        "reclaimed orphaned reservation id=%s (no pending transfer, "
+                        "no commit) — the fill it covered is unrecoverable",
+                        reservation_id,
+                    )
+                    reconciled.append(
+                        {"reservation_id": reservation_id, "reclaimed": True}
+                    )
+            except Exception as exc:
+                logger.warning("orphaned reservation reclaim failed: %s", exc)
             for item in self.reservations.list_pending_transfers():
                 try:
                     self.reservations.commit_exposure(

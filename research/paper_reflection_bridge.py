@@ -28,6 +28,22 @@ def _utc_day(timestamp: str) -> str:
     return parsed.astimezone(timezone.utc).date().isoformat()
 
 
+def _renderable(value: Any) -> str:
+    """Render a lineage value as a scalar, or refuse it.
+
+    The allowlist constrains which *keys* may reach a reflection, not what
+    their values contain. A nested object under an allowlisted key would be
+    rendered verbatim, so a credential carried inside it would land in the
+    reflection text. Only scalars are lineage; anything structured is not a
+    value this bridge can vouch for, so it is reported as unknown.
+    """
+    if value is None:
+        return "unknown"
+    if isinstance(value, (str, int, float, bool)):
+        return str(value)
+    return "unknown"
+
+
 def _summary(event_type: str, data: dict[str, Any]) -> str:
     """Render only fields actually present; nulls remain explicitly unknown."""
     source_type = data.get("source_event_type")
@@ -51,7 +67,7 @@ def _summary(event_type: str, data: dict[str, Any]) -> str:
             value = metadata[key]
         else:
             continue
-        facts.append(f"{key}={value if value is not None else 'unknown'}")
+        facts.append(f"{key}={_renderable(value)}")
     if event_type == "paper_ledger_event":
         for key in ("realized_delta", "commission_delta"):
             # A value may have arrived through the metadata allowlist above, so
