@@ -5,9 +5,9 @@ Patterns are framed as hypotheses, not facts, and are never applied automaticall
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
-import uuid
 from contextlib import closing
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -119,23 +119,42 @@ class ReflectionStore:
                     "Repeated event types were observed: " + ", ".join(repeated)
                     + ". This is a workflow pattern to review, not proof of improved performance."
                 )
+        normalized_unknowns = list(unknowns or [
+            "No outcome or causal conclusion is available unless recorded in the source events."
+        ])
+        normalized_next_steps = list(next_low_risk_steps or [
+            "Review the cited events and decide whether any proposed workflow change is useful."
+        ])
+        identity = json.dumps({
+            "session_id": session_id.strip(),
+            "facts": facts,
+            "owner_corrections": corrections,
+            "hypotheses": hypotheses,
+            "unknowns": normalized_unknowns,
+            "next_low_risk_steps": normalized_next_steps,
+        }, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+        reflection_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()
         reflection = SessionReflection(
-            reflection_id=str(uuid.uuid4()), session_id=session_id.strip(),
+            reflection_id=reflection_id, session_id=session_id.strip(),
             created_at=datetime.now(timezone.utc).isoformat(), event_count=len(facts),
             facts=facts, owner_corrections=corrections, hypotheses=hypotheses,
-            unknowns=list(unknowns or ["No outcome or causal conclusion is available unless recorded in the source events."]),
-            next_low_risk_steps=list(next_low_risk_steps or ["Review the cited events and decide whether any proposed workflow change is useful."]),
+            unknowns=normalized_unknowns,
+            next_low_risk_steps=normalized_next_steps,
             event_ids=[item.event_id for item in normalized],
         )
         payload = json.dumps(asdict(reflection), sort_keys=True, allow_nan=False)
         with closing(sqlite3.connect(self.database_path)) as db:
             db.execute(
-                "INSERT INTO session_reflections VALUES (?,?,?,?,?)",
+                "INSERT OR IGNORE INTO session_reflections VALUES (?,?,?,?,?)",
                 (reflection.reflection_id, reflection.session_id, reflection.created_at,
                  reflection.event_count, payload),
             )
             db.commit()
-        return reflection
+            stored = db.execute(
+                "SELECT payload_json FROM session_reflections WHERE reflection_id=?",
+                (reflection_id,),
+            ).fetchone()
+        return SessionReflection(**json.loads(stored[0]))
 
     def get(self, reflection_id: str) -> SessionReflection | None:
         with closing(sqlite3.connect(self.database_path)) as db:
