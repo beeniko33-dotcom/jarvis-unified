@@ -137,6 +137,7 @@ class ForwardValidationTests(unittest.TestCase):
         self.store.ingest(self.item())
         self.store.close()
         self.store = self.make_store()
+        self.addCleanup(self.store.close)
         self.assertTrue(self.store.verify_chain())
 
 

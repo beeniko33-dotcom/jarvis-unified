@@ -13,6 +13,7 @@ Finding 2 - reconciled transfers lose their position link.
     a pending transfer without position_id, so a crash-recovered entry becomes a
     legacy symbol-wide commit and can no longer be released by position.
 """
+from contextlib import closing
 from decimal import Decimal
 import tempfile
 import unittest
@@ -115,7 +116,7 @@ class ReconciledTransferPositionLinkTests(unittest.TestCase):
         self.assertEqual(self.store.committed_for_symbol("EURUSD"), Decimal("10"))
 
         # The recovered commit must be position-linked, not a legacy row.
-        with self.store._lock, self.store._connect() as db:
+        with self.store._lock, closing(self.store._connect()) as db:
             rows = db.execute(
                 "SELECT position_id FROM exposure_committed WHERE commit_id=?",
                 ("order-1",),
