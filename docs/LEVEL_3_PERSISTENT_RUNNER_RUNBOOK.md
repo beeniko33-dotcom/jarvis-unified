@@ -4,7 +4,7 @@
 
 ## 1. Safety and scope
 
-- Run only the Deriv public EURUSD market-data WebSocket collector.
+- Run only the Deriv public EURUSD market-data WebSocket collector (or other explicitly approved candidate feeds).
 - No account token, App ID, OTP, demo/real account endpoint, wallet, proposal, buy, sell or broker execution.
 - Keep all broker adapters disabled and the paper kill switch engaged.
 - Market-data observations are not fills or strategy performance. Maintain a separate paper execution ledger for fills, spread/cost assumptions, fees, slippage, positions and PnL.
@@ -16,13 +16,18 @@
 - Persistent encrypted disk/volume for SQLite database, WAL files and append-only backup snapshots. Never use an ephemeral CI runner as the evidence host.
 - Dedicated unprivileged OS account; repository checkout and runtime dependencies pinned to a reviewed commit and lockfile.
 - UTC clock synchronization using a monitored time service. Alert on drift beyond the programme's approved tolerance.
-- Outbound network access restricted to DNS and the approved Deriv public WSS hostname/port. No inbound public listener is required for collection.
+- Outbound network access restricted to DNS and the approved public WSS hostname/port. No inbound public listener is required for collection.
 - Disk capacity sized for raw payload retention, WAL growth and backups; alert before low-space conditions.
 - No secrets are required for the public market-data endpoint. Do not add broker credentials to this host.
 
 ## 3. Process supervision
 
-Use a supervisor (for example systemd) with automatic restart on unexpected exit, bounded restart backoff and a clear stop/disable procedure. The service must run as the dedicated unprivileged user, use an explicit working directory, fixed reviewed command, persistent database path and restrictive file permissions.
+Use the continuous session supervisor (`python -m research.collector_supervisor`) under a system supervisor (systemd or equivalent). The supervisor:
+
+- Runs duration-bounded collector sessions sequentially.
+- Holds an exclusive file lock so two writers never touch the same SQLite database.
+- Records every session boundary (start/end, exit code, command, status) as JSON.
+- Supports clean normal-exit restart (the previous gap in a plain `Restart=on-failure` unit).
 
 Example service policy (adapt and review before installation):
 
@@ -37,7 +42,12 @@ Type=simple
 User=jarvis-collector
 Group=jarvis-collector
 WorkingDirectory=/opt/jarvis-unified
-ExecStart=/opt/jarvis-venv/bin/python -m research.deriv_feed --duration-seconds 86400 --db /var/lib/jarvis/deriv_eurusd_forward.sqlite3
+ExecStart=/opt/jarvis-venv/bin/python -m research.collector_supervisor \
+  --command /opt/jarvis-venv/bin/python -m research.deriv_feed --duration-seconds 86400 --db /var/lib/jarvis/deriv_eurusd_forward.sqlite3 \
+  --db /var/lib/jarvis/deriv_eurusd_forward.sqlite3 \
+  --duration-seconds 86400 \
+  --log-dir /var/lib/jarvis/sessions \
+  --pause-between 15
 Restart=on-failure
 RestartSec=15
 NoNewPrivileges=true
@@ -51,7 +61,7 @@ UMask=0077
 WantedBy=multi-user.target
 ```
 
-The current collector is duration-bounded and may exit normally after its configured duration. A production service wrapper or reviewed loop must restart scheduled collection deliberately, record each run/session boundary and avoid overlapping writers. Do not assume the example unit alone provides a continuous 30-day process.
+The supervisor itself is the reviewed loop that schedules bounded sessions, records boundaries, and avoids overlapping writers. Do not assume a bare duration-bounded collector provides continuous 30-day coverage.
 
 ## 4. Health, freshness and alerting
 
