@@ -10,11 +10,12 @@ import argparse
 import hashlib
 import json
 import sqlite3
-import time
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Callable
+
+from core.sqlite_wal import enable_wal
 
 REQUIRED = {
     "observed_at", "instrument", "provider", "source", "interval",
@@ -131,19 +132,7 @@ class ForwardEvidenceStore:
 
     @staticmethod
     def _enable_wal(db):
-        """journal_mode=WAL needs a brief exclusive lock and ignores busy_timeout."""
-        deadline = time.monotonic() + 30
-        delay = 0.01
-        while True:
-            try:
-                db.execute("PRAGMA journal_mode=WAL")
-                return
-            except sqlite3.OperationalError as exc:
-                message = str(exc).lower()
-                if ("locked" not in message and "busy" not in message) or time.monotonic() >= deadline:
-                    raise
-                time.sleep(delay)
-                delay = min(delay * 2, 0.1)
+        enable_wal(db)
 
     def close(self):
         self.db.close()

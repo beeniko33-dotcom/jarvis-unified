@@ -14,6 +14,8 @@ from decimal import Decimal
 from pathlib import Path
 from threading import RLock
 
+from core.sqlite_wal import enable_wal
+
 
 class ReservationError(ValueError):
     """Raised when a reservation cannot be created or does not exist."""
@@ -122,19 +124,7 @@ class ExposureReservationStore:
 
     @staticmethod
     def _enable_wal(db: sqlite3.Connection) -> None:
-        deadline = time.monotonic() + 30
-        delay = 0.01
-        while True:
-            try:
-                db.execute("PRAGMA journal_mode=WAL")
-                return
-            except sqlite3.OperationalError as exc:
-                message = str(exc).lower()
-                is_lock_error = "locked" in message or "busy" in message
-                if not is_lock_error or time.monotonic() >= deadline:
-                    raise
-                time.sleep(delay)
-                delay = min(delay * 2, 0.1)
+        enable_wal(db)
 
     def _purge_expired(self, db: sqlite3.Connection, now: float) -> None:
         db.execute(
