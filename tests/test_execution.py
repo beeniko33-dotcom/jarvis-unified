@@ -155,6 +155,9 @@ class ExecutionServiceTests(unittest.TestCase):
                         "quote_timestamp": "2026-11-14T12:00:00+00:00",
                         "signal_context_hash": "not-a-digest",
                         "signal_id": "sig-7",
+                        "signal_type": "entry",
+                        "data_source_id": "feed-1",
+                        "quote_source": "paper-quote-cache",
                     },
                     "api_key": "must-never-be-journaled",
                     "arbitrary": "untrusted free text",
@@ -166,6 +169,9 @@ class ExecutionServiceTests(unittest.TestCase):
             self.assertEqual(decision["strategy_id"], "momentum-v2")
             self.assertEqual(decision["experiment_id"], "exp-42")
             self.assertEqual(decision["signal_id"], "sig-7")
+            self.assertEqual(decision["signal_type"], "entry")
+            self.assertEqual(decision["data_source_id"], "feed-1")
+            self.assertEqual(decision["quote_source"], "paper-quote-cache")
             self.assertEqual(decision["data_hash"], "a" * 64)
             self.assertIsNone(decision.get("signal_context_hash"))
             self.assertEqual(
@@ -177,12 +183,44 @@ class ExecutionServiceTests(unittest.TestCase):
                     "data_hash": "a" * 64,
                     "quote_timestamp": "2026-11-14T12:00:00+00:00",
                     "signal_id": "sig-7",
+                    "signal_type": "entry",
+                    "data_source_id": "feed-1",
+                    "quote_source": "paper-quote-cache",
                 }},
             )
             rendered = str(events)
             self.assertNotIn("must-never-be-journaled", rendered)
             self.assertNotIn("untrusted free text", rendered)
             self.assertTrue(journal.verify())
+
+
+    def test_legacy_top_level_lineage_is_normalized_into_safe_envelope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = ExecutionObservationJournal(Path(tmp) / "observations.sqlite")
+            service = ExecutionService(self.broker, self.risk, observation_journal=journal)
+            self.risk.release_kill_switch(explicit_operator_action=True)
+            order = OrderRequest(
+                "SOLUSD", Side.BUY, Decimal("0.1"), Decimal("10"), "legacy-lineage",
+                metadata={
+                    "strategy_id": "legacy-strategy",
+                    "experiment_id": "legacy-exp",
+                    "data_hash": "b" * 64,
+                    "access_token": "never-store-this",
+                },
+            )
+            service.submit(order)
+            decision = journal.list_events()[0]["data"]
+            self.assertEqual(decision["strategy_id"], "legacy-strategy")
+            self.assertEqual(decision["experiment_id"], "legacy-exp")
+            self.assertEqual(
+                decision["metadata"],
+                {"research_lineage": {
+                    "strategy_id": "legacy-strategy",
+                    "experiment_id": "legacy-exp",
+                    "data_hash": "b" * 64,
+                }},
+            )
+            self.assertNotIn("never-store-this", str(journal.list_events()))
 
 if __name__ == "__main__":
     unittest.main()
