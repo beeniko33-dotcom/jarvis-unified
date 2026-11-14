@@ -1,6 +1,6 @@
 # Roadmap — Jarvis Unified
 
-Updated 2026-11-13 (afternoon).
+Updated 2026-11-14.
 
 ## Level 2 — DONE
 
@@ -13,18 +13,22 @@ Complete on `main`.
 | Track 2 durability (#22) | Merged |
 | Forward evidence + Deriv collector code (#6/#10) | Merged |
 | Fail-closed provenance (#26/#27) | Merged |
-| Issue #9 phase 1 trust model (#29) | **Merged** |
-| Issue #9 socket/session hardening (#30) | **Draft** · exact-head CI green · independent review pending |
+| Issue #9 phase 1 trust model (#29 / #30) | Merged |
 | Prototype release docs (#28) | Merged |
+| Biquote unverified EURUSD candidate adapter (#37) | Merged |
+| Positive real-SSLSocket transport test (#32) | In progress |
+| Persistent collector session supervisor (#33) | In progress |
+| Independent provider verifier (#9) | Open — evidence credit blocked |
+| Persistent host provisioning (#11) | Open — no host deployed |
 
 ## Immediate sequence
 
-1. Independent review of **PR #30** (technical assessment is not sign-off).
-2. Owner records Issue **#9** policy choice: hold / weaker TLS policy / signed provider.
-3. Provision persistent host (**#11**) — see `docs/LEVEL_3_PERSISTENT_RUNNER_RUNBOOK.md` and host checklist when merged.
-4. Continuous **candidate** collection + paper sessions.
-5. Only after #9 acceptance: consider verified streak toward Level 3 (**0 / 30** today).
+1. Complete positive TLS fixture test and continuous-session supervisor (safe, offline, no provenance change).
+2. Owner / independent review of any future evidence-credit path (Issue #9). Current gate remains `BLOCKED_PROVENANCE`.
+3. Provision persistent host (**#11**) only after reviewer acceptance of the operational package — see `docs/LEVEL_3_PERSISTENT_RUNNER_RUNBOOK.md`.
+4. Continuous **candidate** collection + paper sessions. Unverified observations never start the 30-day clock.
+5. Only after #9 acceptance and first authenticated observation: start verified streak toward Level 3 (**0 / 30** today).
 
 ## Level 3 / 4
 
-Not certified. Live trading locked.
+Not certified. Live trading locked. No performance claims.
