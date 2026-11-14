@@ -20,3 +20,8 @@ pythonpath = ["."]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["apps*", "brokers*", "core*", "infrastructure*", "packages*", "research*", "sources*"]
+exclude = ["tests*"]

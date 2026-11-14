@@ -1,0 +1,3 @@
+# Full CPython 3.11 development/CI lock: optional market-data + test extras.
+-r requirements-market-data.lock
+-r requirements-test.lock

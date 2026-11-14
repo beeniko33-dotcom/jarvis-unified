@@ -20,7 +20,7 @@ Operator performs these steps in the Oracle console / CLI (not automated here):
 2. Attach **block volume**; mount under e.g. `/var/lib/jarvis` (XFS/ext4).
 3. Open **egress only** as needed for DNS + `api.derivws.com:443`; no public inbound for the collector.
 4. Create unprivileged user `jarvis-collector`.
-5. Install Python 3.11+, clone repo at a **reviewed commit**, `pip install -e '.[market-data]'` in a venv.
+5. Install CPython 3.11.18, clone the repo at a **reviewed commit**, create a venv, then install `python -m pip install "pip==26.3" -r requirements-market-data.lock`. The full CI/test dependency set is `requirements-lock.txt`; do not install test tooling on the production collector unless needed.
 6. Enable **chrony** or systemd-timesyncd; document NTP sources.
 7. Install systemd unit from the persistent runner runbook (adapt paths).
 8. Restrict file modes on DB directory (`0700`).
