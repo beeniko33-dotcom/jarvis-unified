@@ -188,6 +188,12 @@ class ExperienceStore:
                 or any(ch not in "0123456789abcdef" for ch in value.lower())
             ):
                 raise ValueError(f"{field} must be a 64-character SHA-256 hex digest")
+        source_ledger_hash = (
+            source_ledger_hash.lower() if source_ledger_hash is not None else None
+        )
+        source_journal_hash = (
+            source_journal_hash.lower() if source_journal_hash is not None else None
+        )
         evidence_status = (
             "source_referenced_unverified"
             if source_ledger_hash or source_journal_hash
