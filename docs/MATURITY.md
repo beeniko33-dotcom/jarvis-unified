@@ -14,11 +14,11 @@ Honest tracking only. No marketing claims.
 
 **Level 2 — Operational tooling — confirmed on `main`.**
 
-As of 2026-11-14, `main` includes Track 2 paper durability, forward-evidence storage, read-only Deriv collector code, fail-closed provenance hardening, paper-prototype release documentation, the Biquote unverified candidate adapter, a positive real-SSLSocket transport test fixture, and a continuous collector session supervisor.
+As of 2026-11-14, `main` includes Track 2 paper durability, forward-evidence storage, read-only Deriv collector code, fail-closed provenance hardening, paper-prototype release documentation, the Biquote unverified candidate adapter, a positive real-SSLSocket transport test fixture, and a hardened continuous collector session supervisor (stale-lock recovery, failure backoff, signal shutdown, health snapshot).
 
 **Level 3 is not certified.** Merged code does **not** equal verified forward days. Synthetic stress, historical replay, and CI fixtures do **not** count as Level 3 evidence. Unverified observations remain candidates only (`BLOCKED_PROVENANCE` until issue #9).
 
-**Level 4 is not started** as a certification target.
+**Level 4 is not started and must not be started.** Level 4 gates are defined only *after* Level 3. Requesting Level 4 without 30 audited paper days, provider-authenticated data, a provisioned host, and independent review is rejected by this maturity model. Live trading remains locked.
 
 ## Delivered on main (Level 2 + engineering readiness)
 
@@ -32,11 +32,12 @@ As of 2026-11-14, `main` includes Track 2 paper durability, forward-evidence sto
 - Read-only Deriv EURUSD collector **code** (no host deployment claimed)
 - Fail-closed TLS claim handling (no caller-supplied verified transport)
 - Positive real-SSLSocket transport session fixture (Issue #32)
-- Continuous collector session supervisor with exclusive file lock (Issue #33 readiness)
+- Continuous collector session supervisor with exclusive file lock, stale-PID recovery, failure backoff, cooperative shutdown (Issue #33 readiness)
 - Biquote unverified EURUSD candidate adapter (zero evidence credit)
 - Localhost read-only status API and dashboard
 - Paper session runner, analytics report, foundation diagnostic
 - Paper-only prototype release documentation
+- Provider research note posted on Issue #34 (desktop survey only)
 
 ## Level 3 evidence gates (all required)
 
@@ -49,9 +50,9 @@ As of 2026-11-14, `main` includes Track 2 paper durability, forward-evidence sto
 - [ ] Provider-authenticated forward market-data path (or explicitly accepted trust model) — **issue #9**
 - [ ] Persistent collector host with monitoring — **issue #11**
 
-Run `python scripts/paper_report.py var/paper_ledger.jsonl --min-days 30` for date-span checks. A smoke session is not Level 3 validation.
+Run `python scripts/paper_report.py var/paper_ledger.jsonl --min-days 30` for date-span checks. A smoke session is not Level 3 validation. Forward day count today: **0 / 30**.
 
-## Level 4 gates (after Level 3)
+## Level 4 gates (only after Level 3 is certified)
 
 - [ ] Hardened deployment (non-ephemeral host, secrets hygiene, supervised processes)
 - [ ] Operational monitoring, alerting, backup/restore drills
@@ -59,12 +60,15 @@ Run `python scripts/paper_report.py var/paper_ledger.jsonl --min-days 30` for da
 - [ ] Independent release review / security review
 - [ ] Explicit written approval before any live adapter enablement
 
+These items are listed for completeness. They are **not** open work until every Level 3 checkbox above is closed with evidence.
+
 ## Remaining (honest)
 
 - **#9** — real provider-specific verifier (or accepted trust model) before evidence credit
+- **#34** — provider evaluation research (desktop note posted; selection not authorized)
 - **#11** — provision persistent host; runbooks alone are not deployment
 - **#3** — 30 genuine forward-validation days + review
 - **#1** — history-preserving source import (separate track)
-- **#32 / #33** — positive TLS fixture and session supervisor are now on `main`; remaining work is CI confirmation and operator runbook wiring
+- **#32 / #33** — engineering preparation largely on `main`; remaining work is CI confirmation and any operator feedback
 
-Live trading remains locked. No performance or profit is guaranteed.
+Live trading remains locked. No performance or profit is guaranteed. Level 4 will not be declared from readiness code alone.
