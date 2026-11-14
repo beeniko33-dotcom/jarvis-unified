@@ -221,10 +221,14 @@ class ExposureReservationStore:
                 reserved_symbol = self._sum_reserved(db, symbol=symbol)
                 committed_symbol = self._sum_committed(db, symbol=symbol)
                 if max_symbol_notional is not None:
+                    # ``existing_symbol_exposure`` is the broker's live position
+                    # notional; ``committed_symbol`` is the durable mirror of the
+                    # same fills. Summing them double-counts, so take the larger
+                    # (the committed rows are the only record that survives a
+                    # restart of an in-memory broker).
                     total = (
-                        existing_symbol_exposure
+                        max(existing_symbol_exposure, committed_symbol)
                         + reserved_symbol
-                        + committed_symbol
                         + notional
                     )
                     if total > max_symbol_notional:
@@ -234,9 +238,8 @@ class ExposureReservationStore:
                     reserved_group = self._sum_reserved(db, corr_group=corr_group)
                     committed_group = self._sum_committed(db, corr_group=corr_group)
                     total_g = (
-                        existing_group_exposure
+                        max(existing_group_exposure, committed_group)
                         + reserved_group
-                        + committed_group
                         + notional
                     )
                     if total_g > max_group_notional:
