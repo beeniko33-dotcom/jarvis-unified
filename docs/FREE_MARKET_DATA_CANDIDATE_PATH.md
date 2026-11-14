@@ -15,13 +15,13 @@ Live execution: disabled; paper kill switch engaged.
 
 | Source | Potential use | Limitations / status |
 |---|---|---|
-| Biquote public API/WebSocket | Optional live quote candidate for schema, freshness, reconnect and pipeline testing | Public documentation advertises anonymous live REST/WebSocket access and multi-source aggregation. No per-tick signature or contractual audit guarantee has been established. Candidate-only; do not award evidence credit. |
+| Biquote public API/WebSocket | Best zero-cost candidate for schema, freshness, reconnect and pipeline testing | Terms dated 30 Sep 2026 permit commercial/non-commercial product use and quote storage, but data is aggregated from third parties, expressly indicative, without accuracy/availability warranty or SLA. Public docs show MT5 source labels and timestamps, but no per-tick signature or contractual audit trail. Candidate-only; do not award evidence credit. |
 | FXCM public historical tick archive | Offline historical parser/backtest fixtures if licence permits | FXCM describes the data as indicative, timestamps UTC, and personal-use under its EULA. Do not use for commercial/redistributed datasets or automated ingestion until legal terms are checked and permission is confirmed. Not forward evidence. |
 | Dukascopy historical export / dukascopy-node | Offline historical research only after terms review | Third-party downloader is not a Dukascopy authenticity attestation. Dukascopy website terms may restrict automated scraping, database construction and use beyond personal non-commercial purposes. Do not automate downloads or store/redistribute data until written permission and current terms are reviewed. |
 | Deriv public WSS | Existing transport candidate and comparison feed | Keep candidate-only. TLS/session binding does not authenticate individual ticks. |
 | TickDataFeed | Future paid evaluation only | Published FX + Crypto plan is paid; not in the zero-cost path. Published checksums and sequence-checked delivery still require exact signature/audit assurance review. |
 
-This is a technical triage, not legal advice or a vendor endorsement. Re-check current terms before any ingestion.
+Biquote terms: https://biquote.io/terms.html. They permit use within a product and storage, but prohibit raw-feed resale/redistribution and warn that third-party source terms may also apply. Terms may change. This is a technical triage, not legal advice or a vendor endorsement.
 
 ## Adapter contract
 
@@ -63,7 +63,8 @@ Before evidence credit: implement provider-specific verification; test positive,
 ## Current next steps
 
 - [ ] Request written technical and licence answers from free candidate provider(s), without creating an account or agreeing to terms on the owner's behalf.
-- [ ] If Biquote is used for pipeline testing, isolate it as candidate-only and verify current terms, EURUSD instrument identity, source metadata, timestamp semantics and stability first.
+- [ ] Biquote's published terms permit product use and storage at no cost, but disclaim accuracy, completeness, timeliness and availability and provide no SLA. Verify EURUSD metadata, source label, quote timestamp, stale flag and quote age on actual responses before use. Do not expose its raw feed as a public data product.
+- [ ] Treat the API's example `source: MetaTrader 5 (Broker 1)` and symbol catalogue `source: MT5` as provider-supplied metadata, not independently authenticated lineage.
 - [ ] Do not automatically scrape FXCM or Dukascopy historical data until permissions and terms are resolved.
 - [ ] Build candidate adapter and adversarial tests only after the existing collector interfaces and storage schema are reviewed against this contract.
 - [ ] Keep the 30-day evidence clock stopped until the signed/auditable provider path and operational controls pass independent review.
@@ -73,5 +74,6 @@ Before evidence credit: implement provider-specific verification; test positive,
 - FXCM historical tick archive: https://github.com/fxcm/MarketData/blob/master/TickData/README.md
 - Biquote API overview: https://biquote.io/
 - Biquote API docs: https://biquote.io/docs/
+- Biquote terms (last updated 2026-09-30): https://biquote.io/terms.html
 - Dukascopy-node documentation: https://www.dukascopy-node.app/
 - TickDataFeed pricing and delivery claims: https://tickdatafeed.com/pricing.php
