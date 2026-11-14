@@ -43,6 +43,17 @@ class MainCliTests(unittest.TestCase):
             self.assertGreater(report["imported_ledger_events"], 0)
             self.assertEqual(report["order_count"], 2)
 
+            reflection_output = io.StringIO()
+            reflection_db = root / "reflections.sqlite"
+            with redirect_stdout(reflection_output):
+                main([
+                    "--paper-reflections", "--learning-db", str(learning),
+                    "--reflection-db", str(reflection_db),
+                ])
+            reflections = json.loads(reflection_output.getvalue())
+            self.assertGreater(reflections["reflection_count"], 0)
+            self.assertTrue(reflection_db.is_file())
+
             shadow_output = io.StringIO()
             shadow_db = root / "shadow.sqlite"
             with redirect_stdout(shadow_output):
