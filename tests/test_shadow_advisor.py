@@ -56,6 +56,8 @@ class ShadowAdvisorTests(unittest.TestCase):
             "mark_coverage", "drawdown_review",
         })
         self.assertTrue(all(item.status == "pending_owner_review" for item in candidates))
+        self.assertTrue(all(item.experiment_id is None for item in candidates))
+        self.assertTrue(all(item.experiment_attribution == "unknown" for item in candidates))
         self.assertTrue(all(item.confidence in {"low", "moderate"} for item in candidates))
         self.assertTrue(all(item.expires_at > item.review_due_at for item in candidates))
         self.assertEqual(len(self.store.list_candidates()), len(candidates))

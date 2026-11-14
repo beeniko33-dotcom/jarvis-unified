@@ -1,6 +1,7 @@
 """Jarvis Unified entrypoint. Paper mode only at this maturity level."""
 from __future__ import annotations
 import argparse
+import dataclasses
 import json
 from dataclasses import asdict
 from decimal import Decimal
@@ -160,6 +161,18 @@ def main(argv: Sequence[str] | None = None) -> None:
                                   help="list persistent shadow candidates and owner review history")
     learning_actions.add_argument("--shadow-decision", nargs=2, metavar=("CANDIDATE_ID", "DECISION"),
                                   help="append an owner review decision; never deploys a strategy")
+    learning_actions.add_argument("--experiment-list", action="store_true",
+                                  help="list immutable experiment metadata")
+    learning_actions.add_argument("--experiment-verify", metavar="EXPERIMENT_ID",
+                                  help="verify stored config and metrics hashes")
+    learning_actions.add_argument("--experiment-verify-sources", nargs=3,
+                                  metavar=("EXPERIMENT_ID", "LEDGER_FILE", "JOURNAL_FILE"),
+                                  help="hash local source artifacts and append a verification result")
+    learning_actions.add_argument("--experiment-compare", nargs=2,
+                                  metavar=("LEFT_EXPERIMENT_ID", "RIGHT_EXPERIMENT_ID"),
+                                  help="compare experiments only when evidence is strictly comparable")
+    parser.add_argument("--experience-db", default="var/learning/experience.sqlite3",
+                        help="SQLite path for the immutable experiment registry")
     parser.add_argument("--shadow-notes", default="", help="optional note for an owner review decision")
     parser.add_argument("--shadow-db", default="var/learning/shadow_candidates.sqlite3",
                         help="SQLite path for persistent shadow recommendation history")
@@ -182,6 +195,33 @@ def main(argv: Sequence[str] | None = None) -> None:
             return
         if args.personality_context:
             print(build_personality_context(memory))
+            return
+
+    if (args.experiment_list or args.experiment_verify
+            or args.experiment_verify_sources or args.experiment_compare):
+        from research.experience_store import ExperienceStore
+        store = ExperienceStore(args.experience_db)
+        if args.experiment_list:
+            print(json.dumps({
+                "experiments": [dataclasses.asdict(item) for item in store.list()],
+            }, indent=2, default=str))
+            return
+        if args.experiment_verify:
+            print(json.dumps({
+                "experiment_id": args.experiment_verify,
+                "integrity_verified": store.verify(args.experiment_verify),
+            }, indent=2))
+            return
+        if args.experiment_verify_sources:
+            experiment_id, ledger_path, journal_path = args.experiment_verify_sources
+            print(json.dumps(store.verify_source_artifacts(
+                experiment_id, ledger_path=ledger_path, journal_path=journal_path,
+            ), indent=2))
+            return
+        if args.experiment_compare:
+            from research.experiment_comparison import compare_experiments
+            report = compare_experiments(store, *args.experiment_compare)
+            print(json.dumps(report.to_dict(), indent=2, default=str))
             return
 
     if (args.import_paper_ledger or args.paper_outcomes or args.shadow_review

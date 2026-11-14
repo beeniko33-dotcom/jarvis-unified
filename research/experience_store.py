@@ -41,6 +41,24 @@ def _required(value: str, field: str, limit: int = 200) -> str:
     return value.strip()
 
 
+
+def _reject_sensitive_config_keys(value: Any, path: str = "config") -> None:
+    """Keep credentials and wallet material out of local experiment snapshots."""
+    forbidden = (
+        "password", "secret", "token", "api_key", "apikey", "private_key",
+        "credential", "wallet_seed", "mnemonic",
+    )
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized = str(key).lower().replace("-", "_")
+            if any(part in normalized for part in forbidden):
+                raise ValueError(f"sensitive config key is not allowed at {path}.{key}")
+            _reject_sensitive_config_keys(item, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            _reject_sensitive_config_keys(item, f"{path}[{index}]")
+
+
 def _canonical_hash(value: dict[str, Any]) -> str:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -61,6 +79,10 @@ class Experiment:
     created_at: str
     metrics: dict[str, Any]
     metrics_hash: str
+    schema_version: int = 2
+    source_ledger_hash: str | None = None
+    source_journal_hash: str | None = None
+    evidence_status: str = "metadata_only"
 
 
 class ExperienceStore:
@@ -94,6 +116,35 @@ class ExperienceStore:
                 CREATE INDEX IF NOT EXISTS idx_experiments_dataset
                     ON research_experiments(dataset_id,dataset_hash);
             """)
+            columns = {
+                row["name"] for row in db.execute(
+                    "PRAGMA table_info(research_experiments)"
+                ).fetchall()
+            }
+            migrations = {
+                "config_json": "TEXT",
+                "schema_version": "INTEGER NOT NULL DEFAULT 1",
+                "source_ledger_hash": "TEXT",
+                "source_journal_hash": "TEXT",
+                "evidence_status": "TEXT NOT NULL DEFAULT 'metadata_only'",
+            }
+            for column, definition in migrations.items():
+                if column not in columns:
+                    db.execute(
+                        f"ALTER TABLE research_experiments ADD COLUMN {column} {definition}"
+                    )
+            db.executescript("""
+                CREATE TABLE IF NOT EXISTS experiment_source_verifications (
+                    verification_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    experiment_id TEXT NOT NULL REFERENCES research_experiments(experiment_id),
+                    ledger_hash TEXT NOT NULL,
+                    journal_hash TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('verified','mismatch')),
+                    checked_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_experiment_source_verifications
+                    ON experiment_source_verifications(experiment_id,verification_id);
+            """)
             db.commit()
 
     def _connect(self) -> sqlite3.Connection:
@@ -107,6 +158,8 @@ class ExperienceStore:
         config: dict[str, Any], dataset_id: str, dataset_hash: str,
         data_status: str, start_at: str, end_at: str,
         metrics: dict[str, Any],
+        source_ledger_hash: str | None = None,
+        source_journal_hash: str | None = None,
     ) -> Experiment:
         name = _required(name, "name")
         hypothesis = _required(hypothesis, "hypothesis", 4000)
@@ -120,7 +173,32 @@ class ExperienceStore:
             raise ValueError("start_at must be earlier than end_at")
         if not isinstance(config, dict) or not isinstance(metrics, dict):
             raise ValueError("config and metrics must be JSON objects")
-        config_hash = _canonical_hash(config)
+        _reject_sensitive_config_keys(config)
+        config_json = json.dumps(
+            config, sort_keys=True, separators=(",", ":"), allow_nan=False
+        )
+        config_hash = hashlib.sha256(config_json.encode("utf-8")).hexdigest()
+        for value, field in (
+            (source_ledger_hash, "source_ledger_hash"),
+            (source_journal_hash, "source_journal_hash"),
+        ):
+            if value is not None and (
+                not isinstance(value, str)
+                or len(value) != 64
+                or any(ch not in "0123456789abcdef" for ch in value.lower())
+            ):
+                raise ValueError(f"{field} must be a 64-character SHA-256 hex digest")
+        source_ledger_hash = (
+            source_ledger_hash.lower() if source_ledger_hash is not None else None
+        )
+        source_journal_hash = (
+            source_journal_hash.lower() if source_journal_hash is not None else None
+        )
+        evidence_status = (
+            "source_referenced_unverified"
+            if source_ledger_hash or source_journal_hash
+            else "metadata_only"
+        )
         metrics_json = json.dumps(metrics, sort_keys=True, separators=(",", ":"), allow_nan=False)
         metrics_hash = hashlib.sha256(metrics_json.encode("utf-8")).hexdigest()
         item = Experiment(
@@ -129,49 +207,130 @@ class ExperienceStore:
             dataset_id=dataset_id, dataset_hash=dataset_hash, data_status=data_status,
             start_at=start_at, end_at=end_at, created_at=_now(),
             metrics=json.loads(metrics_json), metrics_hash=metrics_hash,
+            schema_version=2, source_ledger_hash=source_ledger_hash,
+            source_journal_hash=source_journal_hash, evidence_status=evidence_status,
         )
         with closing(self._connect()) as db:
             db.execute("""
-                INSERT INTO research_experiments VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                INSERT INTO research_experiments (
+                    experiment_id,name,hypothesis,strategy_version,config_hash,
+                    dataset_id,dataset_hash,data_status,start_at,end_at,created_at,
+                    metrics_json,metrics_hash,config_json,schema_version,
+                    source_ledger_hash,source_journal_hash,evidence_status
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 item.experiment_id, item.name, item.hypothesis, item.strategy_version,
                 item.config_hash, item.dataset_id, item.dataset_hash, item.data_status,
                 item.start_at, item.end_at, item.created_at, metrics_json, item.metrics_hash,
+                config_json, item.schema_version, item.source_ledger_hash,
+                item.source_journal_hash, item.evidence_status,
             ))
             db.commit()
         return item
 
     def list(self, *, data_status: str | None = None) -> list[Experiment]:
-        sql = "SELECT * FROM research_experiments"
+        where = ""
         params: tuple[str, ...] = ()
         if data_status is not None:
             if data_status not in _ALLOWED_DATA_STATUSES:
                 raise ValueError("unknown data_status")
-            sql += " WHERE data_status=?"
+            where = " WHERE e.data_status=?"
             params = (data_status,)
-        sql += " ORDER BY created_at,experiment_id"
         with closing(self._connect()) as db:
-            rows = db.execute(sql, params).fetchall()
+            rows = db.execute(
+                """SELECT e.*,
+                    COALESCE((
+                        SELECT v.status FROM experiment_source_verifications v
+                        WHERE v.experiment_id=e.experiment_id
+                        ORDER BY v.verification_id DESC LIMIT 1
+                    ), e.evidence_status) AS current_evidence_status
+                    FROM research_experiments e"""
+                + where + " ORDER BY e.created_at,e.experiment_id",
+                params,
+            ).fetchall()
         return [self._from_row(row) for row in rows]
 
     @staticmethod
     def _from_row(row: sqlite3.Row) -> Experiment:
         values = dict(row)
         values["metrics"] = json.loads(values.pop("metrics_json"))
+        values.pop("config_json", None)
+        values["evidence_status"] = values.pop(
+            "current_evidence_status", values.get("evidence_status", "metadata_only")
+        )
         return Experiment(**values)
+
+    @staticmethod
+    def _file_sha256(path: str | Path) -> str:
+        digest = hashlib.sha256()
+        with Path(path).open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def verify_source_artifacts(
+        self, experiment_id: str, *, ledger_path: str | Path,
+        journal_path: str | Path,
+    ) -> dict[str, Any]:
+        """Hash actual local artifacts and append a verification attempt.
+
+        The paths are never persisted or returned. Only their SHA-256 digests and
+        verification result are retained in the append-only verification history.
+        """
+        with closing(self._connect()) as db:
+            row = db.execute(
+                """SELECT source_ledger_hash,source_journal_hash
+                FROM research_experiments WHERE experiment_id=?""",
+                (experiment_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError("experiment does not exist")
+        ledger_hash = self._file_sha256(ledger_path)
+        journal_hash = self._file_sha256(journal_path)
+        matched = bool(
+            row["source_ledger_hash"] and row["source_journal_hash"]
+            and ledger_hash == row["source_ledger_hash"]
+            and journal_hash == row["source_journal_hash"]
+        )
+        with closing(self._connect()) as db:
+            db.execute(
+                """INSERT INTO experiment_source_verifications
+                (experiment_id,ledger_hash,journal_hash,status,checked_at)
+                VALUES(?,?,?,?,?)""",
+                (
+                    experiment_id, ledger_hash, journal_hash,
+                    "verified" if matched else "mismatch", _now(),
+                ),
+            )
+            db.commit()
+        return {
+            "experiment_id": experiment_id,
+            "status": "verified" if matched else "mismatch",
+            "ledger_hash_matches": bool(row["source_ledger_hash"]) and
+                ledger_hash == row["source_ledger_hash"],
+            "journal_hash_matches": bool(row["source_journal_hash"]) and
+                journal_hash == row["source_journal_hash"],
+        }
 
     def verify(self, experiment_id: str) -> bool:
         with closing(self._connect()) as db:
             row = db.execute(
-                "SELECT config_hash,metrics_json,metrics_hash FROM research_experiments WHERE experiment_id=?",
+                """SELECT config_hash,config_json,metrics_json,metrics_hash
+                FROM research_experiments WHERE experiment_id=?""",
                 (experiment_id,),
             ).fetchone()
         if row is None:
             return False
         try:
             metrics = json.loads(row["metrics_json"])
+            if row["config_json"] is None:
+                return False
+            config = json.loads(row["config_json"])
             return (
-                hashlib.sha256(row["metrics_json"].encode("utf-8")).hexdigest()
+                isinstance(config, dict)
+                and hashlib.sha256(row["config_json"].encode("utf-8")).hexdigest()
+                == row["config_hash"]
+                and hashlib.sha256(row["metrics_json"].encode("utf-8")).hexdigest()
                 == row["metrics_hash"]
                 and isinstance(metrics, dict)
             )

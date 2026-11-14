@@ -24,6 +24,53 @@ class ExperienceStoreTests(unittest.TestCase):
             self.assertTrue(store.verify(item.experiment_id))
             self.assertEqual(store.list()[0], item)
 
+    def test_config_snapshot_is_hash_verified_and_sensitive_keys_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ExperienceStore(Path(tmp) / "experience.sqlite3")
+            start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+            item = store.record(
+                name="safe-config", hypothesis="test", strategy_version="v1",
+                config={"window": 20, "threshold": 1.5},
+                dataset_id="d", dataset_hash="a" * 64, data_status="historical",
+                start_at=start.isoformat(), end_at=(start + timedelta(days=1)).isoformat(),
+                metrics={"pnl": 1},
+            )
+            self.assertTrue(store.verify(item.experiment_id))
+            with self.assertRaises(ValueError):
+                store.record(
+                    name="unsafe", hypothesis="test", strategy_version="v1",
+                    config={"api_key": "must-not-be-stored"},
+                    dataset_id="d", dataset_hash="a" * 64, data_status="historical",
+                    start_at=start.isoformat(), end_at=(start + timedelta(days=1)).isoformat(),
+                    metrics={},
+                )
+            with store._connect() as db:
+                db.execute(
+                    "UPDATE research_experiments SET config_json=? WHERE experiment_id=?",
+                    ('{"window":999}', item.experiment_id),
+                )
+                db.commit()
+            self.assertFalse(store.verify(item.experiment_id))
+
+    def test_legacy_rows_without_config_snapshot_fail_closed_on_verification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "legacy.sqlite3"
+            store = ExperienceStore(path)
+            start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+            item = store.record(
+                name="legacy-test", hypothesis="test", strategy_version="v1",
+                config={"window": 20}, dataset_id="d", dataset_hash="a" * 64,
+                data_status="historical", start_at=start.isoformat(),
+                end_at=(start + timedelta(days=1)).isoformat(), metrics={"pnl": 0},
+            )
+            with store._connect() as db:
+                db.execute(
+                    "UPDATE research_experiments SET config_json=NULL WHERE experiment_id=?",
+                    (item.experiment_id,),
+                )
+                db.commit()
+            self.assertFalse(store.verify(item.experiment_id))
+
     def test_synthetic_and_historical_statuses_remain_segregated(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = ExperienceStore(Path(tmp) / "experience.sqlite3")
