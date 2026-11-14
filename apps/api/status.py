@@ -8,12 +8,15 @@ class StatusHandler(BaseHTTPRequestHandler):
     status_provider: Callable[[], dict] = lambda: {}
 
     def do_GET(self) -> None:
-        if self.path not in {"/", "/health", "/status", "/self-check"}:
+        if self.path not in {"/", "/health", "/status", "/self-check", "/features"}:
             self.send_error(404)
             return
 
         if self.path == "/health":
             payload = {"ok": True}
+        elif self.path == "/features":
+            from core.feature_registry import feature_state_inventory
+            payload = feature_state_inventory()
         elif self.path == "/self-check":
             payload = {"ok": True, "status": "healthy", "mode": "paper", "kill_switch": True}
         elif self.path == "/":
@@ -21,7 +24,7 @@ class StatusHandler(BaseHTTPRequestHandler):
                 "ok": True,
                 "service": "jarvis-unified",
                 "status": "paper",
-                "routes": ["/health", "/status", "/self-check"],
+                "routes": ["/health", "/status", "/self-check", "/features"],
             }
             provider_payload = self.status_provider()
             if isinstance(provider_payload, dict):
