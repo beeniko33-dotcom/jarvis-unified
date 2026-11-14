@@ -14,9 +14,9 @@ Honest tracking only. No marketing claims.
 
 **Level 2 — Operational tooling — confirmed on `main`.**
 
-As of 2026-11-13, `main` also includes Track 2 paper durability, forward-evidence storage, read-only Deriv collector code, fail-closed provenance hardening, and paper-prototype release documentation (merged PRs #22, #6, #10, #25–#28 and related).
+As of 2026-11-14, `main` includes Track 2 paper durability, forward-evidence storage, read-only Deriv collector code, fail-closed provenance hardening, paper-prototype release documentation, the Biquote unverified candidate adapter, a positive real-SSLSocket transport test fixture, and a continuous collector session supervisor.
 
-**Level 3 is not certified.** Merged code does **not** equal verified forward days. Synthetic stress, historical replay, and CI fixtures do **not** count as Level 3 evidence. Unverified observations remain candidates only (BLOCKED_PROVENANCE until issue #9).
+**Level 3 is not certified.** Merged code does **not** equal verified forward days. Synthetic stress, historical replay, and CI fixtures do **not** count as Level 3 evidence. Unverified observations remain candidates only (`BLOCKED_PROVENANCE` until issue #9).
 
 **Level 4 is not started** as a certification target.
 
@@ -31,9 +31,12 @@ As of 2026-11-13, `main` also includes Track 2 paper durability, forward-evidenc
 - Forward-evidence store (candidates only; fail-closed against injectable verifiers)
 - Read-only Deriv EURUSD collector **code** (no host deployment claimed)
 - Fail-closed TLS claim handling (no caller-supplied verified transport)
+- Positive real-SSLSocket transport session fixture (Issue #32)
+- Continuous collector session supervisor with exclusive file lock (Issue #33 readiness)
+- Biquote unverified EURUSD candidate adapter (zero evidence credit)
 - Localhost read-only status API and dashboard
 - Paper session runner, analytics report, foundation diagnostic
-- Paper-only prototype release documentation (PR #28)
+- Paper-only prototype release documentation
 
 ## Level 3 evidence gates (all required)
 
@@ -62,5 +65,6 @@ Run `python scripts/paper_report.py var/paper_ledger.jsonl --min-days 30` for da
 - **#11** — provision persistent host; runbooks alone are not deployment
 - **#3** — 30 genuine forward-validation days + review
 - **#1** — history-preserving source import (separate track)
+- **#32 / #33** — positive TLS fixture and session supervisor are now on `main`; remaining work is CI confirmation and operator runbook wiring
 
 Live trading remains locked. No performance or profit is guaranteed.
