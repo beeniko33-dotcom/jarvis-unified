@@ -42,6 +42,17 @@ class MainCliTests(unittest.TestCase):
             self.assertGreater(report["imported_ledger_events"], 0)
             self.assertEqual(report["order_count"], 1)
 
+            shadow_output = io.StringIO()
+            shadow_db = root / "shadow.sqlite"
+            with redirect_stdout(shadow_output):
+                main([
+                    "--shadow-review", "--learning-db", str(learning),
+                    "--shadow-db", str(shadow_db),
+                ])
+            shadow = json.loads(shadow_output.getvalue())
+            self.assertIn("candidates", shadow)
+            self.assertTrue(shadow_db.is_file())
+
     def test_serve_accepts_custom_host_and_port(self):
         seen = {}
 
