@@ -34,6 +34,8 @@ class ShadowCandidate:
     created_at: str
     review_due_at: str
     expires_at: str
+    experiment_id: str | None = None
+    experiment_attribution: str = "unknown"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -172,7 +174,10 @@ def _candidate(
     now: datetime,
 ) -> ShadowCandidate:
     canonical = json.dumps(
-        {"category": category, "evidence": evidence},
+        {
+            "category": category, "evidence": evidence,
+            "experiment_id": None, "experiment_attribution": "unknown",
+        },
         sort_keys=True, separators=(",", ":"), allow_nan=False,
     )
     candidate_id = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -189,6 +194,8 @@ def _candidate(
         created_at=now.isoformat(),
         review_due_at=(now + timedelta(days=14)).isoformat(),
         expires_at=(now + timedelta(days=45)).isoformat(),
+        experiment_id=None,
+        experiment_attribution="unknown",
     )
 
 
