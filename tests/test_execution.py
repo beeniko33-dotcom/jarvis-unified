@@ -154,7 +154,10 @@ class ExecutionServiceTests(unittest.TestCase):
                         "data_hash": "a" * 64,
                         "quote_timestamp": "2026-11-14T12:00:00+00:00",
                         "signal_context_hash": "not-a-digest",
-                        "signal_id": "sig-7",\n                        "signal_type": "entry",\n                        "data_source_id": "feed-1",\n                        "quote_source": "paper-quote-cache",
+                        "signal_id": "sig-7",
+                        "signal_type": "entry",
+                        "data_source_id": "feed-1",
+                        "quote_source": "paper-quote-cache",
                     },
                     "api_key": "must-never-be-journaled",
                     "arbitrary": "untrusted free text",
@@ -165,7 +168,10 @@ class ExecutionServiceTests(unittest.TestCase):
             decision = events[0]["data"]
             self.assertEqual(decision["strategy_id"], "momentum-v2")
             self.assertEqual(decision["experiment_id"], "exp-42")
-            self.assertEqual(decision["signal_id"], "sig-7")\n            self.assertEqual(decision["signal_type"], "entry")\n            self.assertEqual(decision["data_source_id"], "feed-1")\n            self.assertEqual(decision["quote_source"], "paper-quote-cache")
+            self.assertEqual(decision["signal_id"], "sig-7")
+            self.assertEqual(decision["signal_type"], "entry")
+            self.assertEqual(decision["data_source_id"], "feed-1")
+            self.assertEqual(decision["quote_source"], "paper-quote-cache")
             self.assertEqual(decision["data_hash"], "a" * 64)
             self.assertIsNone(decision.get("signal_context_hash"))
             self.assertEqual(
@@ -177,6 +183,9 @@ class ExecutionServiceTests(unittest.TestCase):
                     "data_hash": "a" * 64,
                     "quote_timestamp": "2026-11-14T12:00:00+00:00",
                     "signal_id": "sig-7",
+                    "signal_type": "entry",
+                    "data_source_id": "feed-1",
+                    "quote_source": "paper-quote-cache",
                 }},
             )
             rendered = str(events)
