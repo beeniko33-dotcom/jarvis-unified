@@ -23,6 +23,7 @@ class MainCliTests(unittest.TestCase):
             broker.place_order(
                 OrderRequest("EURUSD", Side.BUY, Decimal("0.1"), Decimal("10"), "cli-entry")
             )
+            broker.close_position("EURUSD", Decimal("8"))
 
             imported_output = io.StringIO()
             with redirect_stdout(imported_output):
