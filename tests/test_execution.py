@@ -193,5 +193,34 @@ class ExecutionServiceTests(unittest.TestCase):
             self.assertNotIn("untrusted free text", rendered)
             self.assertTrue(journal.verify())
 
+
+    def test_legacy_top_level_lineage_is_normalized_into_safe_envelope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = ExecutionObservationJournal(Path(tmp) / "observations.sqlite")
+            service = ExecutionService(self.broker, self.risk, observation_journal=journal)
+            self.risk.release_kill_switch(explicit_operator_action=True)
+            order = OrderRequest(
+                "SOLUSD", Side.BUY, Decimal("0.1"), Decimal("10"), "legacy-lineage",
+                metadata={
+                    "strategy_id": "legacy-strategy",
+                    "experiment_id": "legacy-exp",
+                    "data_hash": "b" * 64,
+                    "access_token": "never-store-this",
+                },
+            )
+            service.submit(order)
+            decision = journal.list_events()[0]["data"]
+            self.assertEqual(decision["strategy_id"], "legacy-strategy")
+            self.assertEqual(decision["experiment_id"], "legacy-exp")
+            self.assertEqual(
+                decision["metadata"],
+                {"research_lineage": {
+                    "strategy_id": "legacy-strategy",
+                    "experiment_id": "legacy-exp",
+                    "data_hash": "b" * 64,
+                }},
+            )
+            self.assertNotIn("never-store-this", str(journal.list_events()))
+
 if __name__ == "__main__":
     unittest.main()
