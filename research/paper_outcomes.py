@@ -96,6 +96,8 @@ def _drawdown(account: dict[str, Any]) -> Decimal | None:
         return None
     if not isinstance(positions, list) or not isinstance(marks, dict):
         return None
+    if balance_value is None or peak_value is None:
+        return None
     balance = _decimal(balance_value, "account balance")
     peak = _decimal(peak_value, "peak equity")
     if peak <= 0:
@@ -105,10 +107,15 @@ def _drawdown(account: dict[str, Any]) -> Decimal | None:
         if not isinstance(position, dict):
             return None
         symbol = position.get("symbol")
-        if not symbol or symbol not in marks:
+        if (
+            not symbol or symbol not in marks
+            or position.get("quantity") is None
+            or position.get("average_price") is None
+            or marks.get(symbol) is None
+        ):
             return None
-        quantity = _decimal(position.get("quantity"), "position quantity")
-        average = _decimal(position.get("average_price"), "position average price")
+        quantity = _decimal(position["quantity"], "position quantity")
+        average = _decimal(position["average_price"], "position average price")
         mark = _decimal(marks[symbol], "last price")
         unrealized += (mark - average) * quantity
     equity = balance + unrealized
