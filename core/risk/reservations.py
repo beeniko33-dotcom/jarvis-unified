@@ -7,8 +7,11 @@ Pending transfers record fill→commit failures so a restarted process can recov
 """
 from __future__ import annotations
 
+import os
+import socket
 import sqlite3
 import time
+import uuid
 from contextlib import closing
 from decimal import Decimal
 from pathlib import Path
@@ -21,8 +24,34 @@ class ReservationError(ValueError):
     """Raised when a reservation cannot be created or does not exist."""
 
 
+def _pid_alive(pid: int | None) -> bool:
+    """Best-effort liveness check for a process on this host.
+
+    Returns True when the process is still running, False when it is confirmed
+    gone. A pid we cannot inspect is treated as alive, so an unreadable process
+    table can never cause a live submission to be reclaimed.
+    """
+    if pid is None or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Exists but owned by another user: alive.
+        return True
+    except OSError:
+        return True
+    return True
+
+
 class ExposureReservationStore:
     """Atomic temporary reservations, durable committed exposure, pending transfers."""
+
+    #: How long an in-flight reservation lease stays valid without a heartbeat.
+    #: A submission that is still running must heartbeat inside this window; a
+    #: process that dies stops heartbeating and its lease lapses.
+    LEASE_SECONDS = 60.0
 
     def __init__(self, database_path: str | Path) -> None:
         self.database_path = Path(database_path)
@@ -38,7 +67,37 @@ class ExposureReservationStore:
                     notional TEXT NOT NULL,
                     corr_group TEXT,
                     created_at REAL NOT NULL,
-                    expires_at REAL
+                    expires_at REAL,
+                    state TEXT NOT NULL DEFAULT 'reserved',
+                    owner_id TEXT,
+                    heartbeat_at REAL,
+                    lease_expires_at REAL
+                )"""
+            )
+            # Migration: older databases predate durable in-flight state.
+            reservation_cols = {
+                row[1]
+                for row in db.execute("PRAGMA table_info(exposure_reservations)").fetchall()
+            }
+            for column, ddl in (
+                ("state", "ALTER TABLE exposure_reservations ADD COLUMN state TEXT NOT NULL DEFAULT 'reserved'"),
+                ("owner_id", "ALTER TABLE exposure_reservations ADD COLUMN owner_id TEXT"),
+                ("heartbeat_at", "ALTER TABLE exposure_reservations ADD COLUMN heartbeat_at REAL"),
+                ("lease_expires_at", "ALTER TABLE exposure_reservations ADD COLUMN lease_expires_at REAL"),
+            ):
+                if column not in reservation_cols:
+                    db.execute(ddl)
+            # Owner liveness. A reservation is only reclaimed when its lease has
+            # expired *and* the process that owns it is confirmed dead. Age alone
+            # is never sufficient: a slow broker call can outlive any fixed grace
+            # period, and _submission_lock is process-local, so another process
+            # may reconcile while a submission is still in flight.
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS reservation_owners (
+                    owner_id TEXT PRIMARY KEY,
+                    pid INTEGER,
+                    hostname TEXT,
+                    heartbeat_at REAL NOT NULL
                 )"""
             )
             db.execute(
@@ -122,6 +181,73 @@ class ExposureReservationStore:
         db.execute("PRAGMA busy_timeout=30000")
         return db
 
+    # ------------------------------------------------------------------
+    # Owner liveness
+    # ------------------------------------------------------------------
+    def register_owner(self, owner_id: str, *, heartbeat_at: float | None = None) -> None:
+        """Record this process as a live owner of in-flight reservations."""
+        if not isinstance(owner_id, str) or not owner_id.strip():
+            raise ReservationError("owner_id is required")
+        now = time.time() if heartbeat_at is None else float(heartbeat_at)
+        with self._lock, closing(self._connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                db.execute(
+                    "INSERT INTO reservation_owners(owner_id,pid,hostname,heartbeat_at)"
+                    " VALUES(?,?,?,?)"
+                    " ON CONFLICT(owner_id) DO UPDATE SET"
+                    " pid=excluded.pid, hostname=excluded.hostname,"
+                    " heartbeat_at=excluded.heartbeat_at",
+                    (owner_id, os.getpid(), socket.gethostname(), now),
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+
+    def heartbeat(self, owner_id: str, *, now: float | None = None) -> None:
+        """Refresh an owner's liveness and every reservation lease it holds."""
+        if not isinstance(owner_id, str) or not owner_id.strip():
+            raise ReservationError("owner_id is required")
+        stamp = time.time() if now is None else float(now)
+        with self._lock, closing(self._connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                db.execute(
+                    "UPDATE reservation_owners SET heartbeat_at=? WHERE owner_id=?",
+                    (stamp, owner_id),
+                )
+                db.execute(
+                    "UPDATE exposure_reservations SET heartbeat_at=?,"
+                    " lease_expires_at=? WHERE owner_id=? AND state='in_flight'",
+                    (stamp, stamp + self.LEASE_SECONDS, owner_id),
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+
+    def _owner_is_dead(self, db: sqlite3.Connection, owner_id: str | None) -> bool:
+        """True only when the owner is confirmed gone.
+
+        An owner with no row is treated as dead (it never registered, e.g. a
+        process that crashed before its first heartbeat). An owner on another
+        host cannot be probed, so it is treated as alive until its lease
+        expires — the lease is the only evidence available across hosts.
+        """
+        if not owner_id:
+            return True
+        row = db.execute(
+            "SELECT pid,hostname FROM reservation_owners WHERE owner_id=?",
+            (owner_id,),
+        ).fetchone()
+        if row is None:
+            return True
+        pid, hostname = row
+        if hostname and hostname != socket.gethostname():
+            return False
+        return not _pid_alive(pid)
+
     @staticmethod
     def _enable_wal(db: sqlite3.Connection) -> None:
         enable_wal(db)
@@ -182,6 +308,7 @@ class ExposureReservationStore:
         max_group_notional: Decimal | None = None,
         existing_symbol_exposure: Decimal = Decimal("0"),
         existing_group_exposure: Decimal = Decimal("0"),
+        owner_id: str | None = None,
     ) -> None:
         if not reservation_id.strip():
             raise ReservationError("reservation_id is required")
@@ -247,8 +374,9 @@ class ExposureReservationStore:
 
                 db.execute(
                     "INSERT INTO exposure_reservations"
-                    "(reservation_id,symbol,notional,corr_group,created_at,expires_at)"
-                    " VALUES(?,?,?,?,?,?)",
+                    "(reservation_id,symbol,notional,corr_group,created_at,expires_at,"
+                    "state,owner_id,heartbeat_at,lease_expires_at)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,?)",
                     (
                         reservation_id,
                         symbol,
@@ -256,6 +384,12 @@ class ExposureReservationStore:
                         corr_group,
                         now,
                         expires,
+                        # A reservation with no TTL is an in-flight submission:
+                        # it is protected by an owner lease, not by age.
+                        "in_flight" if expires is None else "reserved",
+                        owner_id,
+                        now,
+                        (now + self.LEASE_SECONDS) if expires is None else None,
                     ),
                 )
                 db.commit()
@@ -539,7 +673,7 @@ class ExposureReservationStore:
         ]
 
     def reclaim_orphaned_reservations(
-        self, *, older_than_seconds: float = 300.0
+        self, *, older_than_seconds: float | None = None
     ) -> list[str]:
         """Delete reservations that can never be converted or released.
 
@@ -549,28 +683,50 @@ class ExposureReservationStore:
         a reservation with no pending transfer and no commit — nothing will ever
         clear it, and it consumes capacity forever.
 
-        A reservation is only reclaimed when it is older than the grace period
-        *and* has no pending transfer, so an in-flight order is never touched.
+        Age alone is *not* evidence that a submission is dead: a broker call can
+        outlive any fixed grace period, and ``_submission_lock`` is process-local
+        so another process may reconcile while a submission is still in flight.
+        A reservation is therefore reclaimed only when **all** of these hold:
+
+        1. it has no pending transfer (nothing is queued to convert it),
+        2. its in-flight lease has expired (the owner stopped heartbeating), and
+        3. its owner is confirmed dead (pid gone, or no owner row at all).
+
+        ``older_than_seconds`` is retained for callers that want an extra age
+        floor; it is an *additional* condition, never a substitute for 2 and 3.
         Returns the reclaimed reservation ids.
         """
-        if older_than_seconds < 0:
+        if older_than_seconds is not None and older_than_seconds < 0:
             raise ReservationError("older_than_seconds must be non-negative")
-        cutoff = time.time() - float(older_than_seconds)
+        now = time.time()
+        cutoff = None if older_than_seconds is None else now - float(older_than_seconds)
         with self._lock, closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             try:
                 rows = db.execute(
-                    "SELECT reservation_id FROM exposure_reservations "
-                    "WHERE created_at < ? AND reservation_id NOT IN "
-                    "(SELECT reservation_id FROM exposure_pending)",
-                    (cutoff,),
+                    "SELECT reservation_id,owner_id,lease_expires_at,created_at,state"
+                    " FROM exposure_reservations"
+                    " WHERE reservation_id NOT IN"
+                    " (SELECT reservation_id FROM exposure_pending)"
                 ).fetchall()
-                reclaimed = [row[0] for row in rows]
-                for reservation_id in reclaimed:
+                reclaimed: list[str] = []
+                for reservation_id, owner_id, lease_expires_at, created_at, state in rows:
+                    if cutoff is not None and created_at >= cutoff:
+                        continue
+                    # A TTL-bounded reservation is governed by expires_at and is
+                    # purged by _purge_expired; only in-flight ones are reclaimed
+                    # here, and only once their lease has lapsed.
+                    if state != "in_flight":
+                        continue
+                    if lease_expires_at is None or lease_expires_at > now:
+                        continue
+                    if not self._owner_is_dead(db, owner_id):
+                        continue
                     db.execute(
                         "DELETE FROM exposure_reservations WHERE reservation_id=?",
                         (reservation_id,),
                     )
+                    reclaimed.append(reservation_id)
                 db.commit()
                 return reclaimed
             except Exception:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+import math
 from typing import Any
 
 from research.execution_observations import ExecutionObservationJournal
@@ -28,20 +29,91 @@ def _utc_day(timestamp: str) -> str:
     return parsed.astimezone(timezone.utc).date().isoformat()
 
 
-def _renderable(value: Any) -> str:
-    """Render a lineage value as a scalar, or refuse it.
+#: Fields whose value must be a hex digest. Anything else is not a hash.
+_HASH_FIELDS = frozenset({
+    "strategy_config_hash", "signal_context_hash", "data_hash",
+})
 
-    The allowlist constrains which *keys* may reach a reflection, not what
-    their values contain. A nested object under an allowlisted key would be
-    rendered verbatim, so a credential carried inside it would land in the
-    reflection text. Only scalars are lineage; anything structured is not a
-    value this bridge can vouch for, so it is reported as unknown.
+#: Fields whose value must be a bounded identifier, never free text.
+_IDENTIFIER_FIELDS = frozenset({
+    "strategy_id", "strategy_version", "experiment_id", "signal_id",
+    "signal_type", "data_source_id", "quote_source", "order_id",
+    "client_order_id", "symbol", "side", "result_status", "status",
+    "source_event_seq", "source_utc_day",
+})
+
+#: Fields that may legitimately be free text.
+_FREE_TEXT_FIELDS = frozenset({"reason", "risk_reason"})
+
+#: Substrings that mark a value as credential-shaped. A secret that reaches an
+#: allowlisted *string* field is still a secret; the key allowlist cannot see it.
+_CREDENTIAL_MARKERS = (
+    "api_key", "apikey", "api-key", "secret", "password", "passwd", "token",
+    "bearer", "authorization", "private_key", "privatekey", "access_key",
+    "client_secret", "sk-", "sk_live", "sk_test", "ghp_", "xoxb-", "xoxp-",
+    "-----begin", "aws_secret",
+)
+
+_HEX = frozenset("0123456789abcdefABCDEF")
+_IDENTIFIER_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.:/"
+)
+
+
+def _looks_like_credential(text: str) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in _CREDENTIAL_MARKERS)
+
+
+def _is_hex_digest(text: str) -> bool:
+    """A hash is a hex digest of a plausible length (sha-1 .. sha-512)."""
+    if not 8 <= len(text) <= 128:
+        return False
+    return all(char in _HEX for char in text)
+
+
+def _is_identifier(text: str) -> bool:
+    if not 1 <= len(text) <= 128:
+        return False
+    return all(char in _IDENTIFIER_CHARS for char in text)
+
+
+def _render_lineage(key: str, value: Any) -> str:
+    """Validate a lineage value against the contract for its own field.
+
+    A single generic scalar check is not enough: a credential placed in an
+    allowlisted *string* field would still be rendered. Each field therefore
+    has its own format, and anything that does not satisfy it — including a
+    credential-shaped string, a malformed hash or a non-finite number — is
+    reported as ``unknown`` rather than echoed into the reflection.
     """
     if value is None:
         return "unknown"
-    if isinstance(value, (str, int, float, bool)):
+    # Non-finite floats cannot be represented faithfully and are not lineage.
+    if isinstance(value, float) and not math.isfinite(value):
+        return "unknown"
+    if isinstance(value, bool):
         return str(value)
-    return "unknown"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if not isinstance(value, str):
+        return "unknown"
+
+    text = value.strip()
+    if not text:
+        return "unknown"
+    if _looks_like_credential(text):
+        return "unknown"
+
+    if key in _HASH_FIELDS:
+        return text if _is_hex_digest(text) else "unknown"
+    if key in _IDENTIFIER_FIELDS:
+        return text if _is_identifier(text) else "unknown"
+    if key in _FREE_TEXT_FIELDS:
+        # Free text is allowed, but still bounded and never credential-shaped.
+        return text if len(text) <= 500 else "unknown"
+    # Unknown field: only a short, plain scalar is safe to echo.
+    return text if len(text) <= 200 else "unknown"
 
 
 def _summary(event_type: str, data: dict[str, Any]) -> str:
@@ -67,7 +139,7 @@ def _summary(event_type: str, data: dict[str, Any]) -> str:
             value = metadata[key]
         else:
             continue
-        facts.append(f"{key}={_renderable(value)}")
+        facts.append(f"{key}={_render_lineage(key, value)}")
     if event_type == "paper_ledger_event":
         for key in ("realized_delta", "commission_delta"):
             # A value may have arrived through the metadata allowlist above, so
