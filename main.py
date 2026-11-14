@@ -179,18 +179,18 @@ def main(argv: Sequence[str] | None = None) -> None:
         from pathlib import Path
         from research.execution_observations import ExecutionObservationJournal
 
+        if args.import_paper_ledger and not args.paper_ledger_db:
+            parser.error("--import-paper-ledger requires --paper-ledger-db")
+        if args.paper_outcomes and not Path(args.learning_db).is_file():
+            parser.error("--paper-outcomes requires an existing --learning-db")
         journal = ExecutionObservationJournal(args.learning_db)
         if args.import_paper_ledger:
-            if not args.paper_ledger_db:
-                parser.error("--import-paper-ledger requires --paper-ledger-db")
             from dataclasses import asdict
             from research.paper_ledger_importer import import_paper_ledger
 
             result = import_paper_ledger(args.paper_ledger_db, journal)
             print(json.dumps(asdict(result), indent=2, default=str))
             return
-        if not Path(args.learning_db).is_file():
-            parser.error("--paper-outcomes requires an existing --learning-db")
         from research.paper_outcomes import build_paper_outcome_report
 
         report = build_paper_outcome_report(journal)
