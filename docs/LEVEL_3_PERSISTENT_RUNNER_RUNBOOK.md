@@ -14,7 +14,8 @@
 
 - A continuously available Linux host or equivalent supervised runtime.
 - Persistent encrypted disk/volume for SQLite database, WAL files and append-only backup snapshots. Never use an ephemeral CI runner as the evidence host.
-- Dedicated unprivileged OS account; repository checkout and runtime dependencies pinned to a reviewed commit and lockfile.
+- Dedicated unprivileged OS account; repository checkout pinned to a reviewed commit.
+- Reviewed runtime baseline: CPython 3.11.18. Install the runtime-only, pinned market-data dependency subset with `python -m pip install "pip==26.3" -r requirements-market-data.lock`. CI/test environments use the complete pinned set in `requirements-lock.txt`.
 - UTC clock synchronization using a monitored time service. Alert on drift beyond the programme's approved tolerance.
 - Outbound network access restricted to DNS and the approved public WSS hostname/port. No inbound public listener is required for collection.
 - Disk capacity sized for raw payload retention, WAL growth and backups; alert before low-space conditions.
