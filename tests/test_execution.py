@@ -56,6 +56,18 @@ class ExecutionServiceTests(unittest.TestCase):
             self.assertEqual(events[-1]["data"]["order_id"], result.order_id)
             self.assertTrue(journal.verify())
 
+    def test_journal_records_position_close_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = ExecutionObservationJournal(Path(tmp) / "observations.sqlite")
+            service = ExecutionService(self.broker, self.risk, observation_journal=journal)
+            self.risk.release_kill_switch(explicit_operator_action=True)
+            service.submit(self.order)
+            close = service.close_position("EURUSD", Decimal("11"))
+            events = journal.list_events()
+            self.assertEqual(events[-1]["event_type"], "position_close_result")
+            self.assertEqual(events[-1]["data"]["order_id"], close.order_id)
+            self.assertTrue(journal.verify())
+
     def test_journal_prevents_duplicate_client_order_submission(self):
         with tempfile.TemporaryDirectory() as tmp:
             journal = ExecutionObservationJournal(Path(tmp) / "observations.sqlite")
