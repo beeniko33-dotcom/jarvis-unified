@@ -11,7 +11,7 @@ from core.models import OrderRequest, Side
 from core.risk import RiskEngine, RiskLimits
 from research.execution_observations import ExecutionObservationJournal
 from research.paper_ledger_importer import import_paper_ledger
-from research.paper_outcomes import PaperOutcomeError, build_paper_outcome_report
+from research.paper_outcomes import PaperOutcomeError, _drawdown, build_paper_outcome_report
 
 
 class PaperOutcomeAnalyticsTests(unittest.TestCase):
@@ -108,6 +108,19 @@ class PaperOutcomeAnalyticsTests(unittest.TestCase):
             )
         with self.assertRaises(PaperOutcomeError):
             build_paper_outcome_report(self.journal)
+
+    def test_missing_account_marks_are_unknown_not_a_report_failure(self):
+        account = {
+            "balance": "1000",
+            "peak_equity": "1100",
+            "positions": [{
+                "symbol": "EURUSD",
+                "quantity": None,
+                "average_price": "1.1",
+            }],
+            "last_prices": {},
+        }
+        self.assertIsNone(_drawdown(account))
 
     def test_event_pagination_returns_only_events_after_cursor(self):
         for index in range(3):
