@@ -16,6 +16,36 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+_LINEAGE_KEYS = frozenset({
+    "strategy_id", "strategy_version", "strategy_config_hash", "experiment_id",
+    "signal_id", "signal_type", "signal_context_hash", "data_source_id", "data_hash",
+    "quote_source", "quote_timestamp",
+})
+_SECRET_MARKERS = ("secret", "password", "token", "private_key", "api_key", "authorization", "bearer")
+
+
+def _paper_metadata(metadata: dict) -> dict:
+    """Persist only bounded, non-secret research lineage; never arbitrary metadata."""
+    lineage = metadata.get("research_lineage") if isinstance(metadata, dict) else None
+    if not isinstance(lineage, dict):
+        return {}
+    safe = {}
+    for key, value in lineage.items():
+        if key not in _LINEAGE_KEYS or not isinstance(value, str):
+            continue
+        value = value.strip()
+        lowered = value.lower()
+        if not value or len(value) > 128 or any(marker in lowered for marker in _SECRET_MARKERS):
+            continue
+        if key in {"strategy_config_hash", "signal_context_hash", "data_hash"}:
+            if not (8 <= len(value) <= 128 and all(ch in "0123456789abcdefABCDEF" for ch in value)):
+                continue
+        elif not all(ch.isalnum() or ch in "_-.:/" for ch in value):
+            continue
+        safe[key] = value
+    return {"research_lineage": safe} if safe else {}
+
+
 @dataclass
 class WorkingOrder:
     order_id: str
@@ -228,7 +258,7 @@ class PaperBroker:
                 OrderStatus.FILLED.value,
                 filled_quantity=order.quantity,
                 remaining_quantity=Decimal("0"),
-                metadata=dict(order.metadata),
+                metadata=_paper_metadata(order.metadata),
             )
             self._orders[result.order_id] = result
             self._client_ids[order.client_order_id] = result
