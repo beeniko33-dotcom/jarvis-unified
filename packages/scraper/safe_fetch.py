@@ -14,6 +14,7 @@ import ipaddress
 import math
 import socket
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 
@@ -65,6 +66,47 @@ def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return False
 
 
+def _normalize_hostname(hostname: str) -> str:
+    if not isinstance(hostname, str) or not hostname or hostname != hostname.strip():
+        raise SafeFetchError("invalid hostname")
+    try:
+        return str(ipaddress.ip_address(hostname))
+    except ValueError:
+        pass
+    if hostname.endswith("."):
+        hostname = hostname[:-1]
+    if (
+        not hostname
+        or any(char in hostname for char in "/:@?#")
+        or any(ord(char) <= 32 or ord(char) == 127 for char in hostname)
+    ):
+        raise SafeFetchError("invalid hostname")
+    try:
+        normalized = hostname.encode("idna").decode("ascii").lower()
+    except UnicodeError as exc:
+        raise SafeFetchError("invalid hostname") from exc
+    labels = normalized.split(".")
+    if len(normalized) > 253 or any(
+        not label
+        or len(label) > 63
+        or label.startswith("-")
+        or label.endswith("-")
+        or any(char not in "abcdefghijklmnopqrstuvwxyz0123456789-" for char in label)
+        for label in labels
+    ):
+        raise SafeFetchError("invalid hostname")
+    return normalized
+
+
+def _normalize_allowed_hosts(allowed_hosts: Iterable[str]) -> frozenset[str]:
+    if allowed_hosts is None or isinstance(allowed_hosts, str):
+        raise SafeFetchError("allowed_hosts must be a collection of hostnames")
+    normalized = frozenset(_normalize_hostname(host) for host in allowed_hosts)
+    if not normalized:
+        raise SafeFetchError("allowed_hosts must contain at least one hostname")
+    return normalized
+
+
 def _resolve_and_validate_host(hostname: str) -> list[str]:
     if not hostname or hostname.lower() in {"localhost", "metadata", "metadata.google.internal"}:
         raise SafeFetchError(f"blocked hostname: {hostname!r}")
@@ -90,7 +132,10 @@ def _resolve_and_validate_host(hostname: str) -> list[str]:
     return resolved
 
 
-def _validate_url(url: str) -> tuple[str, str, str, int, list[str]]:
+def _validate_url(
+    url: str,
+    allowed_hosts: frozenset[str] | None = None,
+) -> tuple[str, str, str, int, list[str]]:
     try:
         parsed = urlparse(url)
         port = parsed.port
@@ -107,10 +152,9 @@ def _validate_url(url: str) -> tuple[str, str, str, int, list[str]]:
     default_port = 443 if scheme == "https" else 80
     if port not in {None, default_port}:
         raise SafeFetchError("only standard HTTP and HTTPS ports are supported")
-    try:
-        hostname = hostname.encode("idna").decode("ascii")
-    except UnicodeError as exc:
-        raise SafeFetchError("invalid hostname") from exc
+    hostname = _normalize_hostname(hostname)
+    if allowed_hosts is not None and hostname not in allowed_hosts:
+        raise SafeFetchError(f"hostname is not in the allowlist: {hostname!r}")
     # Reject direct IP literals that are blocked
     try:
         ip = ipaddress.ip_address(hostname)
@@ -154,8 +198,9 @@ def safe_fetch_url(
     max_bytes: int = DEFAULT_MAX_BYTES,
     max_redirects: int = MAX_REDIRECTS,
     user_agent: str = "JarvisUnifiedScraper/0.2 (+safe-fetch)",
+    allowed_hosts: Iterable[str],
 ) -> FetchResult:
-    """Fetch a public HTTP(S) URL, pinning and revalidating each destination."""
+    """Fetch a public HTTP(S) URL restricted to exact allowed hosts."""
     if (
         not math.isfinite(timeout_s)
         or timeout_s <= 0
@@ -169,10 +214,14 @@ def safe_fetch_url(
     if not user_agent or len(user_agent) > 256 or "\r" in user_agent or "\n" in user_agent:
         raise SafeFetchError("invalid user agent")
 
+    normalized_allowed_hosts = _normalize_allowed_hosts(allowed_hosts)
     current = url
     deadline = time.monotonic() + timeout_s
     for _ in range(max_redirects + 1):
-        scheme, hostname, current, port, addresses = _validate_url(current)
+        scheme, hostname, current, port, addresses = _validate_url(
+            current,
+            normalized_allowed_hosts,
+        )
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise SafeFetchError(f"timeout fetching {hostname}")

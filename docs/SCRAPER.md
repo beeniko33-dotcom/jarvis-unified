@@ -10,10 +10,10 @@ The source runtime also includes credential/OTP brute-force and directory-enumer
 
 ## Current Jarvis implementation
 
-- `packages/scraper/safe_fetch.py` fetches one public HTTP(S) URL with DNS pinning, redirect validation, standard-port restriction, a total timeout, and response-size limits.
+- `packages/scraper/safe_fetch.py` fetches one public HTTP(S) URL with DNS pinning, exact-host allowlisting, redirect validation, standard-port restriction, a total timeout, and response-size limits. Every redirect host must also be explicitly allowlisted; the allowlist does not bypass blocked-address checks.
 - `packages/scraper/extract.py` returns bounded title/description/headings only; it does not return or persist page content.
 
-No crawler, robots-policy handling, or remote scraping API is enabled. Keep the existing fetcher local-only to the codebase until those controls are designed and tested.
+The CLI requires one or more `--allow-host HOST` entries for each run. No crawler, robots-policy handling, or remote scraping API is enabled. Private, loopback, and metadata destinations remain blocked, even when a hostname is allowlisted.
 
 ## Future migration requirements
 

@@ -1,6 +1,7 @@
 """Bounded HTML page metadata extraction; page bodies are not returned or stored."""
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from email.message import Message
 from html.parser import HTMLParser
@@ -85,9 +86,13 @@ class _MetadataParser(HTMLParser):
         return " ".join(value.split())
 
 
-def extract_page_metadata(url: str) -> PageMetadata:
+def extract_page_metadata(
+    url: str,
+    *,
+    allowed_hosts: Iterable[str],
+) -> PageMetadata:
     """Fetch one public HTML page and return only bounded title/description/headings."""
-    result: FetchResult = safe_fetch_url(url)
+    result: FetchResult = safe_fetch_url(url, allowed_hosts=allowed_hosts)
     content_type = Message()
     content_type["content-type"] = result.content_type
     media_type = content_type.get_content_type().lower()

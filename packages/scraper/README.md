@@ -1,21 +1,21 @@
 # Scraper package
 
-This independent package provides a deliberately narrow, safe public-page metadata workflow. It is not a trading dependency and does not import or execute the original `advanced-scraper` runtime.
+This independent package provides a deliberately narrow, allowlisted public-page metadata workflow. It is not a trading dependency and does not import or execute the original `advanced-scraper` runtime.
 
 ## Current functionality
 
-- `safe_fetch.py` retrieves one public HTTP(S) page using the address validated during DNS resolution.
+- `safe_fetch.py` retrieves one public HTTP(S) page using the address validated during DNS resolution. The CLI requires explicit exact-host allowlist entries, including any redirect destinations.
 - `extract.py` returns only bounded page title, meta description, and headings; it does not return or persist page bodies or extract personal identities.
 
-The fetcher allows standard HTTP/HTTPS ports only, rejects embedded credentials and non-public destinations, revalidates every redirect, and bounds total time, response bytes, and redirect count. Compressed responses are rejected rather than expanded without a decompression limit.
+The fetcher allows standard HTTP/HTTPS ports only, rejects embedded credentials and non-public destinations, revalidates every redirect against the allowlist, and bounds total time, response bytes, and redirect count. Allowlisting does not permit private or loopback addresses. Compressed responses are rejected rather than expanded without a decompression limit.
 
 Run one authorized-page extraction with:
 
 ```bash
-python -m packages.scraper https://example.com
+python -m packages.scraper --allow-host example.com https://example.com
 ```
 
-The command prints JSON metadata only. Respect the target site's terms and applicable robots policy; this package does not implement crawling or robots-policy handling.
+Repeat `--allow-host` for each exact hostname that may receive a request, including redirect destinations. The command prints JSON metadata only. Respect the target site's terms and applicable robots policy; this package does not implement crawling or robots-policy handling.
 
 ## Migration boundary
 

@@ -26,7 +26,7 @@ python main.py --health
 python main.py --summary
 python main.py --report
 python main.py --demo
-python -m packages.scraper https://example.com
+python -m packages.scraper --allow-host example.com https://example.com
 python -m unittest discover -s tests -v
 python scripts/diagnose.py
 python scripts/paper_session.py --allow-entries --ledger var/paper_ledger.jsonl

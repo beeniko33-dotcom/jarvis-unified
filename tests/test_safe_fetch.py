@@ -17,27 +17,38 @@ from packages.scraper.safe_fetch import (
 class SafeFetchTests(unittest.TestCase):
     def test_rejects_file_scheme(self):
         with self.assertRaises(SafeFetchError):
-            safe_fetch_url("file:///etc/passwd")
+            safe_fetch_url("file:///etc/passwd", allowed_hosts=["example.com"])
 
     def test_rejects_localhost(self):
         with self.assertRaises(SafeFetchError):
-            safe_fetch_url("http://localhost/admin")
+            safe_fetch_url("http://localhost/admin", allowed_hosts=["localhost"])
 
     def test_rejects_loopback_ip(self):
         with self.assertRaises(SafeFetchError):
-            safe_fetch_url("http://127.0.0.1/")
+            safe_fetch_url("http://127.0.0.1/", allowed_hosts=["127.0.0.1"])
 
     def test_rejects_private_ip(self):
         with self.assertRaises(SafeFetchError):
-            safe_fetch_url("http://192.168.1.10/")
+            safe_fetch_url("http://192.168.1.10/", allowed_hosts=["192.168.1.10"])
 
     def test_rejects_metadata_host(self):
         with self.assertRaises(SafeFetchError):
-            safe_fetch_url("http://metadata.google.internal/")
+            safe_fetch_url(
+                "http://metadata.google.internal/",
+                allowed_hosts=["metadata.google.internal"],
+            )
 
     def test_rejects_credentials_in_url(self):
         with self.assertRaises(SafeFetchError):
-            safe_fetch_url("https://user:pass@example.com/")
+            safe_fetch_url(
+                "https://user:pass@example.com/",
+                allowed_hosts=["example.com"],
+            )
+
+    def test_requires_a_nonempty_host_allowlist(self):
+        for allowed_hosts in ([], None):
+            with self.subTest(allowed_hosts=allowed_hosts), self.assertRaises(SafeFetchError):
+                safe_fetch_url("https://example.com/", allowed_hosts=allowed_hosts)
 
     def test_is_public_hostname_localhost_false(self):
         self.assertFalse(is_public_hostname("localhost"))
@@ -63,6 +74,68 @@ class SafeFetchTests(unittest.TestCase):
         with patch("packages.scraper.safe_fetch.socket.getaddrinfo", return_value=resolved):
             with self.assertRaisesRegex(SafeFetchError, "blocked address"):
                 _validate_url("https://example.com/")
+
+    def test_allowed_host_is_normalized_and_fetches(self):
+        resolved = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))
+        ]
+        response = Mock(status=200)
+        response.getheader.side_effect = lambda name, default=None: {
+            "Content-Length": "0",
+            "Content-Type": "text/html",
+            "Content-Encoding": "identity",
+        }.get(name, default)
+        response.read.return_value = b""
+        connection = Mock(sock=None)
+        connection.getresponse.return_value = response
+        with (
+            patch("packages.scraper.safe_fetch.socket.getaddrinfo", return_value=resolved),
+            patch(
+                "packages.scraper.safe_fetch._PinnedHTTPSConnection",
+                return_value=connection,
+            ) as connection_factory,
+        ):
+            result = safe_fetch_url(
+                "https://example.com/",
+                allowed_hosts=["EXAMPLE.COM."],
+            )
+
+        self.assertEqual(result.status, 200)
+        connection_factory.assert_called_once()
+
+    def test_host_outside_allowlist_is_rejected_before_dns(self):
+        with patch("packages.scraper.safe_fetch.socket.getaddrinfo") as resolve:
+            with self.assertRaisesRegex(SafeFetchError, "not in the allowlist"):
+                safe_fetch_url(
+                    "https://sub.example.com/",
+                    allowed_hosts=["example.com"],
+                )
+
+        resolve.assert_not_called()
+
+    def test_redirect_destination_must_be_in_allowlist(self):
+        response = Mock(status=302)
+        response.getheader.return_value = "https://other.example/final"
+        connection = Mock(sock=None)
+        connection.getresponse.return_value = response
+        resolved = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))
+        ]
+        with (
+            patch("packages.scraper.safe_fetch.socket.getaddrinfo", return_value=resolved) as resolve,
+            patch(
+                "packages.scraper.safe_fetch._PinnedHTTPSConnection",
+                return_value=connection,
+            ),
+        ):
+            with self.assertRaisesRegex(SafeFetchError, "not in the allowlist"):
+                safe_fetch_url(
+                    "https://example.com/",
+                    allowed_hosts=["example.com"],
+                    max_redirects=1,
+                )
+
+        resolve.assert_called_once()
 
     def test_http_connection_uses_the_validated_ip_not_the_hostname(self):
         connection = _PinnedHTTPConnection("example.com", 80, "93.184.216.34", 5)
@@ -106,7 +179,11 @@ class SafeFetchTests(unittest.TestCase):
             {"user_agent": "invalid\r\nheader"},
         ):
             with self.subTest(kwargs=kwargs), self.assertRaises(SafeFetchError):
-                safe_fetch_url("https://example.com/", **kwargs)
+                safe_fetch_url(
+                    "https://example.com/",
+                    allowed_hosts=["example.com"],
+                    **kwargs,
+                )
 
     def test_redirect_destination_is_revalidated_and_pinned(self):
         class FakeResponse:
@@ -156,7 +233,11 @@ class SafeFetchTests(unittest.TestCase):
             patch("packages.scraper.safe_fetch.socket.getaddrinfo", side_effect=resolve),
             patch("packages.scraper.safe_fetch._PinnedHTTPSConnection", FakeConnection),
         ):
-            result = safe_fetch_url("https://example.com/start", max_redirects=1)
+            result = safe_fetch_url(
+                "https://example.com/start",
+                max_redirects=1,
+                allowed_hosts=["example.com", "other.example"],
+            )
 
         self.assertEqual(result.final_url, "https://other.example/final")
         self.assertEqual(result.body, b"done")
@@ -231,7 +312,7 @@ class SafeFetchHttpIntegrationTests(unittest.TestCase):
     def test_fetch_uses_pinned_destination_and_returns_bounded_body(self):
         dns_patch, connection_patch = self._network_patches()
         with dns_patch, connection_patch:
-            result = safe_fetch_url("http://example.com/")
+            result = safe_fetch_url("http://example.com/", allowed_hosts=["example.com"])
 
         self.assertEqual(result.status, 200)
         self.assertEqual(result.body, b"<h1>Safe</h1>")
@@ -241,7 +322,10 @@ class SafeFetchHttpIntegrationTests(unittest.TestCase):
         dns_patch, connection_patch = self._network_patches()
         with dns_patch, connection_patch:
             with self.assertRaisesRegex(SafeFetchError, "blocked address"):
-                safe_fetch_url("http://example.com/redirect")
+                safe_fetch_url(
+                    "http://example.com/redirect",
+                    allowed_hosts=["example.com", "rebound.example"],
+                )
 
         self.assertEqual(self.server.paths, ["/redirect"])
 
@@ -249,13 +333,20 @@ class SafeFetchHttpIntegrationTests(unittest.TestCase):
         dns_patch, connection_patch = self._network_patches()
         with dns_patch, connection_patch:
             with self.assertRaisesRegex(SafeFetchError, "exceeded max_bytes"):
-                safe_fetch_url("http://example.com/large", max_bytes=4)
+                safe_fetch_url(
+                    "http://example.com/large",
+                    max_bytes=4,
+                    allowed_hosts=["example.com"],
+                )
 
     def test_compressed_response_is_rejected(self):
         dns_patch, connection_patch = self._network_patches()
         with dns_patch, connection_patch:
             with self.assertRaisesRegex(SafeFetchError, "compressed responses"):
-                safe_fetch_url("http://example.com/compressed")
+                safe_fetch_url(
+                    "http://example.com/compressed",
+                    allowed_hosts=["example.com"],
+                )
 
 
 if __name__ == "__main__":

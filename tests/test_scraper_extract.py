@@ -22,7 +22,10 @@ class PageMetadataExtractionTests(unittest.TestCase):
             body=body,
         )
         with patch("packages.scraper.extract.safe_fetch_url", return_value=result):
-            page = extract_page_metadata("https://example.com/")
+            page = extract_page_metadata(
+                "https://example.com/",
+                allowed_hosts=["example.com"],
+            )
 
         self.assertEqual(
             page,
@@ -47,7 +50,10 @@ class PageMetadataExtractionTests(unittest.TestCase):
         )
         with patch("packages.scraper.extract.safe_fetch_url", return_value=result):
             with self.assertRaisesRegex(SafeFetchError, "HTML document"):
-                extract_page_metadata("https://example.com/data.json")
+                extract_page_metadata(
+                    "https://example.com/data.json",
+                    allowed_hosts=["example.com"],
+                )
 
     def test_rejects_unknown_html_charset(self):
         result = FetchResult(
@@ -59,7 +65,10 @@ class PageMetadataExtractionTests(unittest.TestCase):
         )
         with patch("packages.scraper.extract.safe_fetch_url", return_value=result):
             with self.assertRaisesRegex(SafeFetchError, "unsupported character encoding"):
-                extract_page_metadata("https://example.com/")
+                extract_page_metadata(
+                    "https://example.com/",
+                    allowed_hosts=["example.com"],
+                )
 
     def test_metadata_fields_and_heading_count_are_bounded(self):
         body = (
@@ -75,7 +84,10 @@ class PageMetadataExtractionTests(unittest.TestCase):
             body=body,
         )
         with patch("packages.scraper.extract.safe_fetch_url", return_value=result):
-            page = extract_page_metadata("https://example.com/")
+            page = extract_page_metadata(
+                "https://example.com/",
+                allowed_hosts=["example.com"],
+            )
 
         self.assertLessEqual(len(page.title or ""), 500)
         self.assertLessEqual(len(page.description or ""), 500)
