@@ -139,6 +139,14 @@ class ExecutionObservationJournal:
             previous = event_hash
         return True
 
+    def has_event(self, event_id: str) -> bool:
+        with closing(self._connect()) as db:
+            row = db.execute(
+                "SELECT 1 FROM execution_observations WHERE event_id=?",
+                (event_id,),
+            ).fetchone()
+        return row is not None
+
     def list_events(self, *, limit: int = 100) -> list[dict[str, Any]]:
         if not isinstance(limit, int) or limit < 1 or limit > 10000:
             raise ValueError("limit must be between 1 and 10000")
