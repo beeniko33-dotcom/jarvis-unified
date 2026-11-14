@@ -314,7 +314,7 @@ class PaperBroker:
                 OrderStatus.OPEN.value,
                 filled_quantity=Decimal("0"),
                 remaining_quantity=order.quantity,
-                metadata=dict(order.metadata),
+                metadata=_paper_metadata(order.metadata),
             )
             self._orders[order_id] = result
             return result
