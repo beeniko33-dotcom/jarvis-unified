@@ -122,6 +122,8 @@ def build_paper_outcome_report(
     if not journal.verify():
         raise PaperOutcomeError("learning journal hash chain is invalid")
     events = _pages(journal)
+    if not journal.verify():
+        raise PaperOutcomeError("learning journal changed or became invalid during report generation")
 
     imported = []
     source_ids: set[str] = set()
@@ -147,6 +149,22 @@ def build_paper_outcome_report(
             reservation_rejections += 1
         elif event_type == "broker_submission_error":
             broker_errors += 1
+
+        if event_type in {"broker_order_result", "position_close_result"}:
+            order_id = data.get("order_id")
+            if order_id:
+                latest_orders[str(order_id)] = {
+                    "order_id": order_id,
+                    "client_order_id": data.get("client_order_id"),
+                    "symbol": data.get("symbol"),
+                    "side": data.get("side"),
+                    "quantity": data.get("quantity"),
+                    "fill_price": data.get("fill_price"),
+                    "status": data.get("result_status") or data.get("status"),
+                    "filled_quantity": data.get("filled_quantity"),
+                    "remaining_quantity": data.get("remaining_quantity"),
+                    "created_at": data.get("created_at"),
+                }
 
         if event_type != "paper_ledger_event":
             continue
