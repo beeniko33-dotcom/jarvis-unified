@@ -53,6 +53,16 @@ class ExecutionServiceTests(unittest.TestCase):
             self.assertEqual(events[-1]["data"]["order_id"], result.order_id)
             self.assertTrue(journal.verify())
 
+    def test_journal_prevents_duplicate_client_order_submission(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = ExecutionObservationJournal(Path(tmp) / "observations.sqlite")
+            service = ExecutionService(self.broker, self.risk, observation_journal=journal)
+            self.risk.release_kill_switch(explicit_operator_action=True)
+            service.submit(self.order)
+            with self.assertRaisesRegex(PermissionError, "already has an execution observation"):
+                service.submit(self.order)
+            self.assertEqual(self.broker.get_account().open_positions, 1)
+
     def test_journal_preserves_missing_strategy_provenance_as_unknown(self):
         with tempfile.TemporaryDirectory() as tmp:
             journal = ExecutionObservationJournal(Path(tmp) / "observations.sqlite")
