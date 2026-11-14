@@ -1,14 +1,47 @@
 import io
 import json
 import os
+import tempfile
 import unittest
+from decimal import Decimal
+from pathlib import Path
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
 from main import main
+from brokers.paper import PersistentPaperBroker
+from core.models import OrderRequest, Side
 
 
 class MainCliTests(unittest.TestCase):
+    def test_paper_ledger_import_and_outcome_report_commands(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger = root / "paper.sqlite"
+            learning = root / "learning.sqlite"
+            broker = PersistentPaperBroker(Decimal("1000"), database_path=ledger)
+            broker.place_order(
+                OrderRequest("EURUSD", Side.BUY, Decimal("0.1"), Decimal("10"), "cli-entry")
+            )
+
+            imported_output = io.StringIO()
+            with redirect_stdout(imported_output):
+                main([
+                    "--import-paper-ledger",
+                    "--paper-ledger-db", str(ledger),
+                    "--learning-db", str(learning),
+                ])
+            imported = json.loads(imported_output.getvalue())
+            self.assertTrue(imported["source_chain_verified"])
+            self.assertGreater(imported["imported_events"], 0)
+
+            report_output = io.StringIO()
+            with redirect_stdout(report_output):
+                main(["--paper-outcomes", "--learning-db", str(learning)])
+            report = json.loads(report_output.getvalue())
+            self.assertGreater(report["imported_ledger_events"], 0)
+            self.assertEqual(report["order_count"], 1)
+
     def test_serve_accepts_custom_host_and_port(self):
         seen = {}
 
