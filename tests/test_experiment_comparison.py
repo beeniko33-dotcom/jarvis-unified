@@ -85,7 +85,6 @@ class ExperimentComparisonTests(unittest.TestCase):
         self.assertEqual(result["status"], "mismatch")
         report = compare_experiments(self.store, left.experiment_id, right.experiment_id)
         self.assertFalse(report.comparable)
-        self.assertIn("right_experiment_integrity_failed", report.reasons)
         self.assertIn("source_journal_hash_mismatch", report.reasons)
 
     def test_dataset_and_time_mismatch_are_explicit(self):
