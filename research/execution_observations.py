@@ -82,9 +82,16 @@ class ExecutionObservationJournal:
                     (event_id,),
                 ).fetchone()
                 if existing:
-                    if existing[0] != payload:
+                    prior = json.loads(existing[0])
+                    current = json.loads(payload)
+                    # Retry timestamps are naturally different. Idempotency is
+                    # defined by event identity, type and observed data, not retry time.
+                    if (
+                        prior.get("event_type") != current.get("event_type")
+                        or prior.get("data") != current.get("data")
+                    ):
                         raise ObservationConflictError(
-                            "event_id already exists with different content"
+                            "event_id already exists with different event type or data"
                         )
                     db.commit()
                     return existing[1]
