@@ -168,7 +168,7 @@ class SupervisorTests(unittest.TestCase):
                 "from research import collector_supervisor as cs; "
                 "cs._install_signal_handlers(); "
                 "cs.run_one_session(command=[sys.executable,'-c',"
-                + repr("import os,time; from pathlib import Path; Path(" + repr(str(child_pid_file)) + ").write_text(str(os.getpid())); time.sleep(60)"))
+                + repr("import os,time; from pathlib import Path; Path(" + repr(str(child_pid_file)) + ").write_text(str(os.getpid())); time.sleep(60)")
                 + "], db_path=Path(sys.argv[1])/'db.sqlite3', "
                 "lock_path=Path(sys.argv[1])/'db.lock', duration_seconds=120, "
                 "log_dir=Path(sys.argv[1])/'logs', shutdown_grace_seconds=1)"
