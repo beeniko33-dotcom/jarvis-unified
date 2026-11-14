@@ -96,6 +96,8 @@ class PaperLedgerImporterTests(unittest.TestCase):
         metadata = {
             "research_lineage": {
                 "strategy_id": "momentum-v2",
+                "quote_timestamp": "2026-11-14T15:40:00+00:00",
+                "signal_context_hash": "not-a-valid-hash",
                 "strategy_version": "2.1",
                 "strategy_config_hash": "a" * 64,
                 "experiment_id": "exp-2026-11",
@@ -112,6 +114,8 @@ class PaperLedgerImporterTests(unittest.TestCase):
         )
         self.assertEqual(result.metadata["research_lineage"]["strategy_id"], "momentum-v2")
         self.assertNotIn("api_key", result.metadata)
+        self.assertEqual(result.metadata["research_lineage"]["quote_timestamp"], "2026-11-14T15:40:00+00:00")
+        self.assertNotIn("signal_context_hash", result.metadata["research_lineage"])
 
         restored = PersistentPaperBroker(
             Decimal("1000"), database_path=self.root / "lineage.sqlite"
