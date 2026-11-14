@@ -47,6 +47,31 @@ def _positive_decimal(value: Any, field: str) -> Decimal:
     return result
 
 
+def unwrap_tick_arguments(arguments: Any) -> dict:
+    """Normalise a SignalR invocation payload into a single tick object.
+
+    ``signalrcore`` invokes a registered handler as ``handler(message.arguments)``,
+    where ``message.arguments`` is the JSON array from the hub frame. Passing that
+    list straight to :func:`build_tick_observation` rejected every real tick, so
+    the dispatch boundary is normalised here instead of inside the validator.
+
+    A bare dict is accepted for direct callers. Anything else fails closed: an
+    empty or multi-argument frame is ambiguous and must not be guessed at.
+    """
+    if isinstance(arguments, dict):
+        return arguments
+    if not isinstance(arguments, (list, tuple)):
+        raise ValueError("Biquote tick frame must be a JSON object or a one-element array")
+    if len(arguments) != 1:
+        raise ValueError(
+            f"Biquote tick frame must carry exactly one argument, got {len(arguments)}"
+        )
+    tick = arguments[0]
+    if not isinstance(tick, dict):
+        raise ValueError("Biquote tick frame argument must be a JSON object")
+    return tick
+
+
 def build_tick_observation(
     tick: dict,
     *,
@@ -155,19 +180,20 @@ def collect(
     connection = None
     report = None
 
-    def on_tick(tick):
+    def on_tick(arguments):
+        # signalrcore delivers message.arguments (a list), not the tick itself.
         with lock:
             counts["received"] += 1
         try:
-            pending.put_nowait(tick)
+            pending.put_nowait(arguments)
         except queue.Full:
             with lock:
                 counts["dropped_queue_full"] += 1
 
-    def process_tick(tick):
+    def process_tick(arguments):
         try:
             item = build_tick_observation(
-                tick,
+                unwrap_tick_arguments(arguments),
                 received_at=datetime.now(timezone.utc),
                 max_quote_age_seconds=max_quote_age_seconds,
             )
