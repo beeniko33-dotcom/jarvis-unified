@@ -26,8 +26,11 @@ Use the continuous session supervisor (`python -m research.collector_supervisor`
 
 - Runs duration-bounded collector sessions sequentially.
 - Holds an exclusive file lock so two writers never touch the same SQLite database.
+- Breaks **stale locks** when the recorded owner PID is no longer alive.
+- Applies **exponential backoff** after consecutive failures and stops after a configurable failure budget.
+- Handles **SIGTERM / SIGINT** cooperatively so the continuous loop exits cleanly.
 - Records every session boundary (start/end, exit code, command, status) as JSON.
-- Supports clean normal-exit restart (the previous gap in a plain `Restart=on-failure` unit).
+- Exposes a lightweight `--health` snapshot for operators (not market-data evidence).
 
 Example service policy (adapt and review before installation):
 
@@ -47,9 +50,13 @@ ExecStart=/opt/jarvis-venv/bin/python -m research.collector_supervisor \
   --db /var/lib/jarvis/deriv_eurusd_forward.sqlite3 \
   --duration-seconds 86400 \
   --log-dir /var/lib/jarvis/sessions \
-  --pause-between 15
+  --pause-between 15 \
+  --max-consecutive-failures 5 \
+  --backoff-base 15 \
+  --backoff-cap 300
 Restart=on-failure
 RestartSec=15
+KillMode=control-group
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
@@ -61,14 +68,26 @@ UMask=0077
 WantedBy=multi-user.target
 ```
 
+Operator health check (no collector started):
+
+```bash
+python -m research.collector_supervisor \
+  --db /var/lib/jarvis/deriv_eurusd_forward.sqlite3 \
+  --log-dir /var/lib/jarvis/sessions \
+  --health
+```
+
 The supervisor itself is the reviewed loop that schedules bounded sessions, records boundaries, and avoids overlapping writers. Do not assume a bare duration-bounded collector provides continuous 30-day coverage.
 
 ## 4. Health, freshness and alerting
 
 Emit structured health records with host ID, commit SHA, process start, collector version, endpoint, session ID, connection state, last provider event time, last receive time, UTC clock offset, database path/size, WAL size, last successful backup and current provenance gate.
 
+The supervisor `--health` output covers process-level facts (lock state, last session record, session count). It is **not** a substitute for feed-freshness or provenance checks.
+
 Alert on:
 - process exit or repeated reconnects;
+- supervisor stop after consecutive-failure budget;
 - no tick within the approved freshness window;
 - missed UTC observation day;
 - TLS/certificate/hostname verification failure or unexpected peer change;
@@ -101,6 +120,7 @@ A heartbeat proves process liveness only. It is not a market observation and doe
 7. Confirm backup completion and disk headroom.
 8. Record any outage, reconnect, missed day, configuration change or incident.
 9. Keep broker adapters disabled and verify zero trading actions.
+10. Optionally run `--health` and archive the JSON snapshot with the daily log.
 
 ## 7. Acceptance before starting the 30-day clock
 
