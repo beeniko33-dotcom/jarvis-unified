@@ -38,6 +38,25 @@ class DerivFeedTests(unittest.TestCase):
             "frxEURUSD",
         )
 
+    def test_resolves_eurusd_from_current_underlying_symbol_catalog(self):
+        self.assertEqual(
+            resolve_eurusd_symbol([
+                {"underlying_symbol": "frxGBPUSD", "underlying_symbol_name": "GBP/USD"},
+                {"underlying_symbol": "frxEURUSD", "underlying_symbol_name": "EUR/USD"},
+            ]),
+            "frxEURUSD",
+        )
+
+    def test_rejects_conflicting_symbol_fields(self):
+        with self.assertRaisesRegex(ValueError, "conflicting symbol codes"):
+            resolve_eurusd_symbol([
+                {
+                    "symbol": "frxEURUSD",
+                    "underlying_symbol": "frxGBPUSD",
+                    "display_name": "EUR/USD",
+                }
+            ])
+
     def test_rejects_missing_or_ambiguous_symbol(self):
         with self.assertRaises(ValueError):
             resolve_eurusd_symbol([])

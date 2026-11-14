@@ -1,6 +1,6 @@
 # Persistent host provisioning checklist — Issue #11
 
-**Status:** checklist only. No cloud account, VM, or collector process is created by this document. A compatible EUR/USD data source is still required before provisioning.
+**Status:** checklist only. No cloud account, VM, or collector process is created by this document. The Deriv parser now recognizes the current catalog response; a successful subscription check at market open and provenance review are still required.
 
 Pairs with `docs/LEVEL_3_PERSISTENT_RUNNER_RUNBOOK.md` and the Issue #9 trust model. Market-data on this host remains **candidate** evidence until provenance policy is accepted.
 
@@ -40,7 +40,7 @@ python main.py --check
 python -m research.deriv_feed --duration-seconds 120 --db /var/lib/jarvis/deriv_eurusd_forward.sqlite3
 ```
 
-As of 2026-11-14, the latest read-only Deriv catalog check returned 95 active symbols and no EUR/USD match. The current Deriv EUR/USD collector therefore fails closed before subscribing; do not schedule it or count its output as evidence unless the provider catalog later includes the required symbol. Select and verify a compatible source before provisioning a 30-day run.
+As of 2026-11-14, the read-only Deriv catalog returned 95 active symbols and included EUR/USD as `underlying_symbol=frxEURUSD`. The parser now accepts both the legacy and current field names. A read-only subscription attempt returned `MarketIsClosed` and the provider response stated the market would reopen at `2026-11-16 00:00:00`; repeat the subscription smoke test after reopening before scheduling a collector or provisioning a 30-day run. Public tick provenance remains unverified, so this does not remove the Issue #9 gate.
 
 Confirm:
 
