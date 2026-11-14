@@ -61,6 +61,9 @@ class PaperLedgerImporterTests(unittest.TestCase):
         self.assertLess(Decimal(close["data"]["realized_delta"]), Decimal("0"))
         self.assertGreater(Decimal(close["data"]["commission_delta"]), Decimal("0"))
         self.assertTrue(close["data"]["source_event_hash"])
+        snapshot = close["data"]["account_snapshot"]
+        self.assertEqual(snapshot["commission_per_side"], "0.1")
+        self.assertEqual(snapshot["balance"] is not None, True)
 
     def test_corrupt_source_chain_is_rejected_before_any_import(self):
         with sqlite3.connect(self.source) as db:
