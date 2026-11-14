@@ -17,6 +17,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+from decimal import Decimal
 
 from core.risk import ExposureReservationStore
 
