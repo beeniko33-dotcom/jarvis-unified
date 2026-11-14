@@ -133,6 +133,18 @@ class ExperienceStore:
                     db.execute(
                         f"ALTER TABLE research_experiments ADD COLUMN {column} {definition}"
                     )
+            db.executescript("""
+                CREATE TABLE IF NOT EXISTS experiment_source_verifications (
+                    verification_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    experiment_id TEXT NOT NULL REFERENCES research_experiments(experiment_id),
+                    ledger_hash TEXT NOT NULL,
+                    journal_hash TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('verified','mismatch')),
+                    checked_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_experiment_source_verifications
+                    ON experiment_source_verifications(experiment_id,verification_id);
+            """)
             db.commit()
 
     def _connect(self) -> sqlite3.Connection:
@@ -218,9 +230,19 @@ class ExperienceStore:
                 raise ValueError("unknown data_status")
             sql += " WHERE data_status=?"
             params = (data_status,)
-        sql += " ORDER BY created_at,experiment_id"
+        sql += """ ORDER BY created_at,experiment_id"""
         with closing(self._connect()) as db:
-            rows = db.execute(sql, params).fetchall()
+            rows = db.execute(
+                """SELECT e.*,
+                    COALESCE((
+                        SELECT v.status FROM experiment_source_verifications v
+                        WHERE v.experiment_id=e.experiment_id
+                        ORDER BY v.verification_id DESC LIMIT 1
+                    ), e.evidence_status) AS current_evidence_status
+                    FROM research_experiments e"""
+                + ("" if " WHERE " not in sql else sql[sql.index(" WHERE "):]),
+                params,
+            ).fetchall()
         return [self._from_row(row) for row in rows]
 
     @staticmethod
@@ -228,7 +250,62 @@ class ExperienceStore:
         values = dict(row)
         values["metrics"] = json.loads(values.pop("metrics_json"))
         values.pop("config_json", None)
+        values["evidence_status"] = values.pop(
+            "current_evidence_status", values.get("evidence_status", "metadata_only")
+        )
         return Experiment(**values)
+
+    @staticmethod
+    def _file_sha256(path: str | Path) -> str:
+        digest = hashlib.sha256()
+        with Path(path).open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def verify_source_artifacts(
+        self, experiment_id: str, *, ledger_path: str | Path,
+        journal_path: str | Path,
+    ) -> dict[str, Any]:
+        """Hash actual local artifacts and append a verification attempt.
+
+        The paths are never persisted or returned. Only their SHA-256 digests and
+        verification result are retained in the append-only verification history.
+        """
+        with closing(self._connect()) as db:
+            row = db.execute(
+                """SELECT source_ledger_hash,source_journal_hash
+                FROM research_experiments WHERE experiment_id=?""",
+                (experiment_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError("experiment does not exist")
+        ledger_hash = self._file_sha256(ledger_path)
+        journal_hash = self._file_sha256(journal_path)
+        matched = bool(
+            row["source_ledger_hash"] and row["source_journal_hash"]
+            and ledger_hash == row["source_ledger_hash"]
+            and journal_hash == row["source_journal_hash"]
+        )
+        with closing(self._connect()) as db:
+            db.execute(
+                """INSERT INTO experiment_source_verifications
+                (experiment_id,ledger_hash,journal_hash,status,checked_at)
+                VALUES(?,?,?,?,?)""",
+                (
+                    experiment_id, ledger_hash, journal_hash,
+                    "verified" if matched else "mismatch", _now(),
+                ),
+            )
+            db.commit()
+        return {
+            "experiment_id": experiment_id,
+            "status": "verified" if matched else "mismatch",
+            "ledger_hash_matches": bool(row["source_ledger_hash"]) and
+                ledger_hash == row["source_ledger_hash"],
+            "journal_hash_matches": bool(row["source_journal_hash"]) and
+                journal_hash == row["source_journal_hash"],
+        }
 
     def verify(self, experiment_id: str) -> bool:
         with closing(self._connect()) as db:
