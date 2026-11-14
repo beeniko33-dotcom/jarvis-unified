@@ -23,6 +23,7 @@ class MainCliTests(unittest.TestCase):
             broker.place_order(
                 OrderRequest("EURUSD", Side.BUY, Decimal("0.1"), Decimal("10"), "cli-entry")
             )
+            broker.close_position("EURUSD", Decimal("8"))
 
             imported_output = io.StringIO()
             with redirect_stdout(imported_output):
@@ -40,7 +41,40 @@ class MainCliTests(unittest.TestCase):
                 main(["--paper-outcomes", "--learning-db", str(learning)])
             report = json.loads(report_output.getvalue())
             self.assertGreater(report["imported_ledger_events"], 0)
-            self.assertEqual(report["order_count"], 1)
+            self.assertEqual(report["order_count"], 2)
+
+            shadow_output = io.StringIO()
+            shadow_db = root / "shadow.sqlite"
+            with redirect_stdout(shadow_output):
+                main([
+                    "--shadow-review", "--learning-db", str(learning),
+                    "--shadow-db", str(shadow_db),
+                ])
+            shadow = json.loads(shadow_output.getvalue())
+            self.assertIn("candidates", shadow)
+            self.assertTrue(shadow_db.is_file())
+            candidate_id = shadow["candidates"][0]["candidate_id"]
+
+            history_output = io.StringIO()
+            with redirect_stdout(history_output):
+                main(["--shadow-history", "--shadow-db", str(shadow_db)])
+            history = json.loads(history_output.getvalue())
+            self.assertTrue(history["candidate_history"])
+
+            decision_output = io.StringIO()
+            with redirect_stdout(decision_output):
+                main([
+                    "--shadow-decision", candidate_id, "needs_more_evidence",
+                    "--shadow-notes", "Need more verified observations.",
+                    "--shadow-db", str(shadow_db),
+                ])
+            self.assertTrue(json.loads(decision_output.getvalue())["recorded"])
+
+            history_after = io.StringIO()
+            with redirect_stdout(history_after):
+                main(["--shadow-history", "--shadow-db", str(shadow_db)])
+            decisions = json.loads(history_after.getvalue())["candidate_history"][0]["owner_reviews"]
+            self.assertEqual(decisions[0]["decision"], "needs_more_evidence")
 
     def test_serve_accepts_custom_host_and_port(self):
         seen = {}
