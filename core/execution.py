@@ -168,9 +168,16 @@ class ExecutionService:
                     else account.commission_paid
                 ),
                 open_positions=account.open_positions,
-                symbol_exposure=symbol_exposure + committed_symbol,
+                # The committed ledger is a durable *mirror* of filled exposure,
+                # not additional exposure on top of it. While the broker is
+                # alive both describe the same fills, so summing them doubles
+                # the real exposure and trips the cap at half its value. After
+                # a restart of an in-memory broker the live positions are gone
+                # and the committed rows are the only surviving record, so the
+                # larger of the two is the correct figure in both cases.
+                symbol_exposure=max(symbol_exposure, committed_symbol),
                 reserved_symbol_notional=reserved_symbol,
-                correlated_exposure=correlated_exposure + committed_group,
+                correlated_exposure=max(correlated_exposure, committed_group),
                 reserved_group_notional=reserved_group,
                 current_equity=account.equity,
                 peak_equity=account.peak_equity,
