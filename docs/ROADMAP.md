@@ -1,6 +1,6 @@
 # Roadmap — Jarvis Unified
 
-Updated 2026-11-14.
+Updated 2026-11-14 (later).
 
 ## Level 2 — DONE
 
@@ -16,14 +16,14 @@ Complete on `main`.
 | Issue #9 phase 1 trust model (#29 / #30) | Merged |
 | Prototype release docs (#28) | Merged |
 | Biquote unverified EURUSD candidate adapter (#37) | Merged |
-| Positive real-SSLSocket transport test (#32) | In progress |
-| Persistent collector session supervisor (#33) | In progress |
+| Positive real-SSLSocket transport test (#32) | Merged |
+| Persistent collector session supervisor (#33) | **Merged + hardened** (stale lock, backoff, signals, health) |
 | Independent provider verifier (#9) | Open — evidence credit blocked |
 | Persistent host provisioning (#11) | Open — no host deployed |
 
 ## Immediate sequence
 
-1. Complete positive TLS fixture test and continuous-session supervisor (safe, offline, no provenance change).
+1. CI confirmation of supervisor + transport tests on `main`.
 2. Owner / independent review of any future evidence-credit path (Issue #9). Current gate remains `BLOCKED_PROVENANCE`.
 3. Provision persistent host (**#11**) only after reviewer acceptance of the operational package — see `docs/LEVEL_3_PERSISTENT_RUNNER_RUNBOOK.md`.
 4. Continuous **candidate** collection + paper sessions. Unverified observations never start the 30-day clock.
