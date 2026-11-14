@@ -156,6 +156,11 @@ def main(argv: Sequence[str] | None = None) -> None:
                                   help="print loss-inclusive paper outcome analytics")
     learning_actions.add_argument("--shadow-review", action="store_true",
                                   help="generate evidence-linked, advisory-only learning candidates")
+    learning_actions.add_argument("--shadow-history", action="store_true",
+                                  help="list persistent shadow candidates and owner review history")
+    learning_actions.add_argument("--shadow-decision", nargs=2, metavar=("CANDIDATE_ID", "DECISION"),
+                                  help="append an owner review decision; never deploys a strategy")
+    parser.add_argument("--shadow-notes", default="", help="optional note for an owner review decision")
     parser.add_argument("--shadow-db", default="var/learning/shadow_candidates.sqlite3",
                         help="SQLite path for persistent shadow recommendation history")
     args = parser.parse_args(argv)
@@ -179,10 +184,28 @@ def main(argv: Sequence[str] | None = None) -> None:
             print(build_personality_context(memory))
             return
 
-    if args.import_paper_ledger or args.paper_outcomes or args.shadow_review:
+    if (args.import_paper_ledger or args.paper_outcomes or args.shadow_review
+            or args.shadow_history or args.shadow_decision):
         from pathlib import Path
         from research.execution_observations import ExecutionObservationJournal
+        from research.shadow_advisor import ShadowCandidateStore
 
+        shadow_store = None
+        if args.shadow_history or args.shadow_decision or args.shadow_review:
+            shadow_store = ShadowCandidateStore(args.shadow_db)
+        if args.shadow_history:
+            print(json.dumps({"candidate_history": shadow_store.list_candidates(
+                include_expired=True
+            )}, indent=2, default=str))
+            return
+        if args.shadow_decision:
+            candidate_id, decision = args.shadow_decision
+            shadow_store.record_owner_decision(
+                candidate_id, decision, notes=args.shadow_notes
+            )
+            print(json.dumps({"recorded": True, "candidate_id": candidate_id,
+                              "decision": decision}, indent=2))
+            return
         if args.import_paper_ledger and not args.paper_ledger_db:
             parser.error("--import-paper-ledger requires --paper-ledger-db")
         if (args.paper_outcomes or args.shadow_review) and not Path(args.learning_db).is_file():
@@ -199,16 +222,13 @@ def main(argv: Sequence[str] | None = None) -> None:
 
         report = build_paper_outcome_report(journal)
         if args.shadow_review:
-            from research.shadow_advisor import (
-                ShadowCandidateStore, generate_shadow_candidates,
-            )
+            from research.shadow_advisor import generate_shadow_candidates
 
-            store = ShadowCandidateStore(args.shadow_db)
-            candidates = generate_shadow_candidates(report, store)
+            candidates = generate_shadow_candidates(report, shadow_store)
             print(json.dumps({
                 "report": report.to_dict(),
                 "candidates": [item.to_dict() for item in candidates],
-                "candidate_history": store.list_candidates(),
+                "candidate_history": shadow_store.list_candidates(),
             }, indent=2, default=str))
             return
         print(json.dumps(report.to_dict(), indent=2, default=str))
