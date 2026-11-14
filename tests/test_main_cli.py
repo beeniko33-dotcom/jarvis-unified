@@ -52,6 +52,28 @@ class MainCliTests(unittest.TestCase):
             shadow = json.loads(shadow_output.getvalue())
             self.assertIn("candidates", shadow)
             self.assertTrue(shadow_db.is_file())
+            candidate_id = shadow["candidates"][0]["candidate_id"]
+
+            history_output = io.StringIO()
+            with redirect_stdout(history_output):
+                main(["--shadow-history", "--shadow-db", str(shadow_db)])
+            history = json.loads(history_output.getvalue())
+            self.assertTrue(history["candidate_history"])
+
+            decision_output = io.StringIO()
+            with redirect_stdout(decision_output):
+                main([
+                    "--shadow-decision", candidate_id, "needs_more_evidence",
+                    "--shadow-notes", "Need more verified observations.",
+                    "--shadow-db", str(shadow_db),
+                ])
+            self.assertTrue(json.loads(decision_output.getvalue())["recorded"])
+
+            history_after = io.StringIO()
+            with redirect_stdout(history_after):
+                main(["--shadow-history", "--shadow-db", str(shadow_db)])
+            decisions = json.loads(history_after.getvalue())["candidate_history"][0]["owner_reviews"]
+            self.assertEqual(decisions[0]["decision"], "needs_more_evidence")
 
     def test_serve_accepts_custom_host_and_port(self):
         seen = {}
