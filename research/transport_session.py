@@ -1,14 +1,15 @@
-"""Collector-side transport session boundary records (informational only).
-
-Records what a TLS session *attempted* to establish. They do not authenticate
-individual ticks and must never be used to set provenance_verified=True.
-"""
+"""Informational TLS session records; never grant forward-evidence credit."""
 from __future__ import annotations
 
+import hashlib
 import json
+import ssl
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit
+
+DERIV_PUBLIC_WS = "wss://api.derivws.com/trading/v1/options/ws/public"
 
 
 def _utc_now() -> datetime:
@@ -17,24 +18,27 @@ def _utc_now() -> datetime:
 
 @dataclass(frozen=True)
 class TransportSessionRecord:
-    """Immutable description of a collector transport session.
+    """Immutable facts observed from the collector's established TLS socket.
 
-    All fields are descriptive. ``evidence_credit`` is always False.
+    These facts describe transport only. They do not authenticate individual
+    ticks, prove quote truth, or grant forward-evidence credit.
     """
 
+    session_id: str
     endpoint: str
     provider: str
     started_at: str
-    tls_certificate_verification_requested: bool
-    hostname_check_requested: bool
+    tls_socket_observed: bool
+    peer_certificate_present: bool
     peer_certificate_sha256: str | None
+    certificate_verification_mode: str
+    hostname_check_enabled: bool
     collector_identity: str | None
     notes: str
     evidence_credit: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
-        # Hard invariant: session records never grant evidence credit.
         payload["evidence_credit"] = False
         return payload
 
@@ -42,38 +46,74 @@ class TransportSessionRecord:
         return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
 
 
+def _validate_deriv_endpoint(endpoint: str) -> str:
+    if not isinstance(endpoint, str) or not endpoint.strip():
+        raise ValueError("endpoint is required")
+    normalized = endpoint.strip()
+    parsed = urlsplit(normalized)
+    if (
+        parsed.scheme != "wss"
+        or parsed.hostname != "api.derivws.com"
+        or parsed.port is not None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path != "/trading/v1/options/ws/public"
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("endpoint must be the exact approved Deriv public WSS endpoint")
+    return normalized
+
+
 def build_deriv_public_session(
     *,
     endpoint: str,
+    tls_socket: ssl.SSLSocket,
     started_at: datetime | None = None,
-    peer_certificate_sha256: str | None = None,
     collector_identity: str | None = None,
-    tls_certificate_verification_requested: bool = True,
-    hostname_check_requested: bool = True,
 ) -> TransportSessionRecord:
-    """Build a session record for the Deriv public WSS collector.
+    """Record actual properties of the established TLS socket.
 
-    Peer certificate digest is optional and best-effort. Absence does not
-    upgrade or degrade the hard rule that ticks remain unverified candidates.
+    A real SSLSocket with CERT_REQUIRED, hostname checking enabled, and a
+    presented peer certificate is required. This is descriptive metadata only;
+    even a successful record has evidence_credit=False.
     """
-    if not endpoint.strip():
-        raise ValueError("endpoint is required")
+    normalized_endpoint = _validate_deriv_endpoint(endpoint)
     started = started_at or _utc_now()
     if started.tzinfo is None or started.utcoffset() is None:
         raise ValueError("started_at must be timezone-aware")
+    if not isinstance(tls_socket, ssl.SSLSocket):
+        raise ValueError("an established TLS SSLSocket is required")
+    context = tls_socket.context
+    if context.verify_mode != ssl.CERT_REQUIRED:
+        raise ValueError("TLS socket is not configured with CERT_REQUIRED")
+    if not context.check_hostname:
+        raise ValueError("TLS socket hostname verification is not enabled")
+    certificate_der = tls_socket.getpeercert(binary_form=True)
+    if not certificate_der:
+        raise ValueError("TLS peer certificate is unavailable")
+    started_iso = started.astimezone(timezone.utc).isoformat(timespec="microseconds")
+    certificate_digest = hashlib.sha256(certificate_der).hexdigest()
+    identity = (collector_identity or "").strip() or None
+    session_material = json.dumps(
+        [normalized_endpoint, started_iso, certificate_digest, identity],
+        separators=(",", ":"),
+    ).encode("utf-8")
+    session_id = hashlib.sha256(session_material).hexdigest()
     return TransportSessionRecord(
-        endpoint=endpoint.strip(),
+        session_id=session_id,
+        endpoint=normalized_endpoint,
         provider="Deriv",
-        started_at=started.astimezone(timezone.utc).isoformat(timespec="microseconds"),
-        tls_certificate_verification_requested=bool(
-            tls_certificate_verification_requested
-        ),
-        hostname_check_requested=bool(hostname_check_requested),
-        peer_certificate_sha256=peer_certificate_sha256,
-        collector_identity=collector_identity,
+        started_at=started_iso,
+        tls_socket_observed=True,
+        peer_certificate_present=True,
+        peer_certificate_sha256=certificate_digest,
+        certificate_verification_mode="CERT_REQUIRED",
+        hostname_check_enabled=True,
+        collector_identity=identity,
         notes=(
-            "TLS session metadata only. Deriv public ticks are not individually "
-            "signed; this record does not authorize provenance_verified=1."
+            "Observed TLS socket metadata only. This does not authenticate individual "
+            "ticks, establish non-repudiation, or authorize provenance_verified=1."
         ),
         evidence_credit=False,
     )
