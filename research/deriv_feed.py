@@ -33,15 +33,29 @@ def resolve_eurusd_symbol(active_symbols: Any) -> str:
     if not isinstance(active_symbols, list):
         raise ValueError("Deriv active_symbols response must be a list")
     matches = []
+    conflicts = []
     for entry in active_symbols:
         if not isinstance(entry, dict):
             continue
         symbol = entry.get("symbol")
+        if not isinstance(symbol, str) or not symbol.strip():
+            continue
+        code = symbol.strip()
         display = str(entry.get("display_name", "")).replace("/", "").replace(" ", "").upper()
-        if isinstance(symbol, str) and symbol.strip() and (
-            display == "EURUSD" or symbol.strip().upper() == "FRXEURUSD"
-        ):
-            matches.append(symbol.strip())
+        if code.upper() == "FRXEURUSD":
+            matches.append(code)
+        elif display == "EURUSD":
+            # Claims to be EUR/USD but does not carry the canonical Deriv code.
+            # validate_deriv_observation_binding() requires the literal FRXEURUSD, so
+            # returning this would resolve a symbol that can never pass the binding
+            # check and would abort collection on the first tick. Fail closed instead
+            # of silently ignoring it: a mislabelled symbol is a data-integrity fault.
+            conflicts.append(code)
+    if conflicts:
+        raise ValueError(
+            "symbol(s) claim EUR/USD without the canonical FRXEURUSD code: "
+            + ", ".join(sorted(set(conflicts)))
+        )
     matches = sorted(set(matches))
     if len(matches) != 1:
         raise ValueError(f"expected exactly one Deriv EUR/USD symbol, found {len(matches)}")
@@ -216,6 +230,16 @@ def collect(duration_seconds: int, database: Path, timeout: int = 20) -> dict:
             store.close()
 
 
+def exit_code_for_report(report: dict) -> int:
+    """Map an evidence report to a process exit code.
+
+    Success requires the gate to actually PASS. An intact hash chain over zero
+    observations is trivially valid and must not be read as success: a cron job or
+    CI step would otherwise report green while no evidence exists at all.
+    """
+    return 0 if report.get("level_3_forward_evidence_gate") == "PASS" else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--duration-seconds", type=int, default=3600)
@@ -226,7 +250,7 @@ def main() -> int:
         parser.error("duration and timeout must be positive")
     result = collect(args.duration_seconds, args.db, args.timeout)
     print(json.dumps(result, indent=2))
-    return 0 if result["event_chain_valid"] else 1
+    return exit_code_for_report(result)
 
 
 if __name__ == "__main__":
