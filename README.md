@@ -32,9 +32,15 @@ python scripts/paper_session.py --allow-entries --ledger var/paper_ledger.jsonl
 python scripts/paper_report.py var/paper_ledger.jsonl --min-days 30
 python main.py --import-paper-ledger --paper-ledger-db var/paper/paper.sqlite --learning-db var/learning/observations.sqlite3
 python main.py --paper-outcomes --learning-db var/learning/observations.sqlite3
+python main.py --shadow-review --learning-db var/learning/observations.sqlite3 --shadow-db var/learning/shadow_candidates.sqlite3
+python main.py --shadow-history --shadow-db var/learning/shadow_candidates.sqlite3
+# Append a human review decision; valid values: accepted_for_manual_review, declined, needs_more_evidence
+python main.py --shadow-decision CANDIDATE_ID needs_more_evidence --shadow-db var/learning/shadow_candidates.sqlite3
 ```
 
 The learning commands import an existing persistent paper-broker SQLite ledger into a separate, hash-chained learning journal, then print loss-inclusive outcome analytics. The importer opens the source ledger read-only and rejects broken hash chains or snapshot mismatches before importing. Repeated imports are idempotent. Reports retain realized P&L and commissions separately, show net results after costs, and calculate drawdown only when source snapshots contain the required marks and account data. P&L is attributed to ledger events and UTC days, not individual entry orders where the source ledger cannot prove that allocation.
+
+`--shadow-review` generates persistent, evidence-linked review suggestions for negative net outcomes, partial fills, rejections, drawdown and missing mark coverage. Each candidate records its evidence, sample size, confidence label, review date and expiry. The advisor is descriptive and advisory only: it cannot change strategies, parameters, risk limits, kill switches, permissions or execution. Use `--shadow-history` to inspect candidate and owner-review history, and `--shadow-decision` to append a human review outcome. An accepted review is not strategy approval or deployment.
 
 `--demo` runs one risk-gated in-memory paper entry, demonstrates a rejected oversized order, closes the demo position, and leaves the kill switch engaged. It does not create forward-validation evidence.
 
