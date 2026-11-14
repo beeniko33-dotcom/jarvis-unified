@@ -26,6 +26,7 @@ python main.py --health
 python main.py --summary
 python main.py --report
 python main.py --demo
+python -m packages.scraper https://example.com
 python -m unittest discover -s tests -v
 python scripts/diagnose.py
 python scripts/paper_session.py --allow-entries --ledger var/paper_ledger.jsonl
@@ -56,11 +57,29 @@ The experiment registry stores canonical local config snapshots (credential-like
 
 `--demo` runs one risk-gated in-memory paper entry, demonstrates a rejected oversized order, closes the demo position, and leaves the kill switch engaged. It does not create forward-validation evidence.
 
+## Local dashboard and mobile
+
+Start `python main.py --serve`, then open `http://127.0.0.1:8787/dashboard`. The status page is a read-only installable web app and works offline only for its static shell; live health and account status are never cached. The API remains bound to localhost.
+
+## Local Docker
+
+With Docker Compose, run `docker compose up --build` and open `http://127.0.0.1:8787/dashboard`. The API listens on the container interface but Compose publishes the port only on the host loopback address; do not change that mapping. Stop any existing Jarvis process using port 8787 first.
+
+The optional Telegram integration only reports a fixed paper-only health message to one configured chat. It does not send account balances, positions, or credentials:
+
+```bash
+export TELEGRAM_BOT_TOKEN='your-bot-token'
+export TELEGRAM_CHAT_ID='your-chat-id'
+docker compose --profile telegram up --build
+```
+
+Only `/health` and `/status` are supported, and messages from other chats are ignored. Keep the token in a local secret store or environment, never in git or chat.
+
 ## Architecture and safety
 
 - Paper broker and central risk-gated execution
 - Localhost-only read-only status API
-- SSRF-safe scraper fetch foundation
+- SSRF-safe single-page metadata extraction
 - Deriv and MT5 adapters intentionally disabled
 - No live execution path
 

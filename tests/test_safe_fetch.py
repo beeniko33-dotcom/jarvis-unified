@@ -1,6 +1,17 @@
+import socket
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest.mock import Mock, patch
 
-from packages.scraper.safe_fetch import SafeFetchError, is_public_hostname, safe_fetch_url
+from packages.scraper.safe_fetch import (
+    SafeFetchError,
+    _PinnedHTTPConnection,
+    _PinnedHTTPSConnection,
+    _validate_url,
+    is_public_hostname,
+    safe_fetch_url,
+)
 
 
 class SafeFetchTests(unittest.TestCase):
@@ -31,6 +42,221 @@ class SafeFetchTests(unittest.TestCase):
     def test_is_public_hostname_localhost_false(self):
         self.assertFalse(is_public_hostname("localhost"))
 
+    def test_validate_url_returns_the_public_addresses_to_pin(self):
+        resolved = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))
+        ]
+        with patch("packages.scraper.safe_fetch.socket.getaddrinfo", return_value=resolved):
+            scheme, hostname, url, port, addresses = _validate_url("https://example.com/")
+
+        self.assertEqual(
+            (scheme, hostname, url, port),
+            ("https", "example.com", "https://example.com/", 443),
+        )
+        self.assertEqual(addresses, ["93.184.216.34"])
+
+    def test_hostname_with_any_private_dns_answer_is_rejected(self):
+        resolved = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.10", 0)),
+        ]
+        with patch("packages.scraper.safe_fetch.socket.getaddrinfo", return_value=resolved):
+            with self.assertRaisesRegex(SafeFetchError, "blocked address"):
+                _validate_url("https://example.com/")
+
+    def test_http_connection_uses_the_validated_ip_not_the_hostname(self):
+        connection = _PinnedHTTPConnection("example.com", 80, "93.184.216.34", 5)
+        connected_socket = Mock()
+        with patch(
+            "packages.scraper.safe_fetch.socket.create_connection",
+            return_value=connected_socket,
+        ) as create_connection:
+            connection.connect()
+
+        create_connection.assert_called_once_with(("93.184.216.34", 80), timeout=5.0)
+        connection.close()
+
+    def test_https_connection_preserves_hostname_for_tls_validation(self):
+        connection = _PinnedHTTPSConnection("example.com", 443, "93.184.216.34", 5)
+        raw_socket = Mock()
+        tls_socket = Mock()
+        context = Mock()
+        context.wrap_socket.return_value = tls_socket
+        connection._context = context
+        with patch(
+            "packages.scraper.safe_fetch.socket.create_connection",
+            return_value=raw_socket,
+        ) as create_connection:
+            connection.connect()
+
+        create_connection.assert_called_once_with(("93.184.216.34", 443), timeout=5.0)
+        context.wrap_socket.assert_called_once_with(raw_socket, server_hostname="example.com")
+        connection.close()
+
+    def test_nonstandard_ports_are_rejected(self):
+        with self.assertRaisesRegex(SafeFetchError, "standard HTTP and HTTPS ports"):
+            _validate_url("http://example.com:8080/")
+
+    def test_fetch_limits_and_headers_are_bounded(self):
+        for kwargs in (
+            {"timeout_s": float("nan")},
+            {"timeout_s": 61},
+            {"max_bytes": 10_000_001},
+            {"max_redirects": 11},
+            {"user_agent": "invalid\r\nheader"},
+        ):
+            with self.subTest(kwargs=kwargs), self.assertRaises(SafeFetchError):
+                safe_fetch_url("https://example.com/", **kwargs)
+
+    def test_redirect_destination_is_revalidated_and_pinned(self):
+        class FakeResponse:
+            def __init__(self, status, headers=None, body=b""):
+                self.status = status
+                self.headers = headers or {}
+                self.body = body
+
+            def getheader(self, name, default=None):
+                return self.headers.get(name, default)
+
+            def read(self, size):
+                body, self.body = self.body[:size], self.body[size:]
+                return body
+
+        class FakeConnection:
+            sock = None
+
+            def __init__(self, hostname, port, address, timeout_s):
+                instances.append((hostname, port, address, timeout_s))
+                self.response = responses.pop(0)
+
+            def request(self, method, target, headers):
+                return None
+
+            def getresponse(self):
+                return self.response
+
+            def close(self):
+                return None
+
+        instances = []
+        responses = [
+            FakeResponse(302, {"Location": "https://other.example/final"}),
+            FakeResponse(200, {"Content-Type": "text/html", "Content-Length": "4"}, b"done"),
+        ]
+        addresses = {
+            "example.com": "93.184.216.34",
+            "other.example": "1.1.1.1",
+        }
+
+        def resolve(hostname, _port, *, type):
+            address = addresses[hostname]
+            return [(socket.AF_INET, type, 6, "", (address, 0))]
+
+        with (
+            patch("packages.scraper.safe_fetch.socket.getaddrinfo", side_effect=resolve),
+            patch("packages.scraper.safe_fetch._PinnedHTTPSConnection", FakeConnection),
+        ):
+            result = safe_fetch_url("https://example.com/start", max_redirects=1)
+
+        self.assertEqual(result.final_url, "https://other.example/final")
+        self.assertEqual(result.body, b"done")
+        self.assertEqual(
+            [instance[:3] for instance in instances],
+            [
+                ("example.com", 443, "93.184.216.34"),
+                ("other.example", 443, "1.1.1.1"),
+            ],
+        )
+        for instance in instances:
+            self.assertLessEqual(instance[3], 10.0)
+            self.assertGreater(instance[3], 0.0)
+
+
+class SafeFetchHttpIntegrationTests(unittest.TestCase):
+    def setUp(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.server.paths.append(self.path)
+                if self.path == "/redirect":
+                    self.send_response(302)
+                    self.send_header("Location", "http://rebound.example/")
+                    self.end_headers()
+                    return
+                body = b"<h1>Safe</h1>" if self.path != "/large" else b"too much data"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body)))
+                if self.path == "/compressed":
+                    self.send_header("Content-Encoding", "gzip")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, fmt, *args):
+                return
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.paths = []
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+
+    def _network_patches(self):
+        original_getaddrinfo = socket.getaddrinfo
+        original_create_connection = socket.create_connection
+
+        def resolve(host, port, *args, **kwargs):
+            if host == "example.com":
+                return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+            if host == "rebound.example":
+                return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0))]
+            return original_getaddrinfo(host, port, *args, **kwargs)
+
+        def connect(address, timeout=None, source_address=None):
+            if address == ("93.184.216.34", 80):
+                address = ("127.0.0.1", self.server.server_port)
+            return original_create_connection(address, timeout, source_address)
+
+        return (
+            patch("packages.scraper.safe_fetch.socket.getaddrinfo", side_effect=resolve),
+            patch(
+                "packages.scraper.safe_fetch.socket.create_connection",
+                side_effect=connect,
+            ),
+        )
+
+    def test_fetch_uses_pinned_destination_and_returns_bounded_body(self):
+        dns_patch, connection_patch = self._network_patches()
+        with dns_patch, connection_patch:
+            result = safe_fetch_url("http://example.com/")
+
+        self.assertEqual(result.status, 200)
+        self.assertEqual(result.body, b"<h1>Safe</h1>")
+        self.assertEqual(self.server.paths, ["/"])
+
+    def test_redirect_to_private_dns_target_is_blocked_before_connect(self):
+        dns_patch, connection_patch = self._network_patches()
+        with dns_patch, connection_patch:
+            with self.assertRaisesRegex(SafeFetchError, "blocked address"):
+                safe_fetch_url("http://example.com/redirect")
+
+        self.assertEqual(self.server.paths, ["/redirect"])
+
+    def test_response_size_limit_is_enforced(self):
+        dns_patch, connection_patch = self._network_patches()
+        with dns_patch, connection_patch:
+            with self.assertRaisesRegex(SafeFetchError, "exceeded max_bytes"):
+                safe_fetch_url("http://example.com/large", max_bytes=4)
+
+    def test_compressed_response_is_rejected(self):
+        dns_patch, connection_patch = self._network_patches()
+        with dns_patch, connection_patch:
+            with self.assertRaisesRegex(SafeFetchError, "compressed responses"):
+                safe_fetch_url("http://example.com/compressed")
+
 
 if __name__ == "__main__":
-        unittest.main()
+    unittest.main()

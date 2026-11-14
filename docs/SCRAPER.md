@@ -1,38 +1,20 @@
-# Scraper Integration Plan
+# Scraper Integration
 
-The original `advanced-scraper` remains intact. Migration must preserve the full legitimate web-crawling, extraction, reporting and utility capability set; do not replace it with a reduced toy scraper.
+The original [`advanced-scraper`](https://github.com/beeniko33-dotcom/advanced-scraper) remains intact. Jarvis does not import or execute it. The currently verified source revision is `87a3f4bad64efe53b8a050cf94af6e2db6d1a7ea`.
 
-## Verified source inventory
+## Verified source behavior
 
-The source repository contains `advanced_scraper.py`, `api_server.py`, `orchestrator.py`, `report_gen.py`, `spyglass.py`, `wardrive.py`, `frontend/index.html`, `startup.sh` and dependency declarations.
+The source API at the verified revision exposes health plus authenticated scrape, crawl, and image-search routes, and defaults to loopback. `SECURITY_AND_OPERATIONS.md` describes an older unauthenticated module-dispatch API and is inconsistent with this code revision. Authentication alone is not sufficient for migration: the current API calls scraper methods that make their own network requests instead of using Jarvis's SSRF-safe fetcher.
 
-Legitimate migration candidates include public-web URL fetching, same-site crawling, HTML parsing, public page metadata extraction, structured exports, image-result discovery, crawl orchestration, report generation, progress/status UI and local scheduling/storage utilities.
+The source runtime also includes credential/OTP brute-force and directory-enumeration tools, spoofed forwarding headers, and personal-data extraction. Jarvis will not import, expose, or operate those capabilities. The original source repo remains unchanged.
 
-## Security findings requiring redesign
+## Current Jarvis implementation
 
-The source API currently binds to `0.0.0.0`, has no authentication, accepts a user-controlled module ID and invokes an interactive Python process through `pexpect`. Its module map includes credential/OTP brute force, exploit probes, port/subdomain scanning, TCP flooding, email/SMS bombing, reverse-shell and persistence functions. The CLI also contains stealth header spoofing, credential harvesting and deep people-search/PII collection.
+- `packages/scraper/safe_fetch.py` fetches one public HTTP(S) URL with DNS pinning, redirect validation, standard-port restriction, a total timeout, and response-size limits.
+- `packages/scraper/extract.py` returns bounded title/description/headings only; it does not return or persist page content.
 
-**Do not import or deploy that API server as-is.** It creates a remote abuse and command-execution surface. Do not expose exploit testing, credential/OTP attacks, flooding, reverse shells, persistence, arbitrary commands or invasive personal-data dossiers through Jarvis. Those are not required for the legitimate scraper product.
+No crawler, robots-policy handling, or remote scraping API is enabled. Keep the existing fetcher local-only to the codebase until those controls are designed and tested.
 
-This is a targeted safety boundary, not a blanket restriction on ordinary scraping. Preserve the legitimate crawler, parser, extractor, image metadata, exporter, reporting, orchestration and extensibility features.
+## Future migration requirements
 
-## Required safe migration design
-
-- HTTP/HTTPS only; reject embedded credentials and non-public destination IPs.
-- Validate DNS results and pin the validated destination during connection to prevent DNS-rebinding/TOCTOU bypasses.
-- Revalidate every redirect; block private, loopback, link-local, multicast, reserved and cloud-metadata ranges for IPv4 and IPv6.
-- Bound connect/read timeouts, response bytes, decompression ratio, redirects, concurrency, crawl depth/page count and per-host request rate.
-- Keep crawl scope explicit (same-site by default), respect robots policy and site terms where applicable, and provide an identifiable user agent.
-- Separate public business/contact page extraction from people-search or sensitive personal-data aggregation.
-- Use authenticated, allowlisted API operations; no interactive subprocess dispatch or arbitrary module IDs.
-- Store provenance (source URL, timestamp, extraction method), support deletion/retention controls, and avoid logging harvested content or secrets.
-- Keep the local CLI and approved extraction functions independently usable.
-
-## Migration workflow
-
-1. Preserve original repository and Git history; import into `sources/advanced-scraper` without squashing.
-2. Inventory every module, dependency, CLI command and output format before moving code.
-3. Add compatibility tests for each legitimate capability before changing implementation.
-4. Route network access through the hardened fetch primitive (or a stronger pinned-connection implementation).
-5. Rebuild the API as a narrow authenticated job interface; never expose the original `/scan/all` dispatcher.
-6. Compare output behavior with the original for authorized public websites and document any intentionally excluded unsafe function.
+Any expansion to crawling or an API must enforce public-address validation and IP pinning on every request and redirect, bounded pages/concurrency/time/bytes, explicit same-site scope, site-policy checks, an identifiable user agent, and authenticated allowlisted operations. Do not use the upstream network client as a shortcut around these controls.

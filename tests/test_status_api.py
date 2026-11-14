@@ -31,6 +31,7 @@ class StatusApiTests(unittest.TestCase):
             payload = json.loads(response.read())
             self.assertTrue(payload["ok"])
             self.assertIn("/health", payload["routes"])
+            self.assertIn("/dashboard", payload["routes"])
 
     def test_health_endpoint(self):
         with urlopen(self.base + "/health", timeout=2) as response:
@@ -67,6 +68,18 @@ class StatusApiTests(unittest.TestCase):
             self.assertEqual(payload["status"], "healthy")
             self.assertEqual(payload["mode"], "paper")
 
+    def test_dashboard_and_pwa_assets_are_served_from_same_origin(self):
+        for path, content_type in (
+            ("/dashboard", "text/html"),
+            ("/manifest.webmanifest", "application/manifest+json"),
+            ("/service-worker.js", "text/javascript"),
+            ("/icon.svg", "image/svg+xml"),
+        ):
+            with self.subTest(path=path), urlopen(self.base + path, timeout=2) as response:
+                self.assertEqual(response.status, 200)
+                self.assertIn(content_type, response.headers["Content-Type"])
+                self.assertGreater(len(response.read()), 0)
+
     def test_serve_reports_port_in_use(self):
         occupied = ThreadingHTTPServer(("127.0.0.1", 0), StatusHandler)
         port = occupied.server_port
@@ -83,6 +96,12 @@ class StatusApiTests(unittest.TestCase):
             occupied.shutdown()
             occupied.server_close()
             thread.join(timeout=2)
+
+    def test_non_local_bind_requires_container_opt_in(self):
+        from apps.api.status import serve
+
+        with self.assertRaisesRegex(ValueError, "localhost"):
+            serve("0.0.0.0", 0, lambda: {})
 
 
 if __name__ == "__main__":
