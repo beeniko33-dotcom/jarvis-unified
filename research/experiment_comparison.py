@@ -60,8 +60,8 @@ def compare_experiments(
     elif left.source_journal_hash != right.source_journal_hash:
         reasons.append("source_journal_hash_mismatch")
     if (
-        left.evidence_status != "source_verified"
-        or right.evidence_status != "source_verified"
+        left.evidence_status != "verified"
+        or right.evidence_status != "verified"
     ):
         reasons.append("source_references_not_independently_verified")
 
