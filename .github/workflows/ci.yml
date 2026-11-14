@@ -23,8 +23,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install declared test dependencies
-        run: python -m pip install --upgrade pip && python -m pip install "pytest>=8.0" "cryptography>=42,<47"
+      - name: Install declared test and market-data dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test,market-data]"
+          python -m pip freeze
 
       - name: Run unit test suite
         run: python -m unittest discover -s tests -v
