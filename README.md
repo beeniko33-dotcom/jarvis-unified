@@ -36,11 +36,17 @@ python main.py --shadow-review --learning-db var/learning/observations.sqlite3 -
 python main.py --shadow-history --shadow-db var/learning/shadow_candidates.sqlite3
 # Append a human review decision; valid values: accepted_for_manual_review, declined, needs_more_evidence
 python main.py --shadow-decision CANDIDATE_ID needs_more_evidence --shadow-db var/learning/shadow_candidates.sqlite3
+python main.py --experiment-list --experience-db var/learning/experience.sqlite3
+python main.py --experiment-verify EXPERIMENT_ID --experience-db var/learning/experience.sqlite3
+python main.py --experiment-verify-sources EXPERIMENT_ID /local/paper-ledger.sqlite /local/learning-journal.sqlite --experience-db var/learning/experience.sqlite3
+python main.py --experiment-compare LEFT_ID RIGHT_ID --experience-db var/learning/experience.sqlite3
 ```
 
 The learning commands import an existing persistent paper-broker SQLite ledger into a separate, hash-chained learning journal, then print loss-inclusive outcome analytics. The importer opens the source ledger read-only and rejects broken hash chains or snapshot mismatches before importing. Repeated imports are idempotent. Reports retain realized P&L and commissions separately, show net results after costs, and calculate drawdown only when source snapshots contain the required marks and account data. P&L is attributed to ledger events and UTC days, not individual entry orders where the source ledger cannot prove that allocation.
 
 `--shadow-review` generates persistent, evidence-linked review suggestions for negative net outcomes, partial fills, rejections, drawdown and missing mark coverage. Each candidate records its evidence, sample size, confidence label, review date and expiry. The advisor is descriptive and advisory only: it cannot change strategies, parameters, risk limits, kill switches, permissions or execution. Use `--shadow-history` to inspect candidate and owner-review history, and `--shadow-decision` to append a human review outcome. An accepted review is not strategy approval or deployment.
+
+The experiment registry stores canonical local config snapshots (credential-like keys are rejected), config and metrics hashes, dataset identity, time window and optional SHA-256 references to the exact paper-ledger and learning-journal files. `--experiment-verify` checks stored config and metrics integrity. `--experiment-verify-sources` hashes the actual local files and appends an immutable match/mismatch record; local file paths are not stored. `--experiment-compare` emits metric deltas only when both records have matching dataset identity/hash, verified data-status labels, identical time windows, matching source-file hashes and successful local source-artifact verification. Otherwise it returns explicit reasons and does not rank the experiments. A matching file hash proves byte identity with the recorded reference, not independent provider authenticity; upstream provenance gates remain authoritative. Legacy records without config snapshots fail closed on integrity verification. The registry does not calculate strategy performance from raw fills, promote candidates, or influence the Level 3 evidence clock.
 
 `--demo` runs one risk-gated in-memory paper entry, demonstrates a rejected oversized order, closes the demo position, and leaves the kill switch engaged. It does not create forward-validation evidence.
 
