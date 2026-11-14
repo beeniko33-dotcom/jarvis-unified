@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
-from brokers.paper import PersistentPaperBroker
+from brokers.paper import PaperBroker, PersistentPaperBroker
 from core.execution import ExecutionService
 from core.models import OrderRequest, Side
 from core.risk import RiskEngine, RiskLimits
@@ -68,6 +68,18 @@ class PaperOutcomeAnalyticsTests(unittest.TestCase):
         self.assertEqual(report.gross_realized_pnl, "0")
         self.assertEqual(report.commission_paid, "0")
         self.assertEqual(report.order_count, 0)
+
+    def test_execution_order_is_visible_before_ledger_import(self):
+        broker = PaperBroker(Decimal("1000"))
+        risk = RiskEngine(RiskLimits(Decimal("5"), Decimal("50"), 3, False))
+        service = ExecutionService(broker, risk, observation_journal=self.journal)
+        service.submit(
+            OrderRequest("EURUSD", Side.BUY, Decimal("0.1"), Decimal("10"), "memory-entry")
+        )
+        report = build_paper_outcome_report(self.journal)
+        self.assertEqual(report.order_count, 1)
+        self.assertEqual(report.filled_orders, 1)
+        self.assertEqual(report.imported_ledger_events, 0)
 
     def test_partial_fill_and_fill_identity_are_retained(self):
         broker = PersistentPaperBroker(Decimal("1000"), database_path=self.source, clock=self.clock)
