@@ -140,7 +140,7 @@ class PaperLedgerImporterTests(unittest.TestCase):
         opened = broker.place_working_order(
             OrderRequest(
                 "SOLUSD", Side.BUY, Decimal("2"), Decimal("100"), "working-lineage",
-                metadata={"research_lineage": {"strategy_id": "breakout-v1"}},
+                metadata={"research_lineage": {"strategy_id": "breakout-v1"}, "access_token": "do-not-store"},
             )
         )
         broker.apply_partial_fill(opened.order_id, Decimal("1"), fill_id="fill-a")
@@ -151,6 +151,7 @@ class PaperLedgerImporterTests(unittest.TestCase):
             restored._orders[opened.order_id].metadata["research_lineage"]["strategy_id"],
             "breakout-v1",
         )
+        self.assertNotIn("access_token", restored._orders[opened.order_id].metadata)
         self.assertEqual(
             restored.get_working_orders()[0].metadata["research_lineage"]["strategy_id"],
             "breakout-v1",
