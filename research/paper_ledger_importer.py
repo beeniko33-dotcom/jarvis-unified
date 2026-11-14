@@ -142,6 +142,25 @@ def import_paper_ledger(
                 for fill_id, item in fill_results.items()
                 if isinstance(item, dict)
             },
+            "account_snapshot": {
+                "balance": state.get("balance"),
+                "peak_equity": state.get("peak_equity"),
+                "realized_pnl": state.get("realized_pnl"),
+                "commission_paid": state.get("commission_paid"),
+                "commission_per_side": state.get("commission_per_side"),
+                "slippage_bps": state.get("slippage_bps"),
+                "last_prices": state.get("last_prices", {}),
+                "positions": [
+                    {
+                        "symbol": item.get("symbol"),
+                        "quantity": item.get("quantity"),
+                        "average_price": item.get("average_price"),
+                        "opened_at": item.get("opened_at"),
+                    }
+                    for item in state.get("positions", [])
+                    if isinstance(item, dict)
+                ],
+            },
         })
         previous = event_hash
 
@@ -178,6 +197,7 @@ def import_paper_ledger(
                 "orders": event["orders"],
                 "working_orders": event["working_orders"],
                 "fill_results": event["fill_results"],
+                "account_snapshot": event["account_snapshot"],
             },
         )
         imported += 1
