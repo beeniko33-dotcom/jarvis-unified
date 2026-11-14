@@ -1,0 +1,4 @@
+# Runtime-only optional market-data dependencies resolved on CPython 3.11.18.
+signalrcore==1.0.4
+websocket-client==1.9.2
+msgpack==1.2.4
