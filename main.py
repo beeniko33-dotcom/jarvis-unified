@@ -2,7 +2,7 @@
 from __future__ import annotations
 import argparse
 import json
-from dataclasses import asdict
+from dataclasses import asdict, asdict as dataclass_asdict
 from decimal import Decimal
 from typing import Sequence
 
@@ -202,7 +202,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         store = ExperienceStore(args.experience_db)
         if args.experiment_list:
             print(json.dumps({
-                "experiments": [asdict(item) for item in store.list()],
+                "experiments": [dataclass_asdict(item) for item in store.list()],
             }, indent=2, default=str))
             return
         if args.experiment_verify:
