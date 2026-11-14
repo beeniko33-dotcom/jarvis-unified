@@ -59,7 +59,7 @@ The experiment registry stores canonical local config snapshots (credential-like
 
 ## Local dashboard and mobile
 
-Start `python main.py --serve`, then open `http://127.0.0.1:8787/dashboard`. The status page is a read-only installable web app and works offline only for its static shell; live health and account status are never cached. The API remains bound to localhost.
+Start `python main.py --serve`, then open `http://127.0.0.1:8787/dashboard`. The status page is a read-only installable web app and works offline only for its static shell; live health and account status are never cached. The API remains bound to localhost. Install steps for Android, iOS and desktop are in `apps/mobile/README.md`.
 
 ## Local Docker
 

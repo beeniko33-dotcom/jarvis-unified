@@ -71,6 +71,8 @@ class FileLockTests(unittest.TestCase):
                 if child.poll() is None:
                     child.kill()
                     child.wait(timeout=5)
+                child.stdout.close()
+                child.stderr.close()
 
     def test_live_pid_lock_is_not_broken(self):
         with tempfile.TemporaryDirectory() as tmp:
