@@ -15,6 +15,14 @@ This module provides that wrapper.  It does **not**:
 
 It only orchestrates successive collector runs under a file lock so two
 writers never touch the same database concurrently.
+
+Hardening (2026-11-14)
+----------------------
+- Stale-lock recovery: if the lock file exists but its recorded PID is not alive,
+  the lock is treated as abandoned and removed.
+- Consecutive-failure backoff: exponential pause after repeated failed sessions.
+- Clean shutdown on SIGTERM / SIGINT: finishes the current session boundary
+  write when possible, then exits the continuous loop.
 """
 from __future__ import annotations
 
@@ -22,6 +30,7 @@ import argparse
 import json
 import logging
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -31,6 +40,24 @@ from pathlib import Path
 from typing import Sequence
 
 logger = logging.getLogger("jarvis.collector_supervisor")
+
+# Cooperative shutdown flag set by signal handlers.
+_SHUTDOWN_REQUESTED = False
+
+
+def _request_shutdown(signum: int, frame) -> None:  # noqa: ARG001
+    global _SHUTDOWN_REQUESTED
+    _SHUTDOWN_REQUESTED = True
+    logger.info("shutdown requested via signal %s", signum)
+
+
+def _install_signal_handlers() -> None:
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, _request_shutdown)
+        except (ValueError, OSError):
+            # Not allowed in some threads / platforms; continuous mode still works.
+            pass
 
 
 @dataclass(frozen=True)
@@ -42,7 +69,7 @@ class SessionRecord:
     duration_seconds: int
     command: list[str]
     db_path: str
-    status: str  # "running" | "completed" | "failed" | "skipped_lock"
+    status: str  # "completed" | "failed" | "skipped_lock" | "shutdown"
 
 
 def _utc_now_iso() -> str:
@@ -53,22 +80,72 @@ def _session_id() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + f"-{os.getpid()}"
 
 
+def _pid_is_alive(pid: int) -> bool:
+    """Return True if *pid* appears to be a live process on this host."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Process exists but we cannot signal it — treat as alive.
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _read_lock_pid(path: Path) -> int | None:
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+        return int(text.splitlines()[0].strip())
+    except (OSError, ValueError, IndexError):
+        return None
+
+
 class FileLock:
-    """Simple exclusive lock using O_CREAT|O_EXCL.  Cross-process safe on local FS."""
+    """Exclusive lock using O_CREAT|O_EXCL, with stale-PID recovery.
+
+    Cross-process safe on a local filesystem.  Not safe on NFS.
+    """
 
     def __init__(self, path: Path, timeout_seconds: float = 5.0):
         self.path = path
         self.timeout_seconds = timeout_seconds
         self._fd: int | None = None
 
+    def _try_break_stale(self) -> bool:
+        """If lock exists but owner PID is dead, remove it. Returns True if broken."""
+        if not self.path.exists():
+            return False
+        pid = _read_lock_pid(self.path)
+        if pid is None:
+            # Unreadable / corrupt lock — leave it; operator intervention preferred
+            # over blindly deleting an unknown lock.
+            return False
+        if _pid_is_alive(pid):
+            return False
+        try:
+            self.path.unlink(missing_ok=True)
+            logger.warning("removed stale lock %s (dead pid %s)", self.path, pid)
+            return True
+        except OSError as exc:
+            logger.error("failed to remove stale lock %s: %s", self.path, exc)
+            return False
+
     def acquire(self) -> bool:
         deadline = time.monotonic() + self.timeout_seconds
         while time.monotonic() < deadline:
             try:
-                self._fd = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                self._fd = os.open(
+                    str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600
+                )
                 os.write(self._fd, f"{os.getpid()}\n".encode())
                 return True
             except FileExistsError:
+                # Attempt stale recovery once per spin iteration.
+                self._try_break_stale()
                 time.sleep(0.2)
         return False
 
@@ -143,7 +220,6 @@ def run_one_session(
             db_path=str(db_path),
             status=status,
         )
-        # Persist stdout/stderr for operator review
         (log_dir / f"session-{sid}.stdout").write_text(proc.stdout or "")
         (log_dir / f"session-{sid}.stderr").write_text(proc.stderr or "")
         session_log.write_text(json.dumps(asdict(record), indent=2))
@@ -177,11 +253,25 @@ def run_continuous(
     log_dir: Path,
     max_sessions: int | None = None,
     pause_between_seconds: float = 5.0,
+    max_consecutive_failures: int = 5,
+    backoff_base_seconds: float = 15.0,
+    backoff_cap_seconds: float = 300.0,
 ) -> list[SessionRecord]:
-    """Run successive non-overlapping sessions until max_sessions or interrupted."""
+    """Run successive non-overlapping sessions until max_sessions, failure budget, or shutdown.
+
+    After each failed / skipped session the pause grows exponentially
+    (backoff_base * 2^(n-1)), capped at backoff_cap_seconds.  A successful
+    session resets the failure counter.
+    """
     results: list[SessionRecord] = []
     count = 0
+    consecutive_failures = 0
+
     while max_sessions is None or count < max_sessions:
+        if _SHUTDOWN_REQUESTED:
+            logger.info("exiting continuous loop — shutdown requested")
+            break
+
         record = run_one_session(
             command=command,
             db_path=db_path,
@@ -191,10 +281,74 @@ def run_continuous(
         )
         results.append(record)
         count += 1
+
+        if record.status == "completed":
+            consecutive_failures = 0
+        else:
+            consecutive_failures += 1
+            if consecutive_failures >= max_consecutive_failures:
+                logger.error(
+                    "stopping after %s consecutive failures (limit %s)",
+                    consecutive_failures,
+                    max_consecutive_failures,
+                )
+                break
+
         if max_sessions is not None and count >= max_sessions:
             break
-        time.sleep(pause_between_seconds)
+
+        if _SHUTDOWN_REQUESTED:
+            break
+
+        # Backoff only after non-success; otherwise use the configured pause.
+        if record.status == "completed":
+            pause = pause_between_seconds
+        else:
+            pause = min(
+                backoff_base_seconds * (2 ** (consecutive_failures - 1)),
+                backoff_cap_seconds,
+            )
+        logger.info("pausing %.1fs before next session", pause)
+        # Interruptible sleep
+        end = time.monotonic() + pause
+        while time.monotonic() < end:
+            if _SHUTDOWN_REQUESTED:
+                break
+            time.sleep(min(0.5, end - time.monotonic()))
+
     return results
+
+
+def health_snapshot(
+    *,
+    log_dir: Path,
+    db_path: Path,
+    lock_path: Path,
+) -> dict:
+    """Lightweight operator health view (not market-data evidence)."""
+    sessions = sorted(log_dir.glob("session-*.json")) if log_dir.exists() else []
+    last = None
+    if sessions:
+        try:
+            last = json.loads(sessions[-1].read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            last = {"error": "unreadable"}
+
+    lock_pid = _read_lock_pid(lock_path) if lock_path.exists() else None
+    return {
+        "supervisor_pid": os.getpid(),
+        "utc_now": _utc_now_iso(),
+        "db_path": str(db_path),
+        "db_exists": db_path.exists(),
+        "lock_path": str(lock_path),
+        "lock_held": lock_path.exists(),
+        "lock_pid": lock_pid,
+        "lock_pid_alive": _pid_is_alive(lock_pid) if lock_pid is not None else None,
+        "session_record_count": len(sessions),
+        "last_session": last,
+        "shutdown_requested": _SHUTDOWN_REQUESTED,
+        "note": "Operator metadata only. Not Level 3 evidence.",
+    }
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -204,7 +358,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--command",
         nargs="+",
-        required=True,
+        required=False,
         help="Collector command to run (e.g. python -m research.deriv_feed --duration-seconds 3600 ...)",
     )
     parser.add_argument("--db", type=Path, required=True, help="SQLite database path")
@@ -224,9 +378,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument(
         "--pause-between", type=float, default=5.0,
-        help="Seconds to wait between sessions",
+        help="Seconds to wait between successful sessions",
+    )
+    parser.add_argument(
+        "--max-consecutive-failures", type=int, default=5,
+        help="Stop continuous mode after this many failures in a row",
+    )
+    parser.add_argument(
+        "--backoff-base", type=float, default=15.0,
+        help="Base seconds for exponential backoff after failures",
+    )
+    parser.add_argument(
+        "--backoff-cap", type=float, default=300.0,
+        help="Maximum backoff seconds",
     )
     parser.add_argument("--once", action="store_true", help="Run a single session and exit")
+    parser.add_argument(
+        "--health", action="store_true",
+        help="Print a JSON health snapshot and exit (no collector started)",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -236,6 +406,18 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     lock_path = args.lock or Path(str(args.db) + ".lock")
     args.log_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.health:
+        print(json.dumps(
+            health_snapshot(log_dir=args.log_dir, db_path=args.db, lock_path=lock_path),
+            indent=2,
+        ))
+        return 0
+
+    if not args.command:
+        parser.error("--command is required unless --health is used")
+
+    _install_signal_handlers()
 
     if args.once:
         record = run_one_session(
@@ -256,9 +438,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         log_dir=args.log_dir,
         max_sessions=args.max_sessions,
         pause_between_seconds=args.pause_between,
+        max_consecutive_failures=args.max_consecutive_failures,
+        backoff_base_seconds=args.backoff_base,
+        backoff_cap_seconds=args.backoff_cap,
     )
     print(json.dumps([asdict(r) for r in results], indent=2))
-    return 0 if all(r.status == "completed" for r in results) else 1
+    return 0 if results and all(r.status == "completed" for r in results) else 1
 
 
 if __name__ == "__main__":
