@@ -43,6 +43,35 @@ class FileLockTests(unittest.TestCase):
             lock.release()
             self.assertFalse(lock_path.exists())
 
+    def test_lock_left_by_crashed_process_is_recovered(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lock_path = Path(tmp) / "crashed.lock"
+            child_code = (
+                "import sys,time; from pathlib import Path; "
+                "from research.collector_supervisor import FileLock; "
+                "lock=FileLock(Path(sys.argv[1])); "
+                "assert lock.acquire(); print('LOCKED', flush=True); time.sleep(60)"
+            )
+            child = subprocess.Popen(
+                [sys.executable, "-c", child_code, str(lock_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                self.assertEqual(child.stdout.readline().strip(), "LOCKED")
+                self.assertTrue(lock_path.exists())
+                child.kill()
+                child.wait(timeout=5)
+                recovered = FileLock(lock_path, timeout_seconds=1.0)
+                self.assertTrue(recovered.acquire())
+                recovered.release()
+                self.assertFalse(lock_path.exists())
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                    child.wait(timeout=5)
+
     def test_live_pid_lock_is_not_broken(self):
         with tempfile.TemporaryDirectory() as tmp:
             lock_path = Path(tmp) / "live.lock"
