@@ -301,7 +301,7 @@ class PaperBroker:
                 side=order.side,
                 quantity=order.quantity,
                 limit_price=order.price,
-                metadata=dict(order.metadata),
+                metadata=_paper_metadata(order.metadata),
             )
             self._working[order_id] = working
             result = OrderResult(
