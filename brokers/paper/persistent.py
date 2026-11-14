@@ -19,7 +19,7 @@ from typing import Callable
 
 from core.models import AccountSnapshot, OrderRequest, OrderResult, OrderStatus, Position, Side
 from core.sqlite_wal import enable_wal
-from .broker import PaperBroker, WorkingOrder
+from .broker import PaperBroker, WorkingOrder, _paper_metadata
 
 
 class CrashInjectedError(RuntimeError):
