@@ -1,4 +1,5 @@
 import socket
+import subprocess
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -54,10 +55,8 @@ class SafeFetchTests(unittest.TestCase):
         self.assertFalse(is_public_hostname("localhost"))
 
     def test_validate_url_returns_the_public_addresses_to_pin(self):
-        resolved = [
-            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))
-        ]
-        with patch("packages.scraper.safe_fetch.socket.getaddrinfo", return_value=resolved):
+        resolved = ["93.184.216.34"]
+        with patch("packages.scraper.safe_fetch._resolve_dns", return_value=resolved):
             scheme, hostname, url, port, addresses = _validate_url("https://example.com/")
 
         self.assertEqual(
@@ -67,18 +66,23 @@ class SafeFetchTests(unittest.TestCase):
         self.assertEqual(addresses, ["93.184.216.34"])
 
     def test_hostname_with_any_private_dns_answer_is_rejected(self):
-        resolved = [
-            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0)),
-            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.10", 0)),
-        ]
-        with patch("packages.scraper.safe_fetch.socket.getaddrinfo", return_value=resolved):
+        resolved = ["93.184.216.34", "192.168.1.10"]
+        with patch("packages.scraper.safe_fetch._resolve_dns", return_value=resolved):
             with self.assertRaisesRegex(SafeFetchError, "blocked address"):
                 _validate_url("https://example.com/")
 
+    def test_dns_resolution_is_given_a_finite_timeout(self):
+        with patch(
+            "packages.scraper.safe_fetch.subprocess.run",
+            side_effect=subprocess.TimeoutExpired("python", 0.25),
+        ) as run:
+            with self.assertRaisesRegex(SafeFetchError, "DNS resolution timed out"):
+                _validate_url("https://example.com/", timeout_s=0.25)
+
+        self.assertEqual(run.call_args.kwargs["timeout"], 0.25)
+
     def test_allowed_host_is_normalized_and_fetches(self):
-        resolved = [
-            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))
-        ]
+        resolved = ["93.184.216.34"]
         response = Mock(status=200)
         response.getheader.side_effect = lambda name, default=None: {
             "Content-Length": "0",
@@ -89,7 +93,7 @@ class SafeFetchTests(unittest.TestCase):
         connection = Mock(sock=None)
         connection.getresponse.return_value = response
         with (
-            patch("packages.scraper.safe_fetch.socket.getaddrinfo", return_value=resolved),
+            patch("packages.scraper.safe_fetch._resolve_dns", return_value=resolved),
             patch(
                 "packages.scraper.safe_fetch._PinnedHTTPSConnection",
                 return_value=connection,
@@ -104,7 +108,7 @@ class SafeFetchTests(unittest.TestCase):
         connection_factory.assert_called_once()
 
     def test_host_outside_allowlist_is_rejected_before_dns(self):
-        with patch("packages.scraper.safe_fetch.socket.getaddrinfo") as resolve:
+        with patch("packages.scraper.safe_fetch._resolve_dns") as resolve:
             with self.assertRaisesRegex(SafeFetchError, "not in the allowlist"):
                 safe_fetch_url(
                     "https://sub.example.com/",
@@ -118,11 +122,9 @@ class SafeFetchTests(unittest.TestCase):
         response.getheader.return_value = "https://other.example/final"
         connection = Mock(sock=None)
         connection.getresponse.return_value = response
-        resolved = [
-            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))
-        ]
+        resolved = ["93.184.216.34"]
         with (
-            patch("packages.scraper.safe_fetch.socket.getaddrinfo", return_value=resolved) as resolve,
+            patch("packages.scraper.safe_fetch._resolve_dns", return_value=resolved) as resolve,
             patch(
                 "packages.scraper.safe_fetch._PinnedHTTPSConnection",
                 return_value=connection,
@@ -136,6 +138,38 @@ class SafeFetchTests(unittest.TestCase):
                 )
 
         resolve.assert_called_once()
+
+    def test_unreachable_validated_address_fails_over_to_next_address(self):
+        response = Mock(status=200)
+        response.getheader.side_effect = lambda name, default=None: {
+            "Content-Length": "0",
+            "Content-Type": "text/html",
+            "Content-Encoding": "identity",
+        }.get(name, default)
+        response.read.return_value = b""
+        failed_connection = Mock(sock=None)
+        failed_connection.request.side_effect = OSError("address unreachable")
+        working_connection = Mock(sock=None)
+        working_connection.getresponse.return_value = response
+        addresses = ["93.184.216.34", "1.1.1.1"]
+        with (
+            patch("packages.scraper.safe_fetch._resolve_dns", return_value=addresses),
+            patch(
+                "packages.scraper.safe_fetch._PinnedHTTPSConnection",
+                side_effect=[failed_connection, working_connection],
+            ) as connection_factory,
+        ):
+            result = safe_fetch_url(
+                "https://example.com/",
+                allowed_hosts=["example.com"],
+            )
+
+        self.assertEqual(result.status, 200)
+        self.assertEqual(
+            [call.args[2] for call in connection_factory.call_args_list],
+            addresses,
+        )
+        failed_connection.close.assert_called_once()
 
     def test_http_connection_uses_the_validated_ip_not_the_hostname(self):
         connection = _PinnedHTTPConnection("example.com", 80, "93.184.216.34", 5)
@@ -225,12 +259,11 @@ class SafeFetchTests(unittest.TestCase):
             "other.example": "1.1.1.1",
         }
 
-        def resolve(hostname, _port, *, type):
-            address = addresses[hostname]
-            return [(socket.AF_INET, type, 6, "", (address, 0))]
+        def resolve(hostname, _timeout_s):
+            return [addresses[hostname]]
 
         with (
-            patch("packages.scraper.safe_fetch.socket.getaddrinfo", side_effect=resolve),
+            patch("packages.scraper.safe_fetch._resolve_dns", side_effect=resolve),
             patch("packages.scraper.safe_fetch._PinnedHTTPSConnection", FakeConnection),
         ):
             result = safe_fetch_url(
@@ -289,12 +322,15 @@ class SafeFetchHttpIntegrationTests(unittest.TestCase):
         original_getaddrinfo = socket.getaddrinfo
         original_create_connection = socket.create_connection
 
-        def resolve(host, port, *args, **kwargs):
+        def resolve(host, _timeout_s):
             if host == "example.com":
-                return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+                return ["93.184.216.34"]
             if host == "rebound.example":
-                return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0))]
-            return original_getaddrinfo(host, port, *args, **kwargs)
+                return ["127.0.0.1"]
+            return [
+                info[4][0]
+                for info in original_getaddrinfo(host, None, type=socket.SOCK_STREAM)
+            ]
 
         def connect(address, timeout=None, source_address=None):
             if address == ("93.184.216.34", 80):
@@ -302,7 +338,7 @@ class SafeFetchHttpIntegrationTests(unittest.TestCase):
             return original_create_connection(address, timeout, source_address)
 
         return (
-            patch("packages.scraper.safe_fetch.socket.getaddrinfo", side_effect=resolve),
+            patch("packages.scraper.safe_fetch._resolve_dns", side_effect=resolve),
             patch(
                 "packages.scraper.safe_fetch.socket.create_connection",
                 side_effect=connect,

@@ -7,7 +7,7 @@ This independent package provides a deliberately narrow, allowlisted public-page
 - `safe_fetch.py` retrieves one public HTTP(S) page using the address validated during DNS resolution. The CLI requires explicit exact-host allowlist entries, including any redirect destinations.
 - `extract.py` returns only bounded page title, meta description, and headings; it does not return or persist page bodies or extract personal identities.
 
-The fetcher allows standard HTTP/HTTPS ports only, rejects embedded credentials and non-public destinations, revalidates every redirect against the allowlist, and bounds total time, response bytes, and redirect count. Allowlisting does not permit private or loopback addresses. Compressed responses are rejected rather than expanded without a decompression limit.
+The fetcher allows standard HTTP/HTTPS ports only, rejects embedded credentials and non-public destinations, revalidates every redirect against the allowlist, and bounds total time (including DNS resolution and connection attempts), response bytes, and redirect count. It tries each validated address in order while time remains. Allowlisting does not permit private or loopback addresses. Compressed responses are rejected rather than expanded without a decompression limit.
 
 Run one authorized-page extraction with:
 

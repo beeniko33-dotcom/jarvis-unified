@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import http.client
 import ipaddress
+import json
 import math
 import socket
+import subprocess
+import sys
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -107,16 +110,48 @@ def _normalize_allowed_hosts(allowed_hosts: Iterable[str]) -> frozenset[str]:
     return normalized
 
 
-def _resolve_and_validate_host(hostname: str) -> list[str]:
+def _resolve_dns(hostname: str, timeout_s: float) -> list[str]:
+    resolver = (
+        "import json, socket, sys\n"
+        "try:\n"
+        "    addresses = socket.getaddrinfo(sys.argv[1], None, type=socket.SOCK_STREAM)\n"
+        "    print(json.dumps([item[4][0] for item in addresses]))\n"
+        "except OSError as exc:\n"
+        "    print(json.dumps({'error': str(exc)}))\n"
+    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-I", "-c", resolver, hostname],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SafeFetchError(f"DNS resolution timed out for {hostname!r}") from exc
+    except subprocess.CalledProcessError as exc:
+        raise SafeFetchError(f"DNS resolver exited unsuccessfully for {hostname!r}") from exc
+    except OSError as exc:
+        raise SafeFetchError(f"DNS resolution failed for {hostname!r}: {exc}") from exc
+    try:
+        addresses = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise SafeFetchError(f"invalid DNS response for {hostname!r}") from exc
+    if isinstance(addresses, dict) and "error" in addresses:
+        raise SafeFetchError(f"DNS resolution failed for {hostname!r}: {addresses['error']}")
+    if not isinstance(addresses, list) or any(not isinstance(address, str) for address in addresses):
+        raise SafeFetchError(f"invalid DNS response for {hostname!r}")
+    return addresses
+
+
+def _resolve_and_validate_host(
+    hostname: str,
+    timeout_s: float = DEFAULT_TIMEOUT_S,
+) -> list[str]:
     if not hostname or hostname.lower() in {"localhost", "metadata", "metadata.google.internal"}:
         raise SafeFetchError(f"blocked hostname: {hostname!r}")
-    try:
-        infos = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
-    except socket.gaierror as exc:
-        raise SafeFetchError(f"DNS resolution failed for {hostname!r}: {exc}") from exc
     resolved: list[str] = []
-    for info in infos:
-        ip_str = info[4][0]
+    for ip_str in _resolve_dns(hostname, timeout_s):
         try:
             ip = ipaddress.ip_address(ip_str)
         except ValueError as exc:
@@ -135,6 +170,7 @@ def _resolve_and_validate_host(hostname: str) -> list[str]:
 def _validate_url(
     url: str,
     allowed_hosts: frozenset[str] | None = None,
+    timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> tuple[str, str, str, int, list[str]]:
     try:
         parsed = urlparse(url)
@@ -162,7 +198,7 @@ def _validate_url(
             raise SafeFetchError(f"blocked literal address: {ip}")
     except ValueError:
         pass  # hostname is not an IP literal
-    resolved_addresses = _resolve_and_validate_host(hostname)
+    resolved_addresses = _resolve_and_validate_host(hostname, timeout_s)
     return scheme, hostname, parsed.geturl(), default_port, resolved_addresses
 
 
@@ -218,9 +254,13 @@ def safe_fetch_url(
     current = url
     deadline = time.monotonic() + timeout_s
     for _ in range(max_redirects + 1):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise SafeFetchError("fetch deadline exceeded")
         scheme, hostname, current, port, addresses = _validate_url(
             current,
             normalized_allowed_hosts,
+            remaining,
         )
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -235,23 +275,47 @@ def safe_fetch_url(
             raise SafeFetchError("URL path contains control characters")
 
         connection_type = _PinnedHTTPSConnection if scheme == "https" else _PinnedHTTPConnection
-        connection = connection_type(hostname, port, addresses[0], remaining)
-        try:
-            connection.request(
-                "GET",
-                target,
-                headers={
-                    "Accept-Encoding": "identity",
-                    "Connection": "close",
-                    "User-Agent": user_agent,
-                },
-            )
+        response = None
+        connection = None
+        last_connection_error: OSError | http.client.HTTPException | None = None
+        for address in addresses:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise SafeFetchError(f"timeout fetching {hostname}")
-            if connection.sock is not None:
-                connection.sock.settimeout(remaining)
-            response = connection.getresponse()
+            candidate = connection_type(hostname, port, address, remaining)
+            try:
+                candidate.request(
+                    "GET",
+                    target,
+                    headers={
+                        "Accept-Encoding": "identity",
+                        "Connection": "close",
+                        "User-Agent": user_agent,
+                    },
+                )
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise SafeFetchError(f"timeout fetching {hostname}")
+                if candidate.sock is not None:
+                    candidate.sock.settimeout(remaining)
+                response = candidate.getresponse()
+                connection = candidate
+                break
+            except SafeFetchError:
+                candidate.close()
+                raise
+            except (http.client.HTTPException, OSError) as exc:
+                last_connection_error = exc
+                candidate.close()
+        if response is None or connection is None:
+            if deadline - time.monotonic() <= 0:
+                raise SafeFetchError(f"timeout fetching {hostname}") from last_connection_error
+            if last_connection_error is None:
+                raise SafeFetchError(f"no usable addresses for {hostname!r}")
+            raise SafeFetchError(
+                f"request failed for {hostname}: {last_connection_error}"
+            ) from last_connection_error
+        try:
             status = response.status
             if status in {301, 302, 303, 307, 308}:
                 location = response.getheader("Location")
