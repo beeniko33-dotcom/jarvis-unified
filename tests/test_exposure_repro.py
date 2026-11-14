@@ -10,6 +10,7 @@ They encode the three findings from the review:
 3. Failure handling - a close can succeed while release fails, and the
    caller cannot tell the two apart.
 """
+from contextlib import closing
 from decimal import Decimal
 import tempfile
 import unittest
@@ -92,7 +93,7 @@ class ExposureAccountingReproTests(unittest.TestCase):
         service.submit(OrderRequest("EURUSD", Side.BUY, Decimal("1"), Decimal("10"), "f1"))
 
         # Corrupt the committed ledger so the release cannot find enough notional.
-        with self.store._lock, self.store._connect() as db:
+        with self.store._lock, closing(self.store._connect()) as db:
             db.execute("DELETE FROM exposure_committed")
 
         with self.assertRaises(Exception) as ctx:

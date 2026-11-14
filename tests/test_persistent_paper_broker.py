@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -89,8 +90,9 @@ class PersistentPaperBrokerTests(unittest.TestCase):
     def test_tampered_event_is_detected_and_broker_fails_closed(self):
         broker = self.broker()
         broker.place_order(self.order())
-        with sqlite3.connect(self.db) as db:
+        with closing(sqlite3.connect(self.db)) as db:
             db.execute("UPDATE paper_events SET payload='{}' WHERE seq=2")
+            db.commit()
         with self.assertRaises(RuntimeError):
             broker.get_account()
         with self.assertRaises(RuntimeError):
@@ -99,8 +101,9 @@ class PersistentPaperBrokerTests(unittest.TestCase):
     def test_tampered_snapshot_is_detected(self):
         broker = self.broker()
         broker.place_order(self.order())
-        with sqlite3.connect(self.db) as db:
+        with closing(sqlite3.connect(self.db)) as db:
             db.execute("UPDATE paper_state SET payload='{}' WHERE singleton=1")
+            db.commit()
         with self.assertRaises(RuntimeError):
             broker.get_account()
 

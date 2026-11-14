@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Iterable
+from core.sqlite_wal import enable_wal
 
 @dataclass(frozen=True)
 class Bar:
@@ -65,8 +66,9 @@ class PaperReplay:
         self.risk_fraction,self.fee_bps,self.slippage_bps=risk_fraction,fee_bps,slippage_bps
         self.max_daily_loss_fraction=max_daily_loss_fraction
         database.parent.mkdir(parents=True,exist_ok=True)
-        self.db=sqlite3.connect(database)
-        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db=sqlite3.connect(database,timeout=30)
+        self.db.execute("PRAGMA busy_timeout=30000")
+        enable_wal(self.db)
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.executescript("""
         CREATE TABLE IF NOT EXISTS bars(symbol TEXT,ts TEXT,close TEXT,source_sha256 TEXT,PRIMARY KEY(symbol,ts));

@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from contextlib import closing
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -18,6 +18,7 @@ from uuid import uuid4
 from typing import Callable
 
 from core.models import AccountSnapshot, OrderRequest, OrderResult, OrderStatus, Position, Side
+from core.sqlite_wal import enable_wal
 from .broker import PaperBroker, WorkingOrder
 
 
@@ -53,7 +54,7 @@ class PersistentPaperBroker(PaperBroker):
         )
         self._peak_equity = Decimal(starting_balance)
         with closing(self._connect()) as db:
-            db.execute("PRAGMA journal_mode=WAL")
+            enable_wal(db)
             db.execute("PRAGMA synchronous=FULL")
             db.execute("""CREATE TABLE IF NOT EXISTS paper_state (
                 singleton INTEGER PRIMARY KEY CHECK(singleton=1), payload TEXT NOT NULL)""")
@@ -94,6 +95,15 @@ class PersistentPaperBroker(PaperBroker):
         db.execute("PRAGMA busy_timeout=30000")
         db.execute("PRAGMA foreign_keys=ON")
         return db
+
+    @contextmanager
+    def _db(self):
+        """Yield a connection with commit/rollback-on-exit semantics, then close it.
+
+        ``with sqlite3.Connection`` only commits or rolls back; it never closes.
+        """
+        with closing(self._connect()) as connection, connection as db:
+            yield db
 
     def _order_to_dict(self, o: OrderResult) -> dict:
         return {
@@ -266,7 +276,7 @@ class PersistentPaperBroker(PaperBroker):
             raise RuntimeError("paper ledger snapshot is malformed; broker is locked") from exc
 
     def _mutate(self, event_type: str, operation: Callable[[], object]):
-        with self._persistent_lock, self._connect() as db:
+        with self._persistent_lock, self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             try:
                 self._refresh_from_db(db)
@@ -343,7 +353,7 @@ class PersistentPaperBroker(PaperBroker):
         return self._mutate("paper_close", close_atomically)
 
     def get_account(self) -> AccountSnapshot:
-        with self._persistent_lock, self._connect() as db:
+        with self._persistent_lock, self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             try:
                 self._refresh_from_db(db)
@@ -377,7 +387,7 @@ class PersistentPaperBroker(PaperBroker):
                 raise
 
     def get_positions(self) -> list[Position]:
-        with self._persistent_lock, self._connect() as db:
+        with self._persistent_lock, self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             try:
                 self._refresh_from_db(db)
@@ -389,7 +399,7 @@ class PersistentPaperBroker(PaperBroker):
                 raise
 
     def get_working_orders(self) -> list[WorkingOrder]:
-        with self._persistent_lock, self._connect() as db:
+        with self._persistent_lock, self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             try:
                 self._refresh_from_db(db)
@@ -401,7 +411,7 @@ class PersistentPaperBroker(PaperBroker):
                 raise
 
     def verify_ledger(self) -> bool:
-        with self._persistent_lock, self._connect() as db:
+        with self._persistent_lock, self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             try:
                 ok = self._verify_chain(db)
@@ -412,11 +422,11 @@ class PersistentPaperBroker(PaperBroker):
                 raise
 
     def ledger_event_count(self) -> int:
-        with self._connect() as db:
+        with self._db() as db:
             return int(db.execute("SELECT COUNT(*) FROM paper_events").fetchone()[0])
 
     def reconcile(self) -> dict:
-        with self._persistent_lock, self._connect() as db:
+        with self._persistent_lock, self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             try:
                 self._refresh_from_db(db)

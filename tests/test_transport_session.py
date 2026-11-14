@@ -43,8 +43,8 @@ def _generate_self_signed_cert(tmpdir: Path) -> tuple[Path, Path]:
         .issuer_name(issuer)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(dt.datetime.utcnow() - dt.timedelta(minutes=1))
-        .not_valid_after(dt.datetime.utcnow() + dt.timedelta(hours=1))
+        .not_valid_before(dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=1))
+        .not_valid_after(dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=1))
         .add_extension(
             x509.SubjectAlternativeName([x509.DNSName(u"localhost")]),
             critical=False,
