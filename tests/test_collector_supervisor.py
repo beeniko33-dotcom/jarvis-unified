@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -140,6 +143,66 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(snap["last_session"]["status"], "completed")
             self.assertFalse(snap["lock_held"])
             self.assertIn("note", snap)
+
+    def test_successful_session_rotation_records_each_boundary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            results = run_continuous(
+                command=["python", "-c", "print('session')"],
+                db_path=root / "data.sqlite3",
+                lock_path=root / "data.sqlite3.lock",
+                duration_seconds=10,
+                log_dir=root / "logs",
+                max_sessions=2,
+                pause_between_seconds=0,
+            )
+            self.assertEqual([item.status for item in results], ["completed", "completed"])
+            records = list((root / "logs").glob("session-*.json"))
+            self.assertEqual(len(records), 2)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX process-group signal integration test")
+    def test_sigterm_interrupts_child_and_records_shutdown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            child_pid_file = root / "child.pid"
+            wrapper = (
+                "import sys,time; "
+                "from pathlib import Path; "
+                "from research import collector_supervisor as cs; "
+                "cs._install_signal_handlers(); "
+                "cs.run_one_session(command=[sys.executable,'-c',"
+                + repr("import os,time; from pathlib import Path; Path(" + repr(str(child_pid_file)) + ").write_text(str(os.getpid())); time.sleep(60)")
+                + "], db_path=Path(sys.argv[1])/'db.sqlite3', "
+                "lock_path=Path(sys.argv[1])/'db.lock', duration_seconds=120, "
+                "log_dir=Path(sys.argv[1])/'logs', shutdown_grace_seconds=1)"
+            )
+            parent = subprocess.Popen(
+                [sys.executable, "-c", wrapper, str(root)],
+                cwd=str(Path.cwd()),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            try:
+                deadline = time.monotonic() + 8
+                while not child_pid_file.exists() and time.monotonic() < deadline:
+                    if parent.poll() is not None:
+                        self.fail("supervisor exited before child process started")
+                    time.sleep(0.05)
+                self.assertTrue(child_pid_file.exists(), "child process did not start")
+                child_pid = int(child_pid_file.read_text())
+                os.kill(parent.pid, __import__("signal").SIGTERM)
+                parent.wait(timeout=8)
+                session_records = list((root / "logs").glob("session-*.json"))
+                self.assertEqual(len(session_records), 1)
+                record = json.loads(session_records[0].read_text())
+                self.assertEqual(record["status"], "shutdown")
+                self.assertIsNotNone(record["ended_at"])
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(child_pid, 0)
+            finally:
+                if parent.poll() is None:
+                    parent.kill()
+                    parent.wait(timeout=3)
 
     def test_shutdown_flag_stops_continuous(self):
         with tempfile.TemporaryDirectory() as tmp:

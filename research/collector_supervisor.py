@@ -77,7 +77,7 @@ def _utc_now_iso() -> str:
 
 
 def _session_id() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + f"-{os.getpid()}"
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + f"-{os.getpid()}"
 
 
 def _pid_is_alive(pid: int) -> bool:
@@ -169,6 +169,31 @@ class FileLock:
         self.release()
 
 
+def _terminate_and_reap(proc: subprocess.Popen, *, grace_seconds: float) -> int:
+    """Stop the child (and its POSIX process group) and always reap the direct child."""
+    try:
+        if os.name == "posix":
+            os.killpg(proc.pid, signal.SIGTERM)
+        else:
+            proc.terminate()
+    except ProcessLookupError:
+        pass
+    except OSError:
+        if proc.poll() is None:
+            proc.terminate()
+    try:
+        return proc.wait(timeout=max(0.0, grace_seconds))
+    except subprocess.TimeoutExpired:
+        try:
+            if os.name == "posix":
+                os.killpg(proc.pid, signal.SIGKILL)
+            else:
+                proc.kill()
+        except ProcessLookupError:
+            pass
+        return proc.wait()
+
+
 def run_one_session(
     *,
     command: Sequence[str],
@@ -176,70 +201,81 @@ def run_one_session(
     lock_path: Path,
     duration_seconds: int,
     log_dir: Path,
+    shutdown_grace_seconds: float = 5.0,
 ) -> SessionRecord:
-    """Run a single collector command under exclusive lock."""
+    """Run one collector and promptly stop/reap it when shutdown is requested."""
     sid = _session_id()
     started = _utc_now_iso()
+    started_monotonic = time.monotonic()
     log_dir.mkdir(parents=True, exist_ok=True)
     session_log = log_dir / f"session-{sid}.json"
+    stdout_path = log_dir / f"session-{sid}.stdout"
+    stderr_path = log_dir / f"session-{sid}.stderr"
+
+    def write_record(record: SessionRecord) -> SessionRecord:
+        session_log.write_text(json.dumps(asdict(record), indent=2), encoding="utf-8")
+        return record
 
     lock = FileLock(lock_path, timeout_seconds=10.0)
     if not lock.acquire():
         record = SessionRecord(
-            session_id=sid,
-            started_at=started,
-            ended_at=_utc_now_iso(),
-            exit_code=None,
-            duration_seconds=duration_seconds,
-            command=list(command),
-            db_path=str(db_path),
-            status="skipped_lock",
+            session_id=sid, started_at=started, ended_at=_utc_now_iso(),
+            exit_code=None, duration_seconds=duration_seconds,
+            command=list(command), db_path=str(db_path), status="skipped_lock",
         )
-        session_log.write_text(json.dumps(asdict(record), indent=2))
         logger.warning("skipped session %s — lock held", sid)
-        return record
+        return write_record(record)
 
     try:
         logger.info("starting session %s: %s", sid, " ".join(command))
-        proc = subprocess.run(
-            list(command),
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=duration_seconds + 60,  # hard ceiling
-        )
-        ended = _utc_now_iso()
-        status = "completed" if proc.returncode == 0 else "failed"
+        with stdout_path.open("w", encoding="utf-8") as stdout_file, stderr_path.open(
+            "w", encoding="utf-8"
+        ) as stderr_file:
+            proc = subprocess.Popen(
+                list(command),
+                stdout=stdout_file,
+                stderr=stderr_file,
+                text=True,
+                start_new_session=(os.name == "posix"),
+            )
+            deadline = time.monotonic() + duration_seconds + 60
+            status = "failed"
+            exit_code: int | None = None
+            while True:
+                exit_code = proc.poll()
+                if exit_code is not None:
+                    status = "completed" if exit_code == 0 else "failed"
+                    break
+                if _SHUTDOWN_REQUESTED:
+                    exit_code = _terminate_and_reap(
+                        proc, grace_seconds=shutdown_grace_seconds
+                    )
+                    status = "shutdown"
+                    break
+                if time.monotonic() >= deadline:
+                    _terminate_and_reap(proc, grace_seconds=shutdown_grace_seconds)
+                    exit_code = -1
+                    status = "failed"
+                    logger.error("session %s timed out", sid)
+                    break
+                time.sleep(0.1)
+
         record = SessionRecord(
-            session_id=sid,
-            started_at=started,
-            ended_at=ended,
-            exit_code=proc.returncode,
-            duration_seconds=duration_seconds,
-            command=list(command),
-            db_path=str(db_path),
-            status=status,
+            session_id=sid, started_at=started, ended_at=_utc_now_iso(),
+            exit_code=exit_code, duration_seconds=duration_seconds,
+            command=list(command), db_path=str(db_path), status=status,
         )
-        (log_dir / f"session-{sid}.stdout").write_text(proc.stdout or "")
-        (log_dir / f"session-{sid}.stderr").write_text(proc.stderr or "")
-        session_log.write_text(json.dumps(asdict(record), indent=2))
-        logger.info("session %s finished status=%s exit=%s", sid, status, proc.returncode)
-        return record
-    except subprocess.TimeoutExpired:
-        ended = _utc_now_iso()
+        logger.info("session %s finished status=%s exit=%s", sid, status, exit_code)
+        return write_record(record)
+    except OSError as exc:
+        stderr_path.write_text(f"{type(exc).__name__}: {exc}\n", encoding="utf-8")
         record = SessionRecord(
-            session_id=sid,
-            started_at=started,
-            ended_at=ended,
-            exit_code=-1,
-            duration_seconds=duration_seconds,
-            command=list(command),
-            db_path=str(db_path),
-            status="failed",
+            session_id=sid, started_at=started, ended_at=_utc_now_iso(),
+            exit_code=127, duration_seconds=duration_seconds,
+            command=list(command), db_path=str(db_path), status="failed",
         )
-        session_log.write_text(json.dumps(asdict(record), indent=2))
-        logger.error("session %s timed out", sid)
-        return record
+        logger.exception("could not start session %s", sid)
+        return write_record(record)
     finally:
         lock.release()
 
