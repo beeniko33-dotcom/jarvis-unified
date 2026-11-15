@@ -93,6 +93,24 @@ class OptionsExecutionTests(unittest.TestCase):
             self.service.buy(intent, proposal, proposal)
         self.assertEqual(self.gateway.buy_calls, 0)
 
+    def test_ambiguous_buy_keeps_stake_reserved(self):
+        intent = make_intent()
+        self.ledger.append(intent.client_intent_id, "buy_requested", {"amount": "2"})
+        self.ledger.append(intent.client_intent_id, "buy_unknown", {"reason": "timeout"})
+        self.assertEqual(self.ledger.open_stake_total(), "2")
+
+    def test_buy_claim_is_atomic_and_single_use(self):
+        self.ledger.claim_buy("single-use")
+        with self.assertRaises(PermissionError):
+            self.ledger.claim_buy("single-use")
+
+    def test_unrecorded_proposal_cannot_be_bought(self):
+        intent = make_intent()
+        proposal = DerivProposal("not-recorded", Decimal("2"), Decimal("3"))
+        with self.assertRaises(PermissionError):
+            self.service.buy(intent, proposal)
+        self.assertEqual(self.gateway.buy_calls, 0)
+
     def test_ambiguous_buy_is_not_retried(self):
         class AmbiguousGateway(FakeGateway):
             def buy_contract(self, *args, **kwargs):
