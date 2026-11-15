@@ -141,6 +141,47 @@ class ResearchEvidencePipeline:
             ))
         return IngestResult(True, False, out_of_order, stale, clock_skew, observation.content_hash)
 
+
+    def source_health_report(
+        self,
+        source_id: str,
+        *,
+        expected_interval_seconds: int,
+        outage_after_seconds: int,
+        now: datetime | None = None,
+    ):
+        """Build cadence diagnostics from persisted observations for one source."""
+        from research.source_health import SourceEvent, assess_source_health
+
+        now = now or datetime.now(timezone.utc)
+        with self._session() as db:
+            rows = db.execute(
+                """
+                SELECT event_time, out_of_order, stale, clock_skew
+                FROM market_observations
+                WHERE source_id = ?
+                ORDER BY event_time
+                """,
+                (source_id,),
+            ).fetchall()
+        events = [
+            SourceEvent(
+                source_id=source_id,
+                event_time=datetime.fromisoformat(row[0]),
+                out_of_order=bool(row[1]),
+                stale=bool(row[2]),
+                clock_skew=bool(row[3]),
+            )
+            for row in rows
+        ]
+        return assess_source_health(
+            source_id,
+            events,
+            expected_interval_seconds=expected_interval_seconds,
+            outage_after_seconds=outage_after_seconds,
+            now=now,
+        )
+
     def report(self, *, source_id: str | None = None) -> dict[str, Any]:
         query = "SELECT COUNT(*), SUM(out_of_order), SUM(stale), SUM(clock_skew), COUNT(DISTINCT content_hash) FROM market_observations"
         args: tuple[Any, ...] = ()
