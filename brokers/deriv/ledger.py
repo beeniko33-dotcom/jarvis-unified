@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime, timezone
+from contextlib import contextmanager
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -22,8 +23,9 @@ class DerivContractLedger:
 
     def __init__(self, path: str | Path) -> None:
         self.path = str(path)
+        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
-        with self._connect() as db:
+        with self._session() as db:
             db.execute("""
                 CREATE TABLE IF NOT EXISTS deriv_contract_events (
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,6 +57,15 @@ class DerivContractLedger:
         db.execute("PRAGMA journal_mode=WAL")
         db.execute("PRAGMA synchronous=FULL")
         return db
+
+    @contextmanager
+    def _session(self):
+        db = self._connect()
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
 
     @staticmethod
     def _safe_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -88,7 +99,7 @@ class DerivContractLedger:
             "payload": safe,
         }
         encoded = json.dumps(safe, sort_keys=True, separators=(",", ":"))
-        with self._lock, self._connect() as db:
+        with self._lock, self._session() as db:
             db.execute(
                 """INSERT INTO deriv_contract_events
                 (event_id, client_intent_id, event_type, contract_id, occurred_at, payload_json)
@@ -106,7 +117,7 @@ class DerivContractLedger:
             query += " WHERE client_intent_id = ?"
             args = (client_intent_id,)
         query += " ORDER BY sequence"
-        with self._lock, self._connect() as db:
+        with self._lock, self._session() as db:
             rows = db.execute(query, args).fetchall()
         return [{
             "event_id": row[0], "client_intent_id": row[1], "event_type": row[2],
@@ -118,7 +129,7 @@ class DerivContractLedger:
         if not client_intent_id:
             raise ValueError("client intent identity is required")
         try:
-            with self._lock, self._connect() as db:
+            with self._lock, self._session() as db:
                 db.execute(
                     "INSERT INTO deriv_buy_claims(client_intent_id, claimed_at) VALUES (?, ?)",
                     (client_intent_id, datetime.now(timezone.utc).isoformat()),
@@ -127,7 +138,7 @@ class DerivContractLedger:
             raise PermissionError("buy already claimed; reconcile before any retry") from exc
 
     def has_intent(self, client_intent_id: str) -> bool:
-        with self._lock, self._connect() as db:
+        with self._lock, self._session() as db:
             row = db.execute(
                 "SELECT 1 FROM deriv_contract_events WHERE client_intent_id = ? LIMIT 1",
                 (client_intent_id,),
