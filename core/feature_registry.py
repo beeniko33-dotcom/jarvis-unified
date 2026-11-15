@@ -49,7 +49,7 @@ _FEATURES = (
         "name": "Research lineage and reflections",
         "state": "experimental",
         "maturity": "experimental",
-        "reason": "Lineage persistence is under review in PR #68 and is not yet part of main.",
+        "reason": "Persistent paper-ledger lineage is on main; execution-boundary sanitization and propagation are under review.",
         "dependencies": ["persistent_paper_ledger"],
         "risk_boundary": "Unknown provenance remains unknown; no self-promotion.",
     },

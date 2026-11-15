@@ -38,7 +38,7 @@ def _paper_metadata(metadata: dict) -> dict:
         if not value or len(value) > 128 or any(marker in lowered for marker in _SECRET_MARKERS):
             continue
         if key in {"strategy_config_hash", "signal_context_hash", "data_hash"}:
-            if not (8 <= len(value) <= 128 and all(ch in "0123456789abcdefABCDEF" for ch in value)):
+            if not (len(value) == 64 and all(ch in "0123456789abcdefABCDEF" for ch in value)):
                 continue
         elif key == "quote_timestamp":
             try:
