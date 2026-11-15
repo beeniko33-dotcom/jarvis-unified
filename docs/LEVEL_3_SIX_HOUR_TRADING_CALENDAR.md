@@ -10,14 +10,16 @@ quote quality, and provider provenance remains a separate gate.
 
 - Daily collection window: 07:00 through 08:59:59 UTC.
 - Coverage: both hourly buckets (100% of the selected window).
-- Streak: 30 consecutive expected trading days, not 30 calendar days.
+- Provisional assessment: 2 consecutive expected trading days. This is an early, non-certifying
+  checkpoint for reviewing the prototype; it does not authorize live trading or Level 3 status.
+- Full Level 3 streak: 30 consecutive expected trading days, not 30 calendar days.
 - Weekends: neutral.
 - Holidays: neutral only when explicitly added to the versioned calendar before the run.
 - Unknown weekday closures and missing hourly buckets: break the streak.
 - Calendar version and SHA-256 are bound into the evidence-store configuration. Changing
   the calendar requires a new database and a fresh validation run.
-- The shortened window reduces daily collection time; it does not reduce the 30-trading-day
-  requirement, compress elapsed time, or authorize live use.
+- The two-day checkpoint shortens the time to an initial engineering assessment only. It does
+  not reduce the 30-trading-day full Level 3 requirement, compress elapsed time, or authorize live use.
 
 The current Deriv and Biquote collectors mark every observation unverified. Consequently,
 this calendar can report candidate coverage but cannot create verified-day credit or pass
