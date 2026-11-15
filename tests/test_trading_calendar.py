@@ -1,19 +1,17 @@
 import json
-import tempfile
 import unittest
 from datetime import date, datetime, timezone
-from pathlib import Path
 
 from research.trading_calendar import TradingCalendar
 
 
 CONFIG = {
-    "version": "test-six-hour-v1",
+    "version": "test-two-hour-v1",
     "timezone": "UTC",
     "weekdays": [0, 1, 2, 3, 4],
     "session_start_utc_hour": 7,
-    "session_end_utc_hour": 13,
-    "minimum_covered_hours": 6,
+    "session_end_utc_hour": 9,
+    "minimum_covered_hours": 2,
     "closures": [],
 }
 
@@ -24,9 +22,9 @@ class TradingCalendarTests(unittest.TestCase):
 
     def stamps(self, day):
         return [datetime(day.year, day.month, day.day, hour, 15, tzinfo=timezone.utc).isoformat()
-                for hour in range(7, 13)]
+                for hour in range(7, 9)]
 
-    def test_six_hour_window_requires_all_six_buckets(self):
+    def test_two_hour_window_requires_both_hourly_buckets(self):
         cal = self.calendar()
         day = date(2026, 11, 16)
         self.assertTrue(cal.daily_coverage(self.stamps(day), day)["complete"])
@@ -49,18 +47,18 @@ class TradingCalendarTests(unittest.TestCase):
         tuesday = date(2026, 11, 17)
         stamps = self.stamps(monday) + self.stamps(tuesday)[:-1]
         streak, _ = cal.consecutive_covered_days(
-            stamps, datetime(2026, 11, 18, 14, tzinfo=timezone.utc)
+            stamps, datetime(2026, 11, 18, 10, tzinfo=timezone.utc)
         )
         self.assertEqual(streak, 0)
 
     def test_calendar_rejects_partial_daily_threshold(self):
-        config = dict(CONFIG, minimum_covered_hours=5)
+        config = dict(CONFIG, minimum_covered_hours=1)
         with self.assertRaisesRegex(ValueError, "all configured session hours"):
             self.calendar(config)
 
     def test_calendar_hash_changes_when_rules_change(self):
         first = self.calendar()
-        changed = dict(CONFIG, version="test-six-hour-v2")
+        changed = dict(CONFIG, version="test-two-hour-v2")
         second = self.calendar(changed)
         self.assertNotEqual(first.sha256, second.sha256)
 
