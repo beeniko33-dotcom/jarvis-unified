@@ -117,7 +117,9 @@ def parse_public_feed(
                 None,
             )
             link = link_node.attrib["href"] if link_node is not None else ""
-            date_node = item.find("atom:published", namespace) or item.find("atom:updated", namespace)
+            date_node = item.find("atom:published", namespace)
+            if date_node is None:
+                date_node = item.find("atom:updated", namespace)
             published_text = date_node.text if date_node is not None else None
         else:
             title_node = item.find("title")
