@@ -12,7 +12,7 @@ from uuid import uuid4
 _ALLOWED_EVENT_FIELDS = {
     "proposal_id", "contract_id", "transaction_id", "underlying_symbol",
     "contract_type", "currency", "amount", "basis", "duration",
-    "duration_unit", "ask_price", "payout", "buy_price", "status",
+    "duration_unit", "ask_price", "payout", "buy_price", "stake_reserved", "status",
     "profit", "is_sold", "is_expired", "sold_for", "reason",
 }
 
@@ -139,12 +139,12 @@ class DerivContractLedger:
         states: dict[str, str] = {}
         for event in self.events():
             if event["event_type"] in {"buy_requested", "buy_unknown", "contract_bought"}:
-                amount = event["payload"].get("amount")
+                amount = event["payload"].get("stake_reserved")
                 if amount is None:
                     history = self.events(event["client_intent_id"])
                     amount = next(
-                        (item["payload"].get("amount") for item in history
-                         if item["event_type"] == "buy_requested"), None
+                        (item["payload"].get("stake_reserved", item["payload"].get("amount"))
+                         for item in history if item["event_type"] == "buy_requested"), None
                     )
                 if amount is not None:
                     states[event["client_intent_id"]] = str(amount)
