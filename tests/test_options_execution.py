@@ -108,6 +108,15 @@ class OptionsExecutionTests(unittest.TestCase):
             self.service.buy(intent, proposal)
         self.assertEqual(self.gateway.buy_calls, 0)
 
+    def test_payout_basis_reserves_actual_proposal_stake(self):
+        intent = DerivOptionsIntent(
+            "R_100", "CALL", "USD", Decimal("3"), ContractBasis.PAYOUT,
+            5, DurationUnit.TICKS, "payout-intent",
+        )
+        proposal = self.service.request_proposal(intent)
+        self.service.buy(intent, proposal)
+        self.assertEqual(self.ledger.open_stake_total(), "2")
+
     def test_ambiguous_buy_keeps_stake_reserved(self):
         intent = make_intent()
         self.ledger.append(intent.client_intent_id, "buy_requested", {"amount": "2"})
