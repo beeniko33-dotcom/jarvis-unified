@@ -56,10 +56,7 @@ class OptionsExecutionService:
         })
         return proposal
 
-    def buy(
-        self, intent: DerivOptionsIntent, proposal: DerivProposal,
-        *, proposal_received_at: datetime,
-    ) -> DerivBuyResult:
+    def buy(self, intent: DerivOptionsIntent, proposal: DerivProposal) -> DerivBuyResult:
         policy = self._policy
         if policy.account_mode != "demo":
             raise PermissionError("only an explicitly identified demo account is allowed")
@@ -71,13 +68,20 @@ class OptionsExecutionService:
             raise PermissionError("stake exceeds configured positive maximum")
         if policy.max_aggregate_stake <= 0:
             raise PermissionError("aggregate exposure limit must be configured")
-        if self._ledger.has_intent(intent.client_intent_id):
-            events = self._ledger.events(intent.client_intent_id)
-            if not any(e["event_type"] == "proposal_received" for e in events):
-                raise PermissionError("intent is already pending or has been attempted")
-            if any(e["event_type"] in {"buy_requested", "buy_unknown", "contract_bought"} for e in events):
-                raise PermissionError("buy already attempted; reconcile before any retry")
+        events = self._ledger.events(intent.client_intent_id)
+        proposal_events = [
+            event for event in events
+            if event["event_type"] == "proposal_received"
+            and event["payload"].get("proposal_id") == proposal.proposal_id
+        ]
+        if not proposal_events:
+            raise PermissionError("proposal was not issued and recorded for this intent")
+        if any(e["event_type"] in {"buy_requested", "buy_unknown", "contract_bought"} for e in events):
+            raise PermissionError("buy already attempted; reconcile before any retry")
+        if len(proposal_events) != 1:
+            raise PermissionError("proposal identity is ambiguous; reconcile before proceeding")
         now = self._clock()
+        proposal_received_at = datetime.fromisoformat(proposal_events[0]["occurred_at"])
         if proposal_received_at.tzinfo is None or now.tzinfo is None:
             raise ValueError("proposal timestamps must be timezone-aware")
         age = (now - proposal_received_at).total_seconds()
