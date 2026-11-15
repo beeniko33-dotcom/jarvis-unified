@@ -1,0 +1,9 @@
+{
+  "version": "eurusd-london-morning-6h-v1",
+  "timezone": "UTC",
+  "weekdays": [0, 1, 2, 3, 4],
+  "session_start_utc_hour": 7,
+  "session_end_utc_hour": 13,
+  "minimum_covered_hours": 6,
+  "closures": []
+}
