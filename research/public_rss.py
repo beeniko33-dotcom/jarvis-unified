@@ -24,7 +24,7 @@ MAX_ITEMS = 500
 MAX_TITLE_LENGTH = 500
 MAX_PUBLISHER_LENGTH = 200
 MAX_URL_LENGTH = 4096
-_XML_ENCODING = re.compile(r"""^\\s*<\\?xml[^>]*encoding\\s*=\\s*['"]([^'"]+)['"]""", re.IGNORECASE)
+_XML_ENCODING = re.compile("^\\s*<\\?xml[^>]*encoding\\s*=\\s*['\"]([^'\"]+)['\"]", re.IGNORECASE)
 _TAGS = re.compile(r"<[^>]*>")
 
 
@@ -86,7 +86,7 @@ def parse_public_feed(
     """Parse RSS 2.0 or Atom 1.0 headline metadata with explicit host allowlists."""
     if not isinstance(payload, bytes) or len(payload) > MAX_FEED_BYTES:
         raise ValueError("feed payload must be bytes within the 1 MB limit")
-    if not isinstance(publisher, str) or not publisher.strip() or len(publisher.strip()) > MAX_PUBLISHER_LENGTH:
+    if (not isinstance(publisher, str) or not publisher.strip()
         raise ValueError("publisher is required and must be at most 200 characters")
     if not isinstance(feed_url, str) or len(feed_url) > MAX_URL_LENGTH:
         raise ValueError("feed_url must be a string of at most 4096 characters")
@@ -96,7 +96,7 @@ def parse_public_feed(
         xml_text = payload.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise ValueError("feed XML must be UTF-8 encoded") from exc
-    if "\\x00" in xml_text:
+    if chr(0) in xml_text:
         raise ValueError("feed XML must be UTF-8 encoded without NUL characters")
     declaration = _XML_ENCODING.match(xml_text)
     if declaration and declaration.group(1).lower().replace("_", "-") not in {"utf-8", "utf8"}:
