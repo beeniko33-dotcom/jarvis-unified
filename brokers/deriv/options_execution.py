@@ -64,8 +64,8 @@ class OptionsExecutionService:
             raise PermissionError("options execution kill switch is engaged")
         if not policy.operator_enabled:
             raise PermissionError("explicit operator enablement is required")
-        if policy.max_stake <= 0 or intent.amount > policy.max_stake:
-            raise PermissionError("stake exceeds configured positive maximum")
+        if policy.max_stake <= 0 or proposal.ask_price > policy.max_stake:
+            raise PermissionError("proposal stake exceeds configured positive maximum")
         if policy.max_aggregate_stake <= 0:
             raise PermissionError("aggregate exposure limit must be configured")
         events = self._ledger.events(intent.client_intent_id)
@@ -89,7 +89,7 @@ class OptionsExecutionService:
             raise PermissionError("proposal is stale or timestamp is invalid")
         if proposal.ask_price > intent.amount and intent.basis.value == "stake":
             raise PermissionError("proposal ask price exceeds requested stake")
-        projected = Decimal(self._ledger.open_stake_total()) + intent.amount
+        projected = Decimal(self._ledger.open_stake_total()) + proposal.ask_price
         if projected > policy.max_aggregate_stake:
             raise PermissionError("aggregate stake limit would be exceeded")
 
@@ -99,6 +99,7 @@ class OptionsExecutionService:
         self._ledger.append(intent.client_intent_id, "buy_requested", {
             "proposal_id": proposal.proposal_id,
             "amount": str(intent.amount),
+            "stake_reserved": str(proposal.ask_price),
             "currency": intent.currency,
             "ask_price": str(proposal.ask_price),
             "payout": str(proposal.payout),
