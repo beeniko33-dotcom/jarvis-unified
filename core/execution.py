@@ -38,7 +38,7 @@ def _safe_order_metadata(metadata: object) -> tuple[dict, dict]:
         if not value or len(value) > 128 or any(marker in lowered for marker in _SECRET_MARKERS):
             continue
         if key in _HASH_FIELDS:
-            if not (8 <= len(value) <= 128 and all(ch in "0123456789abcdefABCDEF" for ch in value)):
+            if not (len(value) == 64 and all(ch in "0123456789abcdefABCDEF" for ch in value)):
                 continue
         elif key == "quote_timestamp":
             from datetime import datetime
