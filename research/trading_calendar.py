@@ -1,6 +1,6 @@
 """Immutable, versioned UTC trading calendar for Level 3 forward evidence.
 
-The calendar defines a six-hour London-morning observation window (07:00-13:00 UTC).
+The calendar defines a two-hour London-morning observation window (07:00-09:00 UTC).
 It reduces daily collection time, not the number of required trading days. Only
 explicitly listed closures are neutral; unknown/missing weekdays remain expected days.
 """
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 
