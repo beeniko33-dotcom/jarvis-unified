@@ -14,4 +14,4 @@ This module is read-only market-observation intake. It does not generate trade o
 Provider signatures, independent provenance verification, normalized features, opportunity ranking, forecast calibration, outcome attribution, baseline comparison and strategy promotion are deliberately separate follow-up work. This foundation cannot certify source authenticity or feed execution.
 
 ## Tests
-`python -m unittest tests.test_research_evidence_pipeline -v`
+`python -m unittest discover -s tests -p 'test_research_evidence_pipeline.py' -v`
