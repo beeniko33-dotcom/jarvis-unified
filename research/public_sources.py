@@ -202,7 +202,9 @@ def ingest_public_records(
     It does not promote any record to verified evidence.
     """
     received = _aware_utc(now or datetime.now(timezone.utc), "now")
-    db = sqlite3.connect(str(provenance_database), timeout=10)
+    provenance_path = Path(provenance_database)
+    provenance_path.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(str(provenance_path), timeout=10)
     accepted = duplicates = processed = 0
     try:
         db.execute("PRAGMA journal_mode=WAL")
