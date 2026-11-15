@@ -278,7 +278,7 @@ class ForwardEvidenceStore:
             "provider_signature_or_equivalent_verifier_configured": False,
             "missing_expected_trading_days_break_streak": True,
             "non_trading_days_are_neutral_only_when_calendar_says_so": True,
-            "daily_coverage_requires_all_six_hourly_buckets": True,
+            "daily_coverage_requires_all_two_hourly_buckets": True,
             "latest_verified_observation_age_seconds": latest_age.total_seconds() if latest_age is not None else None,
             "latest_verified_observation_fresh": latest_is_fresh,
             "maximum_verified_observation_age_seconds": self.max_observation_age.total_seconds(),
