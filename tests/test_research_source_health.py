@@ -37,6 +37,10 @@ class SourceHealthTests(unittest.TestCase):
         report = self.assess([self.event(62), self.event(0)])
         self.assertEqual(report.missing_intervals, 0)
 
+    def test_half_interval_boundary_rounds_up_consistently(self):
+        report = self.assess([self.event(90), self.event(0)])
+        self.assertEqual(report.missing_intervals, 1)
+
     def test_outage_is_reported_when_last_event_is_too_old(self):
         report = self.assess([self.event(240)])
         self.assertTrue(report.outage)
