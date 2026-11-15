@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Callable
 
 from core.sqlite_wal import enable_wal
+from research.trading_calendar import TradingCalendar
 
 REQUIRED = {
     "observed_at", "instrument", "provider", "source", "interval",
@@ -80,15 +81,19 @@ class ForwardEvidenceStore:
         clock: Callable[[], datetime] = utc_now,
         max_observation_age: timedelta = timedelta(minutes=10),
         future_tolerance: timedelta = timedelta(minutes=1),
+        calendar_path: Path | None = None,
     ):
         values = (instrument, provider, interval, strategy_id, strategy_version)
         if any(not isinstance(v, str) or not v.strip() for v in values):
             raise ValueError("instrument, provider, interval and strategy identity must be explicit")
         if max_observation_age <= timedelta(0) or future_tolerance < timedelta(0):
             raise ValueError("observation age must be positive and future tolerance non-negative")
+        self.calendar = TradingCalendar.load(calendar_path) if calendar_path else TradingCalendar.load()
         self.config = {
             "instrument": instrument, "provider": provider, "interval": interval,
             "strategy_id": strategy_id, "strategy_version": strategy_version,
+            "trading_calendar_version": self.calendar.version,
+            "trading_calendar_sha256": self.calendar.sha256,
         }
         self.clock = clock
         self.max_observation_age = max_observation_age
@@ -211,9 +216,13 @@ class ForwardEvidenceStore:
     def report(self, required_days: int = 30) -> dict:
         if required_days < 1:
             raise ValueError("required_days must be at least 1")
-        days = [row[0] for row in self.db.execute(
-            "SELECT DISTINCT utc_day FROM observations WHERE provenance_verified=1 ORDER BY utc_day"
+        verified_timestamps = [row[0] for row in self.db.execute(
+            "SELECT observed_at FROM observations WHERE provenance_verified=1 ORDER BY observed_at"
         )]
+        candidate_timestamps = [row[0] for row in self.db.execute(
+            "SELECT observed_at FROM observations WHERE provenance_verified=0 ORDER BY observed_at"
+        )]
+        days = sorted({datetime.fromisoformat(value).date().isoformat() for value in verified_timestamps})
         latest = days[-1] if days else None
         latest_verified = self.db.execute(
             "SELECT observed_at FROM observations WHERE provenance_verified=1 ORDER BY observed_at DESC LIMIT 1"
@@ -227,14 +236,11 @@ class ForwardEvidenceStore:
             latest_age is not None
             and -self.future_tolerance <= latest_age <= self.max_observation_age
         )
-        streak = 0
-        expected = datetime.fromisoformat(latest).date() if latest else None
-        for day in reversed(days):
-            current = datetime.fromisoformat(day).date()
-            if current != expected:
-                break
-            streak += 1
-            expected = current - timedelta(days=1)
+        streak, latest_completed_trading_day = self.calendar.consecutive_covered_days(
+            verified_timestamps, now
+        )
+        candidate_day = self.calendar.latest_completed_trading_day(now)
+        candidate_coverage = self.calendar.daily_coverage(candidate_timestamps, candidate_day)
         valid_chain = self.verify_chain()
         total = self.db.execute("SELECT COUNT(*) FROM observations").fetchone()[0]
         verified_count = self.db.execute(
@@ -259,19 +265,26 @@ class ForwardEvidenceStore:
             "distinct_verified_utc_days": len(days),
             "first_verified_utc_day": days[0] if days else None,
             "latest_verified_utc_day": latest,
-            "latest_consecutive_verified_utc_day_streak": streak,
-            "required_consecutive_utc_days": required_days,
+            "latest_consecutive_verified_trading_days_streak": streak,
+            "required_consecutive_trading_days": required_days,
+            "latest_completed_expected_trading_day": latest_completed_trading_day,
+            "trading_calendar_version": self.calendar.version,
+            "trading_calendar_sha256": self.calendar.sha256,
+            "daily_candidate_coverage": candidate_coverage,
+            "daily_candidate_coverage_is_verified": False,
             "stale_observations_rejected": True,
             "ingestion_time_is_collector_generated": True,
             "provider_signature_or_equivalent_verifier_configured": False,
-            "missing_days_break_streak": True,
+            "missing_expected_trading_days_break_streak": True,
+            "non_trading_days_are_neutral_only_when_calendar_says_so": True,
+            "daily_coverage_requires_all_six_hourly_buckets": True,
             "latest_verified_observation_age_seconds": latest_age.total_seconds() if latest_age is not None else None,
             "latest_verified_observation_fresh": latest_is_fresh,
             "maximum_verified_observation_age_seconds": self.max_observation_age.total_seconds(),
             "event_chain_valid": valid_chain,
             "level_3_forward_evidence_gate": gate,
             "level_3_certification": False,
-            "note": "A coverage pass is necessary, not sufficient, for Level 3 certification. The verifier must be provider-specific and independently audited; the CLI has no provider verifier by default.",
+            "note": "A calendar coverage pass is necessary, not sufficient, for Level 3 certification. Current collectors store only unverified candidates; candidate coverage never earns verified-day credit. The provider verifier must be independently audited.",
         }
 
 
