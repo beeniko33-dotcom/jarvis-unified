@@ -4,7 +4,8 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from dataclasses import asdict, dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -68,7 +69,7 @@ class ResearchEvidencePipeline:
         Path(self.database).parent.mkdir(parents=True, exist_ok=True)
         self.max_age_seconds = max_age_seconds
         self.max_future_skew_seconds = max_future_skew_seconds
-        with self._connect() as db:
+        with self._session() as db:
             db.execute("""
                 CREATE TABLE IF NOT EXISTS market_observations (
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,6 +97,15 @@ class ResearchEvidencePipeline:
         db.execute("PRAGMA synchronous=FULL")
         return db
 
+    @contextmanager
+    def _session(self):
+        db = self._connect()
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
+
     def ingest(self, observation: MarketObservation, *, now: datetime | None = None) -> IngestResult:
         now = now or datetime.now(timezone.utc)
         if now.tzinfo is None or now.utcoffset() is None:
@@ -106,7 +116,7 @@ class ResearchEvidencePipeline:
         age = (now - event_time).total_seconds()
         stale = age > self.max_age_seconds
         clock_skew = age < -self.max_future_skew_seconds or (received_at - now).total_seconds() > self.max_future_skew_seconds
-        with self._connect() as db:
+        with self._session() as db:
             duplicate = db.execute(
                 "SELECT 1 FROM market_observations WHERE content_hash = ?",
                 (observation.content_hash,),
@@ -137,7 +147,7 @@ class ResearchEvidencePipeline:
         if source_id is not None:
             query += " WHERE source_id = ?"
             args = (source_id,)
-        with self._connect() as db:
+        with self._session() as db:
             count, out_of_order, stale, skew, unique = db.execute(query, args).fetchone()
             sources = db.execute(
                 "SELECT DISTINCT source_id FROM market_observations" + (" WHERE source_id = ?" if source_id else "") + " ORDER BY source_id",
