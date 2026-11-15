@@ -93,6 +93,8 @@ class OptionsExecutionService:
         if projected > policy.max_aggregate_stake:
             raise PermissionError("aggregate stake limit would be exceeded")
 
+        # Atomic durable claim prevents concurrent workers from submitting twice.
+        self._ledger.claim_buy(intent.client_intent_id)
         # Durable intent is recorded before the non-idempotent remote side effect.
         self._ledger.append(intent.client_intent_id, "buy_requested", {
             "proposal_id": proposal.proposal_id,
