@@ -67,6 +67,9 @@ class ForwardValidationTests(unittest.TestCase):
         self.assertEqual(report["verified_observation_count"], 0)
         self.assertEqual(report["latest_consecutive_verified_trading_days_streak"], 0)
         self.assertEqual(report["level_3_forward_evidence_gate"], "BLOCKED_PROVENANCE")
+        self.assertEqual(report["provisional_assessment_gate"], "BLOCKED_PROVENANCE")
+        self.assertFalse(report["provisional_assessment_ready"])
+        self.assertFalse(report["provisional_assessment_is_level_3_certification"])
         self.assertFalse(report["level_3_certification"])
 
     def test_public_constructor_rejects_caller_supplied_verifier(self):
