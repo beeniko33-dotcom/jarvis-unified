@@ -11,7 +11,10 @@ from core.models import OrderRequest, Side
 from research.execution_observations import ExecutionObservationJournal
 from research.paper_reflection_bridge import build_paper_reflections
 from research.reflection import ReflectionStore
+from brokers.paper.broker import _paper_metadata
 from research.paper_ledger_importer import (
+    _order_summary,
+    _working_summary,
     PaperLedgerImportError,
     import_paper_ledger,
 )
@@ -160,6 +163,54 @@ class PaperLedgerImporterTests(unittest.TestCase):
         self.assertEqual(
             restored.get_working_orders()[0].metadata["research_lineage"]["strategy_id"],
             "breakout-v1",
+        )
+
+
+    def test_import_summaries_revalidate_lineage_and_drop_untrusted_metadata(self):
+        raw = {
+            "research_lineage": {
+                "strategy_id": "mean-reversion-v3",
+                "strategy_config_hash": "a" * 64,
+                "data_hash": "b" * 32,
+                "quote_timestamp": "2026-11-14T12:00:00",
+                "experiment_id": "exp-9",
+                "signal_id": "sig-9",
+                "unsafe_extra": "not-allowed",
+                "strategy_version": "password=hunter2",
+            },
+            "api_key": "must-not-be-imported",
+            "arbitrary": "free-form secret",
+        }
+        order = {
+            "order_id": "order-9",
+            "client_order_id": "client-9",
+            "metadata": raw,
+        }
+        expected = {
+            "research_lineage": {
+                "strategy_id": "mean-reversion-v3",
+                "strategy_config_hash": "a" * 64,
+                "experiment_id": "exp-9",
+                "signal_id": "sig-9",
+            }
+        }
+        self.assertEqual(_paper_metadata(raw), expected)
+        self.assertEqual(_order_summary(order)["metadata"], expected)
+        self.assertEqual(_working_summary(order)["metadata"], expected)
+        self.assertNotIn("must-not-be-imported", str(_order_summary(order)))
+        self.assertNotIn("free-form secret", str(_working_summary(order)))
+
+    def test_paper_metadata_rejects_non_sha256_digest_lengths(self):
+        raw = {
+            "research_lineage": {
+                "strategy_config_hash": "a" * 32,
+                "signal_context_hash": "b" * 128,
+                "data_hash": "c" * 64,
+            }
+        }
+        self.assertEqual(
+            _paper_metadata(raw),
+            {"research_lineage": {"data_hash": "c" * 64}},
         )
 
 
