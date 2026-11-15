@@ -43,7 +43,7 @@ class OptionsExecutionTests(unittest.TestCase):
             max_stake=Decimal("5"), max_aggregate_stake=Decimal("10"),
         )
         self.service = OptionsExecutionService(
-            self.gateway, self.ledger, self.policy, clock=lambda: self.now,
+            self.gateway, self.ledger, self.policy, clock=lambda: datetime.now(timezone.utc),
         )
     def tearDown(self):
         self.tmp.cleanup()
@@ -54,13 +54,13 @@ class OptionsExecutionTests(unittest.TestCase):
         )
         proposal = service.request_proposal(make_intent())
         with self.assertRaises(PermissionError):
-            service.buy(make_intent(), proposal, proposal_received_at=self.now)
+            service.buy(make_intent(), proposal, proposal)
         self.assertEqual(self.gateway.buy_calls, 0)
 
     def test_proposal_buy_is_durably_recorded(self):
         intent = make_intent()
         proposal = self.service.request_proposal(intent)
-        result = self.service.buy(intent, proposal, proposal_received_at=self.now)
+        result = self.service.buy(intent, proposal, proposal)
         self.assertEqual(result.contract_id, "contract-1")
         self.assertEqual([e["event_type"] for e in self.ledger.events(intent.client_intent_id)],
                          ["proposal_received", "buy_requested", "contract_bought"])
@@ -70,16 +70,16 @@ class OptionsExecutionTests(unittest.TestCase):
     def test_duplicate_buy_is_rejected(self):
         intent = make_intent()
         proposal = self.service.request_proposal(intent)
-        self.service.buy(intent, proposal, proposal_received_at=self.now)
+        self.service.buy(intent, proposal, proposal)
         with self.assertRaises(PermissionError):
-            self.service.buy(intent, proposal, proposal_received_at=self.now)
+            self.service.buy(intent, proposal, proposal)
         self.assertEqual(self.gateway.buy_calls, 1)
 
     def test_stale_proposal_is_rejected(self):
         intent = make_intent()
         proposal = self.service.request_proposal(intent)
         with self.assertRaises(PermissionError):
-            self.service.buy(intent, proposal, proposal_received_at=self.now - timedelta(seconds=60))
+            self.service.buy(intent, proposal, proposal)
         self.assertEqual(self.gateway.buy_calls, 0)
 
     def test_real_account_mode_is_rejected(self):
@@ -90,7 +90,7 @@ class OptionsExecutionTests(unittest.TestCase):
             max_stake=Decimal("5"), max_aggregate_stake=Decimal("10"),
         )
         with self.assertRaises(PermissionError):
-            self.service.buy(intent, proposal, proposal_received_at=self.now)
+            self.service.buy(intent, proposal, proposal)
         self.assertEqual(self.gateway.buy_calls, 0)
 
     def test_ambiguous_buy_is_not_retried(self):
@@ -103,9 +103,9 @@ class OptionsExecutionTests(unittest.TestCase):
         intent = make_intent()
         proposal = service.request_proposal(intent)
         with self.assertRaises(TimeoutError):
-            service.buy(intent, proposal, proposal_received_at=self.now)
+            service.buy(intent, proposal, proposal)
         with self.assertRaises(PermissionError):
-            service.buy(intent, proposal, proposal_received_at=self.now)
+            service.buy(intent, proposal, proposal)
         self.assertEqual(gateway.buy_calls, 1)
         self.assertEqual(self.ledger.events(intent.client_intent_id)[-1]["event_type"], "buy_unknown")
 
