@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import csv
 import json
-import math
 import sqlite3
 import urllib.error
 import urllib.parse
@@ -86,12 +85,15 @@ def fetch_frankfurter_daily(
         headers={"Accept": "application/json", "User-Agent": USER_AGENT},
         method="GET",
     )
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    opener = urllib.request.build_opener(_NoRedirect)
     try:
-        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+        with opener.open(request, timeout=timeout_seconds) as response:
             if response.status != 200:
                 raise RuntimeError(f"Frankfurter returned HTTP {response.status}")
-            if response.geturl().split("/", 3)[:3] != ["https:", "", FRANKFURTER_HOST]:
-                raise RuntimeError("unexpected redirect destination")
             raw = response.read(MAX_RESPONSE_BYTES + 1)
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"Frankfurter returned HTTP {exc.code}") from None
@@ -222,13 +224,9 @@ def ingest_public_records(
                 provenance TEXT NOT NULL CHECK(provenance = 'candidate_unverified')
             )
         """)
-        for record in records:
+        pending = list(records)
+        for record in pending:
             processed += 1
-            result = pipeline.ingest(record.observation, now=received)
-            if result.accepted:
-                accepted += 1
-            if result.duplicate:
-                duplicates += 1
             meta = record.metadata
             db.execute("""
                 INSERT OR IGNORE INTO public_source_provenance
@@ -240,7 +238,15 @@ def ingest_public_records(
                 meta.source_url, meta.terms_url, _aware_utc(meta.retrieved_at, "retrieved_at").isoformat(),
                 meta.licence_status, meta.data_class,
             ))
+        # Commit provenance first: an intake failure can leave an orphan metadata
+        # row, but cannot leave an ingested observation without its source record.
         db.commit()
+        for record in pending:
+            result = pipeline.ingest(record.observation, now=received)
+            if result.accepted:
+                accepted += 1
+            if result.duplicate:
+                duplicates += 1
     except Exception:
         db.rollback()
         raise
