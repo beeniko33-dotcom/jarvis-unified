@@ -135,7 +135,7 @@ class DerivContractLedger:
         return row is not None
 
     def open_stake_total(self) -> str:
-    """Conservative exposure: pending, ambiguous and open buys remain reserved."""
+        """Conservative exposure: pending, ambiguous and open buys remain reserved."""
         states: dict[str, str] = {}
         for event in self.events():
             if event["event_type"] in {"buy_requested", "buy_unknown", "contract_bought"}:
