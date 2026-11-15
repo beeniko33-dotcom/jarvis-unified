@@ -1,8 +1,9 @@
 # Public RSS/Atom headline metadata intake
 
 ## What this does
-- Parses RSS 2.0 and Atom 1.0 XML bytes supplied by an upstream caller.
+- Parses RSS 2.0 and Atom 1.0 UTF-8 XML bytes supplied by an upstream caller; UTF-16/UTF-32 and non-UTF-8 declarations fail closed.
 - Requires explicit allowlists for both feed hosts and article-link hosts.
+- Rejects DTD/entity declarations after strict UTF-8 decoding, with NUL-byte rejection to prevent UTF-16/32 declaration obfuscation; publisher and URL lengths are bounded.
 - Stores publisher, feed URL, canonical article URL, headline, publication time, retrieval time and a content hash.
 - Uses an append-only SQLite table with hash-based deduplication.
 - Keeps every headline `candidate_unverified`.
