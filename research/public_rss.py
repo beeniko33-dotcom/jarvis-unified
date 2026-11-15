@@ -24,7 +24,7 @@ MAX_ITEMS = 500
 MAX_TITLE_LENGTH = 500
 MAX_PUBLISHER_LENGTH = 200
 MAX_URL_LENGTH = 4096
-_XML_ENCODING = re.compile("^\\s*<\\?xml[^>]*encoding\\s*=\\s*['\"]([^'\"]+)['\"]", re.IGNORECASE)
+_XML_ENCODING = re.compile(r"^\s*<\?xml[^>]*encoding\s*=\s*['"]([^'"]+)['"]", re.IGNORECASE)
 _TAGS = re.compile(r"<[^>]*>")
 
 
