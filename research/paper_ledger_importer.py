@@ -56,7 +56,7 @@ def _working_summary(order: dict) -> dict:
         "limit_price", "filled_quantity", "average_fill_price", "status",
         "created_at", "applied_fill_ids", "metadata",
     )
-    return {key: order.get(key) for key in keys}
+    return {key: (_paper_metadata(order.get(key, {})) if key == "metadata" else order.get(key)) for key in keys}
 
 
 def import_paper_ledger(
