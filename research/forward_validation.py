@@ -145,7 +145,8 @@ class ForwardEvidenceStore:
     def ingest(self, observation: dict) -> bool:
         item = validate_observation(observation)
         observed = item.pop("_parsed_observed_at")
-        for key, expected in self.config.items():
+        for key in ("instrument", "provider", "interval", "strategy_id", "strategy_version"):
+            expected = self.config[key]
             if item[key] != expected:
                 raise ValueError(f"{key} mismatch: expected {expected!r}")
         now = self.clock()
