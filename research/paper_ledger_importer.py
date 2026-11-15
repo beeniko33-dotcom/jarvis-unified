@@ -14,6 +14,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
+from brokers.paper.broker import _paper_metadata
 from research.execution_observations import ExecutionObservationJournal
 
 
@@ -46,7 +47,7 @@ def _order_summary(order: dict) -> dict:
         "fill_price", "status", "created_at", "filled_quantity",
         "remaining_quantity", "metadata",
     )
-    return {key: order.get(key) for key in keys}
+    return {key: (_paper_metadata(order.get(key, {})) if key == "metadata" else order.get(key)) for key in keys}
 
 
 def _working_summary(order: dict) -> dict:
