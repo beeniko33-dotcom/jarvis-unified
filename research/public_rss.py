@@ -87,6 +87,7 @@ def parse_public_feed(
     if not isinstance(payload, bytes) or len(payload) > MAX_FEED_BYTES:
         raise ValueError("feed payload must be bytes within the 1 MB limit")
     if (not isinstance(publisher, str) or not publisher.strip()
+            or len(publisher.strip()) > MAX_PUBLISHER_LENGTH):
         raise ValueError("publisher is required and must be at most 200 characters")
     if not isinstance(feed_url, str) or len(feed_url) > MAX_URL_LENGTH:
         raise ValueError("feed_url must be a string of at most 4096 characters")
