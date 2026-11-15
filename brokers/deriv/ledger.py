@@ -116,21 +116,20 @@ class DerivContractLedger:
         return row is not None
 
     def open_stake_total(self) -> str:
-        """Conservative exposure: all bought contracts not yet sold/settled."""
-        states: dict[str, tuple[str | None, str | None]] = {}
+    """Conservative exposure: pending, ambiguous and open buys remain reserved."""
+        states: dict[str, str] = {}
         for event in self.events():
-            if event["event_type"] == "contract_bought":
-                states[event["client_intent_id"]] = (
-                    event["contract_id"], event["payload"].get("buy_price")
-                )
+            if event["event_type"] in {"buy_requested", "buy_unknown", "contract_bought"}:
+                amount = event["payload"].get("amount")
+                if amount is None:
+                    history = self.events(event["client_intent_id"])
+                    amount = next(
+                        (item["payload"].get("amount") for item in history
+                         if item["event_type"] == "buy_requested"), None
+                    )
+                if amount is not None:
+                    states[event["client_intent_id"]] = str(amount)
             elif event["event_type"] in {"contract_sold", "contract_settled"}:
                 states.pop(event["client_intent_id"], None)
         from decimal import Decimal
-        total = Decimal("0")
-        for intent_id in states:
-            history = self.events(intent_id)
-            for event in history:
-                if event["event_type"] == "buy_requested":
-                    total += Decimal(str(event["payload"]["amount"]))
-                    break
-        return str(total)
+        return str(sum((Decimal(amount) for amount in states.values()), Decimal("0")))
