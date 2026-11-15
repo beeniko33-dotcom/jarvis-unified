@@ -214,9 +214,9 @@ class ForwardEvidenceStore:
             previous = record_hash
         return True
 
-    def report(self, required_days: int = 30) -> dict:
-        if required_days < 1:
-            raise ValueError("required_days must be at least 1")
+    def report(self, required_days: int = 30, provisional_required_days: int = 2) -> dict:
+        if required_days < 1 or provisional_required_days < 1:
+            raise ValueError("required and provisional day thresholds must be at least 1")
         verified_timestamps = [row[0] for row in self.db.execute(
             "SELECT observed_at FROM observations WHERE provenance_verified=1 ORDER BY observed_at"
         )]
@@ -248,15 +248,20 @@ class ForwardEvidenceStore:
             "SELECT COUNT(*) FROM observations WHERE provenance_verified=1"
         ).fetchone()[0]
         unverified_count = total - verified_count
-        ready = bool(valid_chain and verified_count and latest_is_fresh and streak >= required_days)
         if not valid_chain:
             gate = "BLOCKED_CHAIN"
+            provisional_gate = "BLOCKED_CHAIN"
         elif not verified_count:
             gate = "BLOCKED_PROVENANCE"
+            provisional_gate = "BLOCKED_PROVENANCE"
         elif not latest_is_fresh:
             gate = "BLOCKED_STALE"
+            provisional_gate = "BLOCKED_STALE"
         else:
             gate = "PASS" if streak >= required_days else "NOT_MET"
+            provisional_gate = (
+                "PROVISIONAL_PASS" if streak >= provisional_required_days else "NOT_MET"
+            )
         return {
             "evidence_class": "provider_verified_forward_paper_candidates_only",
             "configuration": self.config,
@@ -268,6 +273,10 @@ class ForwardEvidenceStore:
             "latest_verified_utc_day": latest,
             "latest_consecutive_verified_trading_days_streak": streak,
             "required_consecutive_trading_days": required_days,
+            "provisional_assessment_required_consecutive_trading_days": provisional_required_days,
+            "provisional_assessment_gate": provisional_gate,
+            "provisional_assessment_ready": provisional_gate == "PROVISIONAL_PASS",
+            "provisional_assessment_is_level_3_certification": False,
             "latest_completed_expected_trading_day": latest_completed_trading_day,
             "trading_calendar_version": self.calendar.version,
             "trading_calendar_sha256": self.calendar.sha256,
@@ -298,7 +307,10 @@ def main() -> int:
     parser.add_argument("--interval", required=True)
     parser.add_argument("--strategy-id", required=True)
     parser.add_argument("--strategy-version", required=True)
-    parser.add_argument("--required-days", type=int, default=30)
+    parser.add_argument("--required-days", type=int, default=30,
+                        help="Full Level 3 consecutive trading-day requirement (default: 30)")
+    parser.add_argument("--provisional-days", type=int, default=2,
+                        help="Non-certifying provisional assessment threshold (default: 2)")
     args = parser.parse_args()
     store = ForwardEvidenceStore(
         args.db, instrument=args.instrument, provider=args.provider, interval=args.interval,
@@ -316,7 +328,7 @@ def main() -> int:
                     parser.error(f"line {line_no}: {exc}")
                 accepted += int(inserted)
                 duplicates += int(not inserted)
-        result = store.report(args.required_days)
+        result = store.report(args.required_days, args.provisional_days)
         result["new_observations_ingested"] = accepted
         result["duplicate_observations_ignored"] = duplicates
         print(json.dumps(result, indent=2))
