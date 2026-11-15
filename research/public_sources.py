@@ -203,7 +203,7 @@ def ingest_public_records(
     """
     received = _aware_utc(now or datetime.now(timezone.utc), "now")
     db = sqlite3.connect(str(provenance_database), timeout=10)
-    accepted = duplicates = 0
+    accepted = duplicates = processed = 0
     try:
         db.execute("PRAGMA journal_mode=WAL")
         db.execute("PRAGMA synchronous=FULL")
@@ -221,6 +221,7 @@ def ingest_public_records(
             )
         """)
         for record in records:
+            processed += 1
             result = pipeline.ingest(record.observation, now=received)
             if result.accepted:
                 accepted += 1
@@ -246,7 +247,7 @@ def ingest_public_records(
     return {
         "accepted": accepted,
         "duplicates": duplicates,
-        "provenance_records": len(list(records)) if not isinstance(records, list) else len(records),
+        "provenance_records": processed,
         "verified_observations": 0,
         "evidence_eligible": 0,
     }
