@@ -42,6 +42,15 @@ BLOCKED_NETWORKS = [
     ipaddress.ip_network("fc00::/7"),
     ipaddress.ip_network("fe80::/10"),
     ipaddress.ip_network("ff00::/8"),
+    # Deprecated site-local space is not classified private by every Python version.
+    ipaddress.ip_network("fec0::/10"),
+    # Transition mechanisms that embed an IPv4 address. A gateway could translate these to
+    # loopback, private or metadata IPv4 targets, so block them outright instead of relying on
+    # the stdlib's per-version classification.
+    ipaddress.ip_network("64:ff9b::/96"),  # NAT64
+    ipaddress.ip_network("64:ff9b:1::/48"),  # local-use NAT64
+    ipaddress.ip_network("2002::/16"),  # 6to4
+    ipaddress.ip_network("2001::/32"),  # Teredo
 ]
 
 

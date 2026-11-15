@@ -42,6 +42,39 @@ class RiskEngineTests(unittest.TestCase):
         )
         self.assertFalse(decision.allowed)
 
+    def test_non_decimal_order_values_are_declined_not_raised(self):
+        # OrderRequest does not enforce types; the gate must decline cleanly, never raise.
+        for quantity, price in (
+            (0.1, Decimal("10")),
+            (Decimal("0.1"), 10),
+            ("0.1", Decimal("10")),
+            (Decimal("0.1"), None),
+            (float("nan"), Decimal("10")),
+        ):
+            with self.subTest(quantity=quantity, price=price):
+                order = OrderRequest("EURUSD", Side.BUY, quantity, price, "typed")
+                decision = self.risk.evaluate(order, daily_realized_pnl=Decimal("0"), open_positions=0)
+                self.assertFalse(decision.allowed)
+                self.assertIn("Decimal", decision.reason)
+
+    def test_non_decimal_risk_inputs_are_declined_not_raised(self):
+        for field_name in (
+            "daily_realized_pnl",
+            "unrealized_pnl",
+            "commission_paid",
+            "symbol_exposure",
+            "reserved_symbol_notional",
+            "correlated_exposure",
+            "reserved_group_notional",
+        ):
+            for bad in (0, 1.5, "0", None):
+                with self.subTest(field=field_name, value=bad):
+                    kwargs = {"daily_realized_pnl": Decimal("0"), "open_positions": 0}
+                    kwargs[field_name] = bad
+                    decision = self.risk.evaluate(self.order, **kwargs)
+                    self.assertFalse(decision.allowed)
+                    self.assertIn("Decimal", decision.reason)
+
     def test_rejects_non_finite_pnl(self):
         decision = self.risk.evaluate(
             self.order, daily_realized_pnl=Decimal("0"),

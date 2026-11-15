@@ -1,3 +1,4 @@
+import ipaddress
 import socket
 import subprocess
 import threading
@@ -7,6 +8,7 @@ from unittest.mock import Mock, patch
 
 from packages.scraper.safe_fetch import (
     SafeFetchError,
+    _is_blocked_ip,
     _PinnedHTTPConnection,
     _PinnedHTTPSConnection,
     _validate_url,
@@ -50,6 +52,38 @@ class SafeFetchTests(unittest.TestCase):
         for allowed_hosts in ([], None):
             with self.subTest(allowed_hosts=allowed_hosts), self.assertRaises(SafeFetchError):
                 safe_fetch_url("https://example.com/", allowed_hosts=allowed_hosts)
+
+    def test_blocked_ip_literals_cover_embedded_ipv4_and_special_ranges(self):
+        # Locks in behavior independent of the Python version's ipaddress classification.
+        blocked = (
+            "::ffff:127.0.0.1",  # IPv4-mapped loopback
+            "::7f00:1",  # IPv4-compatible loopback
+            "64:ff9b::a9fe:a9fe",  # NAT64 -> cloud metadata
+            "64:ff9b::7f00:1",  # NAT64 -> loopback
+            "64:ff9b:1::a9fe:a9fe",  # local-use NAT64
+            "2002:7f00:1::",  # 6to4 -> loopback
+            "2002:a9fe:a9fe::",  # 6to4 -> cloud metadata
+            "2001:0:4136:e378:8000:63bf:3fff:fdd2",  # Teredo
+            "fec0::1",  # deprecated site-local
+            "fe80::1",
+            "fd00::1",
+            "100.64.0.1",
+            "169.254.169.254",
+        )
+        for literal in blocked:
+            with self.subTest(literal=literal):
+                self.assertTrue(_is_blocked_ip(ipaddress.ip_address(literal)))
+        for literal in ("93.184.216.34", "2606:4700:4700::1111"):
+            with self.subTest(literal=literal):
+                self.assertFalse(_is_blocked_ip(ipaddress.ip_address(literal)))
+
+    def test_hostname_resolving_to_embedded_ipv4_address_is_rejected(self):
+        for answer in ("64:ff9b::a9fe:a9fe", "2002:7f00:1::", "::ffff:169.254.169.254", "fec0::1"):
+            with self.subTest(answer=answer), patch(
+                "packages.scraper.safe_fetch._resolve_dns", return_value=[answer]
+            ):
+                with self.assertRaisesRegex(SafeFetchError, "blocked address"):
+                    _validate_url("https://example.com/")
 
     def test_is_public_hostname_localhost_false(self):
         self.assertFalse(is_public_hostname("localhost"))
