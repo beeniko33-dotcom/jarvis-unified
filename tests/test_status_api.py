@@ -136,6 +136,50 @@ class StatusApiTests(unittest.TestCase):
         with urlopen(self.base + path, timeout=2) as response:
             return response.read()
 
+    def test_dashboard_has_strict_csp_and_no_inline_code(self):
+        import re
+
+        _, response = self._raw_get("/dashboard", "127.0.0.1")
+        csp = response.headers["Content-Security-Policy"]
+        for directive in (
+            "default-src 'none'",
+            "script-src 'self'",
+            "style-src 'self'",
+            "connect-src 'self'",
+            "frame-ancestors 'none'",
+            "base-uri 'none'",
+        ):
+            self.assertIn(directive, csp)
+        self.assertNotIn("unsafe-inline", csp)
+        self.assertNotIn("unsafe-eval", csp)
+
+        html = self._get("/dashboard").decode()
+        # The CSP only holds if the page really has no inline script, style, or handlers.
+        self.assertIsNone(re.search(r"<script(?![^>]*\bsrc=)", html))
+        self.assertNotIn("<style", html)
+        self.assertIsNone(re.search(r"\sstyle\s*=", html))
+        self.assertIsNone(re.search(r"\son[a-z]+\s*=", html))
+
+    def test_csp_is_only_needed_on_html_and_assets_have_correct_types(self):
+        _, js = self._raw_get("/dashboard.js", "127.0.0.1")
+        _, css = self._raw_get("/dashboard.css", "127.0.0.1")
+        self.assertIn("text/javascript", js.headers["Content-Type"])
+        self.assertIn("text/css", css.headers["Content-Type"])
+        self.assertIsNone(js.headers["Content-Security-Policy"])
+
+    def test_every_local_asset_the_page_loads_is_in_the_offline_shell(self):
+        import re
+
+        html = self._get("/dashboard").decode()
+        referenced = set(re.findall(r'(?:href|src)="(/[^"?#]*)"', html))
+        self.assertIn("/dashboard.js", referenced)
+        self.assertIn("/dashboard.css", referenced)
+        worker = self._get("/service-worker.js").decode()
+        shell = set(re.findall(r"'(/[^']*)'", worker.split("APP_SHELL = [", 1)[1].split("];", 1)[0]))
+        for path in referenced:
+            with self.subTest(path=path):
+                self.assertIn(path, shell)
+
     def _raw_get(self, path, host):
         import http.client
 

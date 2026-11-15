@@ -11,6 +11,8 @@ from urllib.parse import urlsplit
 _DASHBOARD_DIR = Path(__file__).resolve().parents[1] / "dashboard"
 _STATIC_ASSETS = {
     "/dashboard": (_DASHBOARD_DIR / "index.html", "text/html; charset=utf-8"),
+    "/dashboard.css": (_DASHBOARD_DIR / "dashboard.css", "text/css; charset=utf-8"),
+    "/dashboard.js": (_DASHBOARD_DIR / "dashboard.js", "text/javascript; charset=utf-8"),
     "/manifest.webmanifest": (_DASHBOARD_DIR / "manifest.webmanifest", "application/manifest+json"),
     "/service-worker.js": (_DASHBOARD_DIR / "service-worker.js", "text/javascript; charset=utf-8"),
     "/icon.svg": (_DASHBOARD_DIR / "icon.svg", "image/svg+xml"),
@@ -31,6 +33,23 @@ _SECURITY_HEADERS = (
     ("X-Content-Type-Options", "nosniff"),
     ("X-Frame-Options", "DENY"),
     ("Referrer-Policy", "no-referrer"),
+)
+
+
+# The dashboard ships no inline script or style, so everything can be locked to same origin.
+_DASHBOARD_CSP = "; ".join(
+    (
+        "default-src 'none'",
+        "script-src 'self'",
+        "style-src 'self'",
+        "img-src 'self'",
+        "connect-src 'self'",
+        "manifest-src 'self'",
+        "worker-src 'self'",
+        "base-uri 'none'",
+        "form-action 'none'",
+        "frame-ancestors 'none'",
+    )
 )
 
 
@@ -75,6 +94,8 @@ class StatusHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-cache")
+            if content_type.startswith("text/html"):
+                self.send_header("Content-Security-Policy", _DASHBOARD_CSP)
             self.end_headers()
             self.wfile.write(body)
             return
