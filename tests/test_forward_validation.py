@@ -65,7 +65,7 @@ class ForwardValidationTests(unittest.TestCase):
         report = self.store.report(1)
         self.assertEqual(report["unverified_candidate_count"], 5)
         self.assertEqual(report["verified_observation_count"], 0)
-        self.assertEqual(report["latest_consecutive_verified_utc_day_streak"], 0)
+        self.assertEqual(report["latest_consecutive_verified_trading_days_streak"], 0)
         self.assertEqual(report["level_3_forward_evidence_gate"], "BLOCKED_PROVENANCE")
         self.assertFalse(report["level_3_certification"])
 
