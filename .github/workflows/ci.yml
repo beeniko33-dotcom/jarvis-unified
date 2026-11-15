@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, deriv-eurusd-readonly-feed, level3-provenance-ops-readiness, feat/deriv-tls-claim-fail-closed, fix/forward-evidence-verifier-injection-closed]
   pull_request:
-    branches: [main, deriv-eurusd-readonly-feed, level3-provenance-ops-readiness, feat/deriv-tls-claim-fail-closed]
+    branches: [main, deriv-eurusd-readonly-feed, level3-provenance-ops-readiness, feat/deriv-tls-claim-fail-closed, feat/public-rss-metadata-ingestion, feat/research-source-health-gaps]
   workflow_dispatch:
 
 permissions:
@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v7
