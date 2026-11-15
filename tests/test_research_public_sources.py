@@ -3,6 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 from research.evidence_pipeline import ResearchEvidencePipeline
 from research.public_sources import (
@@ -86,7 +87,10 @@ class PublicSourceAdapterTests(unittest.TestCase):
                 return "https://api.frankfurter.dev/v1/2026-11-15?from=EUR&to=USD"
             def read(self, size):
                 return b'{"date":"2026-11-15","base":"EUR","rates":{"USD":1.16}}'
-        with patch("urllib.request.urlopen", return_value=FakeResponse()):
+        class FakeOpener:
+            def open(self, request, timeout):
+                return FakeResponse()
+        with patch("urllib.request.build_opener", return_value=FakeOpener()):
             record = fetch_frankfurter_daily(
                 self.now.date(), now=self.now,
             )
@@ -95,13 +99,13 @@ class PublicSourceAdapterTests(unittest.TestCase):
         self.assertEqual(record.metadata.data_class, "daily_reference_rate_not_execution_quote")
 
     def test_redirect_to_unapproved_host_is_rejected(self):
-        class FakeResponse:
-            status = 200
-            def __enter__(self): return self
-            def __exit__(self, *args): return None
-            def geturl(self): return "https://example.com/steal"
-            def read(self, size): return b'{}'
-        with patch("urllib.request.urlopen", return_value=FakeResponse()):
+        class FakeOpener:
+            def open(self, request, timeout):
+                raise HTTPError(
+                    "https://api.frankfurter.dev/v1/2026-11-15?from=EUR&to=USD",
+                    302, "redirect", {}, None,
+                )
+        with patch("urllib.request.build_opener", return_value=FakeOpener()):
             with self.assertRaises(RuntimeError):
                 fetch_frankfurter_daily(self.now.date(), now=self.now)
 
