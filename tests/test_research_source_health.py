@@ -28,6 +28,15 @@ class SourceHealthTests(unittest.TestCase):
         self.assertEqual(report.missing_intervals, 2)
         self.assertEqual(report.status, "GAPS_DETECTED")
 
+    def test_gap_near_two_intervals_is_not_undercounted(self):
+        report = self.assess([self.event(114), self.event(0)])
+        self.assertEqual(report.missing_intervals, 1)
+        self.assertEqual(report.status, "GAPS_DETECTED")
+
+    def test_small_timestamp_jitter_does_not_create_false_gap(self):
+        report = self.assess([self.event(62), self.event(0)])
+        self.assertEqual(report.missing_intervals, 0)
+
     def test_outage_is_reported_when_last_event_is_too_old(self):
         report = self.assess([self.event(240)])
         self.assertTrue(report.outage)
