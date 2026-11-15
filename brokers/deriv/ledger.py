@@ -43,6 +43,12 @@ class DerivContractLedger:
                 CREATE INDEX IF NOT EXISTS deriv_events_contract_idx
                 ON deriv_contract_events(contract_id, sequence)
             """)
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS deriv_buy_claims (
+                    client_intent_id TEXT PRIMARY KEY,
+                    claimed_at TEXT NOT NULL
+                )
+            """)
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=10)
@@ -106,6 +112,19 @@ class DerivContractLedger:
             "event_id": row[0], "client_intent_id": row[1], "event_type": row[2],
             "contract_id": row[3], "occurred_at": row[4], "payload": json.loads(row[5]),
         } for row in rows]
+
+    def claim_buy(self, client_intent_id: str) -> None:
+        """Atomically make a client intent single-use across processes/restarts."""
+        if not client_intent_id:
+            raise ValueError("client intent identity is required")
+        try:
+            with self._lock, self._connect() as db:
+                db.execute(
+                    "INSERT INTO deriv_buy_claims(client_intent_id, claimed_at) VALUES (?, ?)",
+                    (client_intent_id, datetime.now(timezone.utc).isoformat()),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise PermissionError("buy already claimed; reconcile before any retry") from exc
 
     def has_intent(self, client_intent_id: str) -> bool:
         with self._lock, self._connect() as db:
