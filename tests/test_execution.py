@@ -154,6 +154,8 @@ class ExecutionServiceTests(unittest.TestCase):
                         "data_hash": "a" * 64,
                         "quote_timestamp": "2026-11-14T12:00:00+00:00",
                         "signal_context_hash": "not-a-digest",
+                        "strategy_config_hash": "a" * 32,
+                        "quote_timestamp": "2026-11-14T12:00:00",
                         "signal_id": "sig-7",
                         "signal_type": "entry",
                         "data_source_id": "feed-1",
@@ -174,6 +176,8 @@ class ExecutionServiceTests(unittest.TestCase):
             self.assertEqual(decision["quote_source"], "paper-quote-cache")
             self.assertEqual(decision["data_hash"], "a" * 64)
             self.assertIsNone(decision.get("signal_context_hash"))
+            self.assertIsNone(decision.get("strategy_config_hash"))
+            self.assertNotIn("quote_timestamp", decision["metadata"]["research_lineage"])
             self.assertEqual(
                 decision["metadata"],
                 {"research_lineage": {
