@@ -1,7 +1,8 @@
-"""Bounded, read-only smoke test for Deriv's documented public market-data feed.
+"""Bounded read-only Deriv live-feed and same-provider history consistency probe.
 
-This validates endpoint TLS and the live public symbol/tick protocol only. It does
-not authenticate individual ticks, grant evidence credit, or place trades.
+TLS validates the endpoint connection, not individual tick signatures. Historical
+agreement is only a same-provider consistency check, never independent provenance.
+No account authentication, evidence credit, or trading actions are permitted.
 """
 from __future__ import annotations
 
@@ -92,7 +93,7 @@ def run(duration_seconds: int, timeout_seconds: int) -> dict:
                 raise RuntimeError("tick payload missing or symbol mismatch")
             epoch = tick.get("epoch")
             quote = tick.get("quote")
-            if not isinstance(epoch, int) or not isinstance(quote, (int, float)):
+            if isinstance(epoch, bool) or not isinstance(epoch, int) or not isinstance(quote, (int, float)):
                 raise RuntimeError("tick epoch/quote has an unexpected type")
             if quote <= 0:
                 raise RuntimeError("tick quote must be positive")
@@ -169,12 +170,6 @@ def run(duration_seconds: int, timeout_seconds: int) -> dict:
             "duplicate_second_timestamps": duplicates,
             "last_provider_epoch": last_epoch,
             "history_reconciliation": reconciliation,
-            "provider": "Deriv",
-            "endpoint": DERIV_PUBLIC_WS,
-            "symbol": symbol,
-            "ticks_received": received,
-            "duplicate_second_timestamps": duplicates,
-            "last_provider_epoch": last_epoch,
             "transport_session": session,
             "evidence_credit": False,
             "level_3_certification": False,
@@ -193,7 +188,7 @@ def main() -> int:
         parser.error("duration and timeout must be positive")
     report = run(args.duration_seconds, args.timeout_seconds)
     print(json.dumps(report, indent=2))
-    return 0 if report["status"] == "ticks_observed" else 2
+    return 0 if report["status"] == "ticks_observed_history_consistent" else 2
 
 
 if __name__ == "__main__":
