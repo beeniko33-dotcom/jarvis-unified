@@ -15,3 +15,6 @@ This helper performs continuity arithmetic only. It does not verify a Deriv acco
 ## Tests
 
 `python -m unittest discover -s tests -p 'test_demo_evidence_continuity.py' -v`
+
+
+The continuity assessor is intentionally not wired into live-readiness approval until authenticated account reconciliation and independent provider verification exist.
