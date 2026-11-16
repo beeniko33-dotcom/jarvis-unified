@@ -42,6 +42,9 @@ class FakeConnection:
         self._reconnect_after = reconnect_after
         self._handlers = {}
         self._open_handlers = []
+        self._reconnect_handlers = []
+        self._close_handlers = []
+        self._error_handlers = []
         self.started = False
         self.stopped = False
         self.subscribe_calls = 0
@@ -52,6 +55,15 @@ class FakeConnection:
 
     def on_open(self, handler):
         self._open_handlers.append(handler)
+
+    def on_reconnect(self, handler):
+        self._reconnect_handlers.append(handler)
+
+    def on_close(self, handler):
+        self._close_handlers.append(handler)
+
+    def on_error(self, handler):
+        self._error_handlers.append(handler)
 
     def send(self, method, args):
         self.sent.append((method, args))
@@ -66,12 +78,16 @@ class FakeConnection:
             # signalrcore delivers message.arguments, i.e. a list.
             self._handlers["ReceiveTick"]([frame])
             if self._reconnect_after is not None and index == self._reconnect_after:
-                # A reconnect re-fires on_open, which must re-subscribe.
+                # Reconnect callback records the gap; on_open must re-subscribe.
+                for handler in self._reconnect_handlers:
+                    handler()
                 for handler in self._open_handlers:
                     handler()
 
     def stop(self):
         self.stopped = True
+        for handler in self._close_handlers:
+            handler()
 
 
 class FakeBuilder:
@@ -150,6 +166,8 @@ class CollectorLifecycleTests(unittest.TestCase):
             "on_open must re-subscribe after a reconnect",
         )
         self.assertEqual(report["inserted"], 3, report)
+        self.assertEqual(report["reconnect_events"], 1, report)
+        self.assertEqual(report["collection_integrity"], "degraded", report)
 
     def test_shutdown_stops_connection_and_drains_queue(self) -> None:
         frames = [_tick(mid=f"1.10{index:02d}") for index in range(5)]
@@ -160,6 +178,7 @@ class CollectorLifecycleTests(unittest.TestCase):
             f"ticks lost at shutdown: {report}",
         )
         self.assertTrue(report["event_chain_valid"], report)
+        self.assertEqual(report["unexpected_disconnects"], 0, report)
 
     def test_report_never_grants_evidence_credit(self) -> None:
         _, report = self._run([_tick()])
