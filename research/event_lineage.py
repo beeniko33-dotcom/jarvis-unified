@@ -111,6 +111,22 @@ class ResearchEventLedger:
                 )
             """)
             db.execute("CREATE INDEX IF NOT EXISTS research_events_stage_idx ON research_events(stage, occurred_at)")
+            # Enforce append-only behavior for ordinary database clients. The
+            # hash chain remains the independent tamper-evidence mechanism.
+            db.execute("""
+                CREATE TRIGGER IF NOT EXISTS research_events_no_update
+                BEFORE UPDATE ON research_events
+                BEGIN
+                    SELECT RAISE(ABORT, 'research_events is append-only');
+                END
+            """)
+            db.execute("""
+                CREATE TRIGGER IF NOT EXISTS research_events_no_delete
+                BEFORE DELETE ON research_events
+                BEGIN
+                    SELECT RAISE(ABORT, 'research_events is append-only');
+                END
+            """)
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=30, isolation_level=None)
