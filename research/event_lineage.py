@@ -144,14 +144,25 @@ class ResearchEventLedger:
             db.execute("BEGIN IMMEDIATE")
             try:
                 existing = db.execute(
-                    "SELECT payload_json, event_hash FROM research_events WHERE event_id=?",
+                    """SELECT schema_version, stage, occurred_at, source_ref,
+                              parent_ids_json, payload_json, event_hash
+                       FROM research_events WHERE event_id=?""",
                     (event.event_id,),
                 ).fetchone()
                 if existing:
-                    if existing[0] != payload:
+                    stored_body = {
+                        "schema_version": existing[0],
+                        "event_id": event.event_id,
+                        "stage": existing[1],
+                        "occurred_at": existing[2],
+                        "source_ref": existing[3],
+                        "parent_event_ids": json.loads(existing[4]),
+                        "payload": json.loads(existing[5]),
+                    }
+                    if self._canonical(stored_body) != payload:
                         raise ResearchLineageError("event_id already exists with different content")
                     db.commit()
-                    return existing[1]
+                    return existing[6]
 
                 expected_parent = _PARENT_STAGE[event.stage]
                 if expected_parent is None:
