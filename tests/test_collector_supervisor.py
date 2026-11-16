@@ -85,7 +85,38 @@ class FileLockTests(unittest.TestCase):
             lock_path.unlink(missing_ok=True)
 
 
+class FakeReporter:
+    def __init__(self):
+        self.events = []
+
+    def emit_event(self, event_type, *, health="healthy", details=None):
+        self.events.append((event_type, health, details or {}))
+
+
 class SupervisorTests(unittest.TestCase):
+    def test_continuous_emits_lifecycle_and_backoff_without_command_details(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reporter = FakeReporter()
+            results = run_continuous(
+                command=["python", "-c", "raise SystemExit(2)"],
+                db_path=root / "data.sqlite3",
+                lock_path=root / "data.sqlite3.lock",
+                duration_seconds=5,
+                log_dir=root / "logs",
+                max_sessions=1,
+                reporter=reporter,
+            )
+            names = [event[0] for event in reporter.events]
+            self.assertEqual(names[0], "supervisor.started")
+            self.assertIn("supervisor.session_started", names)
+            self.assertIn("supervisor.session_failed", names)
+            self.assertEqual(names[-1], "supervisor.stopped")
+            serialized = json.dumps(reporter.events)
+            self.assertNotIn("raise SystemExit", serialized)
+            self.assertNotIn("python", serialized)
+            self.assertEqual(results[0].status, "failed")
+
     def test_successful_session_records_status(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
