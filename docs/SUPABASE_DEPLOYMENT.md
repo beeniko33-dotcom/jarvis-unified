@@ -30,7 +30,20 @@ locks to serialize per-source ordering checks, deduplicates by the existing uniq
 an independent provider verifier exists. It does not migrate the paper ledger or
 switch SQLite-backed components automatically.
 
-Run the read-only diagnostic:
+## Control-plane heartbeat and audit adapter (opt-in)
+
+`research.supabase_control_plane.SupabaseControlPlaneStore` writes worker heartbeat
+snapshots and append-only runtime audit events. It is not automatically enabled by
+the worker runtime. Use it only from a trusted backend process with
+`JARVIS_DATABASE_URL`; it is never suitable for browser/mobile clients.
+
+Heartbeat writes hard-code `mode='paper'`, reject invalid health values and
+out-of-order heartbeat timestamps. Audit events are insert-only and include a
+SHA-256 digest of canonical JSON payloads. Both paths reject credential-like
+payload keys, enforce payload size/depth limits, and require timezone-aware
+timestamps. Do not send raw exception messages or unrestricted process state.
+
+Run the read-only schema diagnostic:
 
 ```bash
 python scripts/supabase_diagnostic.py
