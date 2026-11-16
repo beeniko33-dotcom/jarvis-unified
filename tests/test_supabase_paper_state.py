@@ -30,6 +30,10 @@ class Cursor:
             self.row = self.state.get("prior_run")
         elif "select sequence, event_hash" in normalized:
             self.row = self.state.get("ledger_tail")
+        elif "select revision, last_run_id::text" in normalized:
+            self.row = self.state.get("integrity_account")
+        elif "select run_id::text, revision_before" in normalized:
+            self.rows = self.state.get("run_rows", [])
         elif "select sequence, run_id::text" in normalized:
             self.rows = self.state.get("ledger_rows", [])
         elif "select revision, state::text" in normalized:
@@ -145,12 +149,40 @@ class SupabasePaperStateTests(unittest.TestCase):
         self.assertEqual(result["tail_hash"], "GENESIS")
 
     def test_remote_ledger_detects_hash_tampering(self):
-        from research.supabase_paper_state import PaperStateIntegrityError
+        run_id = str(uuid4())
+        self.state["integrity_account"] = (1, run_id, "a" * 64)
+        self.state["run_rows"] = [(run_id, 0, 1, "a" * 64)]
         self.state["ledger_rows"] = [(
-            1, str(uuid4()), "cycle.completed", self.now,
+            1, run_id, "cycle.completed", self.now,
             {"orders": 0}, "GENESIS", "0" * 64,
         )]
-        with self.assertRaises(PaperStateIntegrityError):
+        with self.assertRaisesRegex(PaperStateIntegrityError, "event hash mismatch"):
+            self.store.verify_ledger("paper-account-1")
+
+    def test_account_history_requires_contiguous_runs_and_matching_tail(self):
+        run_id = str(uuid4())
+        self.state["integrity_account"] = (1, run_id, "a" * 64)
+        self.state["run_rows"] = [(run_id, 0, 1, "a" * 64)]
+        with self.assertRaisesRegex(PaperStateIntegrityError, "no corresponding ledger"):
+            self.store.verify_ledger("paper-account-1")
+
+    def test_missing_run_revision_is_rejected(self):
+        self.state["integrity_account"] = (2, str(uuid4()), "b" * 64)
+        self.state["run_rows"] = [(str(uuid4()), 0, 1, "a" * 64)]
+        with self.assertRaisesRegex(PaperStateIntegrityError, "revision does not match"):
+            self.store.verify_ledger("paper-account-1")
+
+    def test_wrong_last_run_id_is_rejected(self):
+        run_id = str(uuid4())
+        self.state["integrity_account"] = (1, str(uuid4()), "a" * 64)
+        self.state["run_rows"] = [(run_id, 0, 1, "a" * 64)]
+        with self.assertRaisesRegex(PaperStateIntegrityError, "last_run_id"):
+            self.store.verify_ledger("paper-account-1")
+
+    def test_orphaned_events_without_account_are_rejected(self):
+        self.state["ledger_rows"] = [(1, str(uuid4()), "cycle.completed", self.now,
+                                      {}, "GENESIS", "0" * 64)]
+        with self.assertRaisesRegex(PaperStateIntegrityError, "without an account"):
             self.store.verify_ledger("paper-account-1")
 
     def test_load_rejects_non_paper_mode(self):
