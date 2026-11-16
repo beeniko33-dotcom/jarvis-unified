@@ -176,9 +176,12 @@ def collect(
     counts = {
         "inserted": 0, "duplicates": 0, "rejected": 0,
         "received": 0, "dropped_queue_full": 0,
+        "reconnect_events": 0, "unexpected_disconnects": 0,
+        "hub_errors": 0, "connection_open_events": 0,
     }
     connection = None
     report = None
+    stopping = False
 
     def on_tick(arguments):
         # signalrcore delivers message.arguments (a list), not the tick itself.
@@ -205,8 +208,26 @@ def collect(
                 counts["rejected"] += 1
 
     def subscribe():
-        # on_open is called after initial connection and successful reconnect.
+        # Re-subscribe after initial connection and every successful reconnect.
+        with lock:
+            counts["connection_open_events"] += 1
         connection.send("Subscribe", [INSTRUMENT])
+
+    def on_reconnect():
+        # Any reconnect creates an unmeasured market-data gap. Without a
+        # separately verified backfill, this session cannot be called complete.
+        with lock:
+            counts["reconnect_events"] += 1
+
+    def on_close():
+        with lock:
+            if not stopping:
+                counts["unexpected_disconnects"] += 1
+
+    def on_error(_error):
+        # Hub errors are conservatively treated as collection degradation.
+        with lock:
+            counts["hub_errors"] += 1
 
     connection = (
         HubConnectionBuilder()
@@ -221,6 +242,9 @@ def collect(
     )
     connection.on("ReceiveTick", on_tick)
     connection.on_open(subscribe)
+    connection.on_reconnect(on_reconnect)
+    connection.on_close(on_close)
+    connection.on_error(on_error)
     stop_at = time.monotonic() + duration_seconds
     try:
         connection.start()
@@ -231,6 +255,7 @@ def collect(
             except queue.Empty:
                 continue
             process_tick(tick)
+        stopping = True
         connection.stop()
         connection = None
         # Drain events already delivered before closing the store.
@@ -240,6 +265,7 @@ def collect(
             except queue.Empty:
                 break
     finally:
+        stopping = True
         if connection is not None:
             try:
                 connection.stop()
@@ -260,8 +286,13 @@ def collect(
         })
         # A valid hash chain only proves stored-row integrity. Queue overflow or
         # rejected events means the observed stream was not fully ingested.
+        transport_degraded = any(
+            report[key] > 0
+            for key in ("reconnect_events", "unexpected_disconnects", "hub_errors")
+        )
         report["collection_integrity"] = (
-            "degraded" if report["dropped_queue_full"] > 0 or report["rejected"] > 0
+            "degraded"
+            if report["dropped_queue_full"] > 0 or report["rejected"] > 0 or transport_degraded
             else "candidate_observed" if report["inserted"] > 0
             else "no_usable_ticks"
         )
@@ -276,6 +307,9 @@ def collection_exit_code(report: dict) -> int:
         and report.get("inserted", 0) > 0
         and report.get("dropped_queue_full", 0) == 0
         and report.get("rejected", 0) == 0
+        and report.get("reconnect_events", 0) == 0
+        and report.get("unexpected_disconnects", 0) == 0
+        and report.get("hub_errors", 0) == 0
         and report.get("collection_integrity") == "candidate_observed"
     ) else 1
 
