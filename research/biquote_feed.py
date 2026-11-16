@@ -208,7 +208,7 @@ def collect(
                 counts["rejected"] += 1
 
     def subscribe():
-        # Re-subscribe after initial connection and every successful reconnect.
+        # Subscribe on the initial open; reconnects use on_reconnect below.
         with lock:
             counts["connection_open_events"] += 1
         connection.send("Subscribe", [INSTRUMENT])
