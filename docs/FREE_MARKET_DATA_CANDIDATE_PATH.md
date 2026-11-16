@@ -74,6 +74,7 @@ Run with `pip install -e '.[market-data]'` and `python -m research.biquote_feed 
 - [ ] Do not automatically scrape FXCM or Dukascopy historical data until permissions and terms are resolved.
 - [x] Implement the isolated candidate adapter and deterministic offline validation tests; CI and live event compatibility still require confirmation.
 - [ ] Before enabling collection, add/verify bounded queue saturation, reconnect/resubscribe, duplicate/replay, restart/recovery and shutdown tests against the actual SignalR client.
+- [x] Biquote collection now marks queue overflow or rejected events as degraded and exits non-zero; a valid local hash chain alone cannot make a lossy run look successful. This remains candidate-only and does not establish provider authenticity.
 - [ ] Keep the 30-day evidence clock stopped until the signed/auditable provider path and operational controls pass independent review.
 
 ## References
