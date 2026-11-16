@@ -52,14 +52,15 @@ class ExperimentCliTests(unittest.TestCase):
                 "--experiment-verify-sources", left.experiment_id,
                 str(ledger), str(journal),
             )
-            self.assertIn('"status": "verified"', source_result)
+            self.assertIn('"status": "integrity_matched_unverified"', source_result)
             run(
                 "--experiment-verify-sources", right.experiment_id,
                 str(ledger), str(journal),
             )
             comparison = run("--experiment-compare", left.experiment_id, right.experiment_id)
-            self.assertIn('"comparable": true', comparison)
-            self.assertIn('"net_pnl": "1"', comparison)
+            self.assertIn('"comparable": false', comparison)
+            self.assertIn('source_references_not_independently_verified', comparison)
+            self.assertNotIn('"net_pnl": "1"', comparison)
 
 
 if __name__ == "__main__":

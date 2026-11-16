@@ -139,11 +139,48 @@ class ExperienceStore:
                     experiment_id TEXT NOT NULL REFERENCES research_experiments(experiment_id),
                     ledger_hash TEXT NOT NULL,
                     journal_hash TEXT NOT NULL,
-                    status TEXT NOT NULL CHECK(status IN ('verified','mismatch')),
+                    status TEXT NOT NULL CHECK(status IN
+                        ('verified','mismatch','integrity_matched_unverified')),
                     checked_at TEXT NOT NULL
                 );
+            """)
+            # Older versions incorrectly treated matching local file hashes as
+            # independent provenance verification. Migrate those historical
+            # labels to an explicitly non-authenticating integrity status.
+            verification_schema = db.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' "
+                "AND name='experiment_source_verifications'"
+            ).fetchone()[0]
+            if "integrity_matched_unverified" not in verification_schema:
+                db.execute(
+                    "ALTER TABLE experiment_source_verifications "
+                    "RENAME TO experiment_source_verifications_legacy"
+                )
+                db.execute("""
+                    CREATE TABLE experiment_source_verifications (
+                        verification_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        experiment_id TEXT NOT NULL REFERENCES research_experiments(experiment_id),
+                        ledger_hash TEXT NOT NULL,
+                        journal_hash TEXT NOT NULL,
+                        status TEXT NOT NULL CHECK(status IN
+                            ('verified','mismatch','integrity_matched_unverified')),
+                        checked_at TEXT NOT NULL
+                    )
+                """)
+                db.execute("""
+                    INSERT INTO experiment_source_verifications
+                    (verification_id,experiment_id,ledger_hash,journal_hash,status,checked_at)
+                    SELECT verification_id,experiment_id,ledger_hash,journal_hash,
+                        CASE WHEN status='verified'
+                            THEN 'integrity_matched_unverified'
+                            ELSE status END,
+                        checked_at
+                    FROM experiment_source_verifications_legacy
+                """)
+                db.execute("DROP TABLE experiment_source_verifications_legacy")
+            db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_experiment_source_verifications
-                    ON experiment_source_verifications(experiment_id,verification_id);
+                ON experiment_source_verifications(experiment_id,verification_id)
             """)
             db.commit()
 
@@ -292,20 +329,20 @@ class ExperienceStore:
             and ledger_hash == row["source_ledger_hash"]
             and journal_hash == row["source_journal_hash"]
         )
+        # Local SHA-256 equality proves only that the bytes match the recorded
+        # snapshot. It does not authenticate the publisher or market-data origin.
+        status = "integrity_matched_unverified" if matched else "mismatch"
         with closing(self._connect()) as db:
             db.execute(
                 """INSERT INTO experiment_source_verifications
                 (experiment_id,ledger_hash,journal_hash,status,checked_at)
                 VALUES(?,?,?,?,?)""",
-                (
-                    experiment_id, ledger_hash, journal_hash,
-                    "verified" if matched else "mismatch", _now(),
-                ),
+                (experiment_id, ledger_hash, journal_hash, status, _now()),
             )
             db.commit()
         return {
             "experiment_id": experiment_id,
-            "status": "verified" if matched else "mismatch",
+            "status": status,
             "ledger_hash_matches": bool(row["source_ledger_hash"]) and
                 ledger_hash == row["source_ledger_hash"],
             "journal_hash_matches": bool(row["source_journal_hash"]) and

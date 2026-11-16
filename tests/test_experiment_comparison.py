@@ -41,20 +41,21 @@ class ExperimentComparisonTests(unittest.TestCase):
             source_journal_hash=kwargs.get("journal_hash", self.journal_hash),
         )
 
-    def test_matching_artifacts_enable_deterministic_comparison(self):
+    def test_matching_local_hashes_do_not_authenticate_research_provenance(self):
         left = self.record("baseline", {"window": 20}, {"net_pnl": -2.0, "trades": 4})
         right = self.record("candidate", {"window": 30}, {"net_pnl": 1.5, "trades": 5})
         self.assertEqual(self.store.verify_source_artifacts(
             left.experiment_id, ledger_path=self.ledger, journal_path=self.journal
-        )["status"], "verified")
+        )["status"], "integrity_matched_unverified")
         self.assertEqual(self.store.verify_source_artifacts(
             right.experiment_id, ledger_path=self.ledger, journal_path=self.journal
-        )["status"], "verified")
+        )["status"], "integrity_matched_unverified")
         first = compare_experiments(self.store, left.experiment_id, right.experiment_id)
         second = compare_experiments(self.store, left.experiment_id, right.experiment_id)
-        self.assertTrue(first.comparable)
+        self.assertFalse(first.comparable)
+        self.assertIn("source_references_not_independently_verified", first.reasons)
         self.assertEqual(first.to_dict(), second.to_dict())
-        self.assertEqual(first.metric_deltas, {"net_pnl": "3.5", "trades": "1"})
+        self.assertEqual(first.metric_deltas, {})
 
     def test_missing_source_hashes_are_incomparable_not_ranked(self):
         left = self.store.record(
@@ -72,6 +73,38 @@ class ExperimentComparisonTests(unittest.TestCase):
         self.assertIn("source_ledger_hash_missing", report.reasons)
         self.assertEqual(report.metric_deltas, {})
 
+    def test_legacy_verified_labels_are_downgraded_during_schema_migration(self):
+        item = self.record("legacy", {}, {"net_pnl": 0})
+        with self.store._connect() as db:
+            db.execute("DROP INDEX IF EXISTS idx_experiment_source_verifications")
+            db.execute(
+                "ALTER TABLE experiment_source_verifications "
+                "RENAME TO experiment_source_verifications_new"
+            )
+            db.execute("""
+                CREATE TABLE experiment_source_verifications (
+                    verification_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    experiment_id TEXT NOT NULL REFERENCES research_experiments(experiment_id),
+                    ledger_hash TEXT NOT NULL,
+                    journal_hash TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('verified','mismatch')),
+                    checked_at TEXT NOT NULL
+                )
+            """)
+            db.execute("""
+                INSERT INTO experiment_source_verifications
+                (experiment_id,ledger_hash,journal_hash,status,checked_at)
+                VALUES(?,?,?,?,?)
+            """, (item.experiment_id, self.ledger_hash, self.journal_hash,
+                  "verified", self.start.isoformat()))
+            db.execute("DROP TABLE experiment_source_verifications_new")
+            db.commit()
+
+        migrated = ExperienceStore(self.root / "experience.sqlite3")
+        stored = next(
+            row for row in migrated.list() if row.experiment_id == item.experiment_id
+        )
+        self.assertEqual(stored.evidence_status, "integrity_matched_unverified")
     def test_source_artifact_mismatch_is_persisted_and_blocks_comparison(self):
         left = self.record("left", {}, {"pnl": 1})
         right = self.record("right", {}, {"pnl": 2})
