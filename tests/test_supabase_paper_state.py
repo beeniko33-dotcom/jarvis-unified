@@ -85,7 +85,8 @@ class SupabasePaperStateTests(unittest.TestCase):
         self.assertTrue(any("insert into jarvis_private.paper_runs" in q for q in sql))
         self.assertTrue(any("insert into jarvis_private.paper_ledger_events" in q for q in sql))
         self.assertTrue(any("insert into jarvis_private.paper_accounts" in q for q in sql))
-        self.assertTrue(all("'paper'" in q or "select" in q for q in sql if "insert into" in q))
+        self.assertTrue(any("'paper', 'completed'" in q for q in sql if "insert into jarvis_private.paper_runs" in q))
+        self.assertTrue(any("'paper'" in q for q in sql if "insert into jarvis_private.paper_accounts" in q))
 
     def test_stale_revision_is_rejected(self):
         self.state["account_row"] = (4,)
