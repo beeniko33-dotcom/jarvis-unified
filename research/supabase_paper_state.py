@@ -127,6 +127,7 @@ class SupabasePaperStateStore:
         _, actual_hash = _validate_json(state)
         if actual_hash != expected_hash:
             raise PaperStateIntegrityError("stored account state hash mismatch")
+        self.verify_ledger(account_id)
         return {
             "account_id": account_id,
             "mode": "paper",
@@ -267,3 +268,92 @@ class SupabasePaperStateStore:
             "revision": expected_revision + 1, "state_sha256": state_hash,
             "duplicate": False, "mode": "paper",
         }
+    
+    def verify_ledger(self, account_id: str) -> dict:
+        """Verify the account, complete run history, and every event in the remote hash chain."""
+        account_id = self._account_id(account_id)
+        with closing(self._connect()) as db:
+            with db:
+                with db.cursor() as cur:
+                    cur.execute("set transaction isolation level repeatable read")
+                    cur.execute(
+                        """select revision, last_run_id::text, state_sha256
+                           from jarvis_private.paper_accounts where account_id = %s""",
+                        (account_id,),
+                    )
+                    account = cur.fetchone()
+                    cur.execute(
+                        """select run_id::text, revision_before, revision_after, state_sha256
+                           from jarvis_private.paper_runs where account_id = %s
+                           order by revision_after asc""",
+                        (account_id,),
+                    )
+                    runs = cur.fetchall()
+                    cur.execute(
+                        """select sequence, run_id::text, event_type, occurred_at,
+                                  payload, previous_hash, event_hash
+                           from jarvis_private.paper_ledger_events
+                           where account_id = %s order by sequence asc""",
+                        (account_id,),
+                    )
+                    rows = cur.fetchall()
+
+        if account is None:
+            if runs or rows:
+                raise PaperStateIntegrityError("orphaned paper runs or ledger events exist without an account")
+            return {"account_id": account_id, "events": 0, "tail_hash": _GENESIS, "verified": True}
+
+        revision, last_run_id, account_state_hash = account
+        revision = int(revision)
+        if revision < 1 or len(runs) != revision:
+            raise PaperStateIntegrityError("paper account revision does not match persisted run history")
+
+        run_ids = set()
+        run_event_counts: dict[str, int] = {}
+        previous_revision = 0
+        for run_id, revision_before, revision_after, run_state_hash in runs:
+            run_id = str(run_id)
+            before, after = int(revision_before), int(revision_after)
+            if run_id in run_ids or before != previous_revision or after != before + 1:
+                raise PaperStateIntegrityError("paper run revisions are missing, duplicated, or out of order")
+            run_ids.add(run_id)
+            run_event_counts[run_id] = 0
+            previous_revision = after
+        if previous_revision != revision or str(last_run_id) != str(runs[-1][0]):
+            raise PaperStateIntegrityError("paper account revision or last_run_id disagrees with run history")
+        if runs[-1][3] != account_state_hash:
+            raise PaperStateIntegrityError("paper account snapshot hash disagrees with its final run")
+
+        previous_hash = _GENESIS
+        expected_sequence = 1
+        for sequence, run_id, event_type, occurred_at, payload, stored_previous, stored_hash in rows:
+            run_id = str(run_id)
+            if run_id not in run_event_counts:
+                raise PaperStateIntegrityError("paper ledger event references an unknown account run")
+            if int(sequence) != expected_sequence or stored_previous != previous_hash:
+                raise PaperStateIntegrityError("paper ledger sequence or previous hash mismatch")
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except json.JSONDecodeError as exc:
+                    raise PaperStateIntegrityError("paper ledger payload is invalid JSON") from exc
+            if not isinstance(occurred_at, datetime) or occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
+                raise PaperStateIntegrityError("paper ledger timestamp is not timezone-aware")
+            material = json.dumps(
+                {"account_id": account_id, "sequence": int(sequence),
+                 "run_id": run_id, "event_type": event_type,
+                 "occurred_at": occurred_at.astimezone(timezone.utc).isoformat(),
+                 "payload": payload},
+                sort_keys=True, separators=(",", ":"), allow_nan=False,
+            )
+            actual_hash = hashlib.sha256((previous_hash + "|" + material).encode()).hexdigest()
+            if actual_hash != stored_hash:
+                raise PaperStateIntegrityError("paper ledger event hash mismatch")
+            run_event_counts[run_id] += 1
+            previous_hash = actual_hash
+            expected_sequence += 1
+
+        if any(count == 0 for count in run_event_counts.values()):
+            raise PaperStateIntegrityError("a completed paper run has no corresponding ledger event")
+        return {"account_id": account_id, "events": expected_sequence - 1,
+                "tail_hash": previous_hash, "verified": True}
