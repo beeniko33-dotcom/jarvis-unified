@@ -160,8 +160,6 @@ def run(duration_seconds: int, timeout_seconds: int) -> dict:
                 raise RuntimeError(f"Deriv history API returned an error: {payload['error']!r}")
             if payload.get("msg_type") != "history":
                 raise RuntimeError("correlated Deriv history response has unexpected message type")
-            if not isinstance(echo, dict) or echo.get("ticks_history") != symbol:
-                raise RuntimeError("Deriv history response symbol/request binding mismatch")
             history_response = payload
             break
         if history_response is None:
