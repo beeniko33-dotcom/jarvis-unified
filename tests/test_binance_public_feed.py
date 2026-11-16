@@ -36,6 +36,10 @@ class BinancePublicFeedTests(unittest.TestCase):
     def opener_for(self, candles=None, server_ms=None):
         def opener(request, timeout=10):
             path = urlparse(request.full_url).path
+            if path.endswith("/exchangeInfo"):
+                return _Response({"symbols": [{
+                    "symbol": "BTCUSDT", "status": "TRADING", "isSpotTradingAllowed": True,
+                }]})
             if path.endswith("/time"):
                 return _Response({"serverTime": server_ms or self.server_ms})
             if path.endswith("/klines"):
