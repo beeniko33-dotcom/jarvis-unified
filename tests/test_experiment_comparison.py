@@ -41,20 +41,21 @@ class ExperimentComparisonTests(unittest.TestCase):
             source_journal_hash=kwargs.get("journal_hash", self.journal_hash),
         )
 
-    def test_matching_artifacts_enable_deterministic_comparison(self):
+    def test_matching_local_hashes_do_not_authenticate_research_provenance(self):
         left = self.record("baseline", {"window": 20}, {"net_pnl": -2.0, "trades": 4})
         right = self.record("candidate", {"window": 30}, {"net_pnl": 1.5, "trades": 5})
         self.assertEqual(self.store.verify_source_artifacts(
             left.experiment_id, ledger_path=self.ledger, journal_path=self.journal
-        )["status"], "verified")
+        )["status"], "integrity_matched_unverified")
         self.assertEqual(self.store.verify_source_artifacts(
             right.experiment_id, ledger_path=self.ledger, journal_path=self.journal
-        )["status"], "verified")
+        )["status"], "integrity_matched_unverified")
         first = compare_experiments(self.store, left.experiment_id, right.experiment_id)
         second = compare_experiments(self.store, left.experiment_id, right.experiment_id)
-        self.assertTrue(first.comparable)
+        self.assertFalse(first.comparable)
+        self.assertIn("source_references_not_independently_verified", first.reasons)
         self.assertEqual(first.to_dict(), second.to_dict())
-        self.assertEqual(first.metric_deltas, {"net_pnl": "3.5", "trades": "1"})
+        self.assertEqual(first.metric_deltas, {})
 
     def test_missing_source_hashes_are_incomparable_not_ranked(self):
         left = self.store.record(
