@@ -19,7 +19,6 @@ def evidence(**overrides):
         rejected_entry_rate=Decimal("0.05"),
         slippage_coverage_pct=Decimal("100"),
         open_positions_at_end=0,
-        ledger_integrity_verified=True,
     )
     values.update(overrides)
     return DemoEvidenceSummary(**values)
@@ -28,10 +27,11 @@ def evidence(**overrides):
 class LiveReadinessTests(unittest.TestCase):
     def test_threshold_passes_only_to_manual_review_not_live(self):
         result = assess_live_readiness(evidence())
-        self.assertEqual(result.status, LiveReadinessStatus.ELIGIBLE_FOR_MANUAL_REVIEW)
+        self.assertEqual(result.status, LiveReadinessStatus.BLOCKED)
+        self.assertTrue(result.quantitative_thresholds_met)
         self.assertFalse(result.live_trading_enabled)
         self.assertIn("independent provider authenticity", " ".join(result.reasons))
-        self.assertIn("live execution remains unavailable", " ".join(result.reasons))
+        self.assertIn("trusted demo-ledger integrity", " ".join(result.reasons))
 
     def test_less_than_30_consecutive_days_is_blocked(self):
         result = assess_live_readiness(evidence(consecutive_utc_days=29))
@@ -52,10 +52,6 @@ class LiveReadinessTests(unittest.TestCase):
 
     def test_excessive_drawdown_blocks(self):
         result = assess_live_readiness(evidence(max_drawdown_pct=Decimal("10.01")))
-        self.assertEqual(result.status, LiveReadinessStatus.BLOCKED)
-
-    def test_unverified_ledger_blocks(self):
-        result = assess_live_readiness(evidence(ledger_integrity_verified=False))
         self.assertEqual(result.status, LiveReadinessStatus.BLOCKED)
 
     def test_open_positions_block(self):
