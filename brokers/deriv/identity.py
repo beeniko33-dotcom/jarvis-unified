@@ -6,7 +6,7 @@ transport, prove provider origin, or make the resulting claim eligible evidence.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
+import hmac
 import re
 from typing import Any, Mapping
 
@@ -40,6 +40,8 @@ def _flag(payload: Mapping[str, Any], field: str, expected: int) -> None:
 
 def parse_demo_account_claim(
     authorization: Mapping[str, Any],
+    *,
+    fingerprint_key: bytes,
 ) -> DerivDemoAccountClaim:
     """Parse an authorize response and require one unambiguous virtual trading account.
 
@@ -47,6 +49,8 @@ def parse_demo_account_claim(
     authorization exchange. Even then, this parser's output remains an unverified
     provider claim until an independent verification layer is implemented.
     """
+    if not isinstance(fingerprint_key, bytes) or len(fingerprint_key) < 32:
+        raise DemoIdentityError("fingerprint_key must contain at least 32 secret bytes")
     if not isinstance(authorization, Mapping):
         raise DemoIdentityError("authorization response must be an object")
 
@@ -96,7 +100,7 @@ def parse_demo_account_claim(
     ):
         raise DemoIdentityError("selected account metadata is incomplete or malformed")
 
-    fingerprint = hashlib.sha256(selected_loginid.encode("ascii")).hexdigest()
+    fingerprint = hmac.new(fingerprint_key, selected_loginid.encode("ascii"), digestmod="sha256").hexdigest()
     return DerivDemoAccountClaim(
         account_fingerprint=fingerprint,
         currency=currency,
