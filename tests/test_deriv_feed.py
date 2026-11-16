@@ -125,5 +125,49 @@ class DerivFeedTests(unittest.TestCase):
             )
 
 
+    def test_live_history_reconciliation_exact_match(self):
+        from research.deriv_feed import reconcile_live_history
+        report = reconcile_live_history(
+            [(100, "1.1"), (101, "1.2")],
+            {"msg_type": "history", "history": {"times": [100, 101], "prices": ["1.10", "1.20"]}},
+        )
+        self.assertEqual(report["consistency_check"], "PASS")
+        self.assertEqual(report["exact_matches"], 2)
+        self.assertFalse(report["evidence_credit"])
+        self.assertFalse(report["provenance_verified"])
+
+    def test_live_history_reconciliation_rejects_no_overlap(self):
+        from research.deriv_feed import reconcile_live_history
+        with self.assertRaisesRegex(ValueError, "no overlapping"):
+            reconcile_live_history(
+                [(100, "1.1")],
+                {"msg_type": "history", "history": {"times": [101], "prices": ["1.1"]}},
+            )
+
+    def test_live_history_reconciliation_rejects_price_mismatch(self):
+        from research.deriv_feed import reconcile_live_history
+        with self.assertRaisesRegex(ValueError, "mismatches"):
+            reconcile_live_history(
+                [(100, "1.1")],
+                {"msg_type": "history", "history": {"times": [100], "prices": ["1.2"]}},
+            )
+
+    def test_live_history_reconciliation_rejects_conflicting_duplicate_epoch(self):
+        from research.deriv_feed import reconcile_live_history
+        with self.assertRaisesRegex(ValueError, "conflicting live quotes"):
+            reconcile_live_history(
+                [(100, "1.1"), (100, "1.2")],
+                {"msg_type": "history", "history": {"times": [100], "prices": ["1.1"]}},
+            )
+
+    def test_live_history_reconciliation_rejects_malformed_history(self):
+        from research.deriv_feed import reconcile_live_history
+        with self.assertRaisesRegex(ValueError, "equally sized"):
+            reconcile_live_history(
+                [(100, "1.1")],
+                {"msg_type": "history", "history": {"times": [100], "prices": []}},
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
