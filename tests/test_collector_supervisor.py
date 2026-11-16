@@ -103,6 +103,9 @@ class SupervisorTests(unittest.TestCase):
             self.assertIsInstance(record, SessionRecord)
             self.assertEqual(record.status, "completed")
             self.assertEqual(record.exit_code, 0)
+            self.assertEqual(record.command, [])  # Never persist potentially secret CLI arguments.
+            persisted = json.loads((log_dir / f"session-{record.session_id}.json").read_text())
+            self.assertEqual(persisted["command"], [])
             self.assertTrue((log_dir / f"session-{record.session_id}.json").exists())
 
     def test_failed_command_records_failed(self):
