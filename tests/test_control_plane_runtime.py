@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import unittest
 import threading
-import time
 from datetime import datetime, timezone
 
 from research.control_plane_runtime import ControlPlaneReporter
