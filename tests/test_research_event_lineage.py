@@ -87,10 +87,22 @@ class ResearchEventLedgerTests(unittest.TestCase):
                 {"nested": {"api_token": "do-not-store"}},
             )
 
+    def test_database_rejects_updates_and_deletes(self):
+        self.add("o1", ResearchStage.OBSERVATION, 0)
+        import sqlite3
+        with sqlite3.connect(self.path) as db:
+            with self.assertRaises(sqlite3.IntegrityError):
+                db.execute("UPDATE research_events SET payload_json='{}' WHERE event_id='o1'")
+            with self.assertRaises(sqlite3.IntegrityError):
+                db.execute("DELETE FROM research_events WHERE event_id='o1'")
+        self.assertTrue(self.ledger.verify())
+
     def test_hash_chain_detects_database_tampering(self):
         self.full_chain()
         import sqlite3
+        # Simulate an administrator bypassing the ordinary append-only guard.
         with sqlite3.connect(self.path) as db:
+            db.execute("DROP TRIGGER research_events_no_update")
             db.execute("UPDATE research_events SET payload_json='{}' WHERE event_id='f1'")
         self.assertFalse(self.ledger.verify())
 
