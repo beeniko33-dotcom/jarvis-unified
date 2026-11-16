@@ -8,6 +8,7 @@ evidence store — without any network access.
 from __future__ import annotations
 
 import sys
+import sqlite3
 import tempfile
 import types
 import unittest
@@ -217,6 +218,14 @@ class CollectorLifecycleTests(unittest.TestCase):
         _, report = self._run(frames)
         self.assertEqual(report["inserted"], 3, report)
         self.assertEqual(report["rejected"], 0, report)
+        # The append-only chain follows collector ingestion order, not a
+        # misleading timestamp sort; retain source timestamps for audit.
+        with sqlite3.connect(self.db) as audit_db:
+            stored_times = [row[0] for row in audit_db.execute(
+                "SELECT observed_at FROM observations ORDER BY id"
+            )]
+        self.assertGreater(stored_times[0], stored_times[1])
+        self.assertLess(stored_times[1], stored_times[2])
         self.assertTrue(report["event_chain_valid"], report)
         self.assertEqual(report["trust_classification"], "candidate_unverified")
         self.assertFalse(report["evidence_credit"])
