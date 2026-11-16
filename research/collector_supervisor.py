@@ -292,6 +292,7 @@ def run_continuous(
     max_consecutive_failures: int = 5,
     backoff_base_seconds: float = 15.0,
     backoff_cap_seconds: float = 300.0,
+    reporter=None,
 ) -> list[SessionRecord]:
     """Run successive non-overlapping sessions until max_sessions, failure budget, or shutdown.
 
@@ -303,11 +304,15 @@ def run_continuous(
     count = 0
     consecutive_failures = 0
 
+    if reporter is not None:
+        reporter.emit_event("supervisor.started", health="healthy", details={"status": "running"})
     while max_sessions is None or count < max_sessions:
         if _SHUTDOWN_REQUESTED:
             logger.info("exiting continuous loop — shutdown requested")
             break
 
+        if reporter is not None:
+            reporter.emit_event("supervisor.session_started", health="healthy", details={"duration_seconds": duration_seconds})
         record = run_one_session(
             command=command,
             db_path=db_path,
@@ -317,6 +322,10 @@ def run_continuous(
         )
         results.append(record)
         count += 1
+        if reporter is not None:
+            event = "supervisor.session_completed" if record.status == "completed" else "supervisor.session_" + record.status
+            health = "healthy" if record.status == "completed" else ("blocked" if record.status == "skipped_lock" else "degraded")
+            reporter.emit_event(event, health=health, details={"status": record.status, "duration_seconds": record.duration_seconds, "exit_code": record.exit_code})
 
         if record.status == "completed":
             consecutive_failures = 0
@@ -345,6 +354,8 @@ def run_continuous(
                 backoff_cap_seconds,
             )
         logger.info("pausing %.1fs before next session", pause)
+        if reporter is not None and record.status != "completed":
+            reporter.emit_event("supervisor.backoff", health="degraded", details={"failure_count": consecutive_failures, "pause_seconds": pause, "status": record.status})
         # Interruptible sleep
         end = time.monotonic() + pause
         while time.monotonic() < end:
@@ -352,6 +363,8 @@ def run_continuous(
                 break
             time.sleep(min(0.5, end - time.monotonic()))
 
+    if reporter is not None:
+        reporter.emit_event("supervisor.stopped", health="stopped", details={"status": "shutdown" if _SHUTDOWN_REQUESTED else "completed"})
     return results
 
 
@@ -466,7 +479,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(asdict(record), indent=2))
         return 0 if record.status == "completed" else 1
 
-    results = run_continuous(
+    reporter = None
+    try:
+        from research.control_plane_runtime import ControlPlaneReporter
+        reporter = ControlPlaneReporter.from_environment()
+        if reporter is not None:
+            reporter.worker_type = "collector_supervisor"
+            reporter.component = "collector_supervisor"
+            reporter.worker_id = f"jarvis-collector-supervisor-{os.getpid()}"[:128]
+            reporter.start()
+    except Exception as exc:  # noqa: BLE001 - telemetry must never block local collection
+        logger.warning("control-plane reporter unavailable (%s)", type(exc).__name__)
+        reporter = None
+
+    try:
+        results = run_continuous(
         command=args.command,
         db_path=args.db,
         lock_path=lock_path,
@@ -477,7 +504,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_consecutive_failures=args.max_consecutive_failures,
         backoff_base_seconds=args.backoff_base,
         backoff_cap_seconds=args.backoff_cap,
-    )
+        reporter=reporter,
+        )
+    finally:
+        if reporter is not None:
+            reporter.stop()
     print(json.dumps([asdict(r) for r in results], indent=2))
     return 0 if results and all(r.status == "completed" for r in results) else 1
 
