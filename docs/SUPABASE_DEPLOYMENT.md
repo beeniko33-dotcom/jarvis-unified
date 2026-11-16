@@ -1,5 +1,9 @@
 # Supabase deployment architecture
 
+## Current connected project
+
+Jarvis Unified is connected to a healthy Supabase project in Europe West running PostgreSQL 17.12. Its private schema contains `market_observations`, `runtime_audit_events`, and `worker_heartbeats`. These tables are intentionally outside the browser-facing Data API.
+
 ## Target topology
 
 Supabase is the managed data and identity platform, not the always-on Python process host.
@@ -8,45 +12,65 @@ Supabase is the managed data and identity platform, not the always-on Python pro
 - **Supabase Auth:** operator sign-in for a future dashboard/API. Do not expose the service-role key to a browser.
 - **Supabase Storage:** later home for exported reports and evidence artifacts, with private buckets and narrowly scoped signed access.
 - **Supabase Edge Functions:** short authenticated API endpoints, webhooks and dashboard orchestration only.
-- **Python runtime:** keep the collector, paper engine, scheduler, scraper and long-running research workers on a persistent host (the existing host plan prefers an Oracle Cloud Always Free VM with persistent disk). These workers connect to Supabase Postgres over TLS using a server-side secret.
+- **Python runtime:** keep the collector, paper engine, scheduler, scraper and long-running research workers on a persistent host. These workers connect to Supabase Postgres over TLS using a server-side secret.
 - **Dashboard:** static frontend can be hosted separately; it calls authenticated endpoints, never the database service key.
 
-## Why not put the whole runtime in Edge Functions?
+## Postgres evidence adapter (opt-in)
 
-Supabase Edge Functions use a Deno/TypeScript runtime, not the repository's Python runtime. Hosted limits include 256 MB memory, 2 seconds CPU per request, and a wall-clock duration of 150 seconds on Free / 400 seconds on paid. A continuous WebSocket market collector and a 30-day validation process must not depend on an Edge Function staying alive. Supabase documents Compute as private alpha; do not treat it as a generally available production host.
+Install the pinned optional dependency with `pip install '.[postgres]'`. Set
+`JARVIS_DATABASE_URL` only in the trusted worker's secret manager/environment.
+Use the Supabase direct or session-pooler connection string with TLS enabled.
+Do not put the DSN, database password, service-role key, or JWT in source control,
+dashboard code, CI output, issue comments, or chat.
 
-## Migration
+The adapter is intentionally limited to the existing market-observation contract.
+It writes only `candidate_unverified` observations, uses transaction-scoped advisory
+locks to serialize per-source ordering checks, deduplicates by the existing unique
+(source_id, content_hash) constraint, and reports all evidence as ineligible until
+an independent provider verifier exists. It does not migrate the paper ledger or
+switch SQLite-backed components automatically.
 
-Apply SQL migrations with the Supabase CLI after creating a project and linking its project ref:
+## Control-plane heartbeat and audit adapter (opt-in)
+
+`research.supabase_control_plane.SupabaseControlPlaneStore` writes worker heartbeat
+snapshots and append-only runtime audit events. The read-only status API has an
+additional best-effort lifecycle reporter in `research.control_plane_runtime`.
+Enable it only with `JARVIS_SUPABASE_CONTROL_PLANE_ENABLED=true` and a backend-only
+`JARVIS_DATABASE_URL` in the trusted worker's secret manager. It is disabled by
+default and never suitable for browser/mobile clients. Startup, shutdown and periodic
+heartbeat writes are best-effort: database failures are logged by exception type
+only and must never prevent the local paper status API from serving. A stopped
+heartbeat is not proof of a clean shutdown; monitor heartbeat age externally.
+
+Heartbeat writes hard-code `mode='paper'`, reject invalid health values and
+out-of-order heartbeat timestamps. Audit events are insert-only and include a
+SHA-256 digest of canonical JSON payloads. Both paths reject credential-like
+payload keys, enforce payload size/depth limits, and require timezone-aware
+timestamps. Do not send raw exception messages or unrestricted process state.
+
+Run the read-only schema diagnostic:
 
 ```bash
-supabase login
-supabase link --project-ref YOUR_PROJECT_REF
-supabase db push
+python scripts/supabase_diagnostic.py
 ```
 
-This migration creates a non-exposed `jarvis_private` schema with:
-- append-only market observations whose provenance is constrained to `candidate_unverified`;
-- append-only operational audit events;
-- mutable worker heartbeat snapshots constrained to `paper` mode.
+It verifies connection, PostgreSQL version, required private tables and RLS state.
+It performs no writes and suppresses driver exception strings to avoid leaking DSNs.
 
-RLS is enabled, browser roles have no table privileges, and only the server-side `service_role` receives the required grants. Never put the service-role key in dashboard code, mobile apps, source control, or chat. Do not put credentials, tokens, OTP URLs, or unrestricted exception text in event payloads.
+## Migration boundary
 
-## Important migration boundary
+This is not a completed SQLite-to-Postgres migration. Existing Jarvis modules still
+use SQLite and local file paths. Do not switch production reads/writes to Supabase
+until each store has a tested adapter, idempotent backfill, reconciliation report,
+restart recovery test and rollback procedure. Keep SQLite as the authoritative paper
+ledger until that cutover is independently validated.
 
-This is a control-plane schema foundation, not a completed SQLite-to-Postgres migration. Existing Jarvis modules still use SQLite and local file paths. Do not switch production reads/writes to Supabase until each store has a tested adapter, idempotent backfill, reconciliation report, restart recovery test and rollback procedure. Keep SQLite as the authoritative paper ledger until that cutover is independently validated.
+## Security and operational constraints
 
-## Required deployment sequence
-
-1. Create a Supabase project and select a region close to the persistent worker where possible.
-2. Store the project URL, database connection string and service-role credential in the worker host's secret manager; use a dedicated restricted database role in preference to broad credentials once the adapter supports it.
-3. Apply migrations to a fresh project and verify schema grants, RLS and append-only triggers.
-4. Implement a Postgres repository adapter for market observations and heartbeats; add integration tests against a disposable Supabase/Postgres instance.
-5. Migrate audit events and reports with hash/row-count reconciliation and restore drills.
-6. Only then migrate paper ledger / reservations / contract lifecycle, preserving transaction and idempotency guarantees.
-7. Deploy authenticated dashboard endpoints and Storage policies. Do not expose the existing unauthenticated localhost status API publicly.
-8. Run paper-only soak tests and backup/restore drills before starting any forward-evidence clock.
-
-## Backups
-
-Supabase Free projects should regularly export data using `supabase db dump` and store encrypted off-site copies. Automated daily backups and point-in-time recovery depend on paid plan eligibility. Backups do not replace a tested restore drill.
+- Keep `jarvis_private` outside exposed API schemas; browser roles receive no grants.
+- Use a backend-only database credential. Never expose `service_role` or secret keys in a browser.
+- RLS is enabled on the three private tables; trusted server-side grants are explicit.
+- Do not put credentials, tokens, OTP URLs, wallet secrets or unrestricted exception text in event payloads.
+- Keep all broker adapters disabled, the kill switch engaged and execution paper-only.
+- A Supabase project does not run the repository's long-lived Python worker.
+- No hosting resource is provisioned and no paid service is enabled by this change.
