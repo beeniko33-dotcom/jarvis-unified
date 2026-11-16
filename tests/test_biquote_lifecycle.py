@@ -11,6 +11,7 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -78,7 +79,7 @@ class FakeConnection:
             # signalrcore delivers message.arguments, i.e. a list.
             self._handlers["ReceiveTick"]([frame])
             if self._reconnect_after is not None and index == self._reconnect_after:
-                # Reconnect callback records the gap; on_open must re-subscribe.
+                # Reconnect callback records the gap; it must re-subscribe.
                 # signalrcore fires on_reconnect after the reconnect
                 # handshake; it does not fire on_open a second time.
                 for handler in self._reconnect_handlers:
@@ -163,11 +164,37 @@ class CollectorLifecycleTests(unittest.TestCase):
         connection, report = self._run(frames, reconnect_after=0)
         self.assertEqual(
             connection.subscribe_calls, 2,
-            "on_open must re-subscribe after a reconnect",
+            "on_reconnect must re-subscribe after a reconnect",
         )
         self.assertEqual(report["inserted"], 3, report)
         self.assertEqual(report["reconnect_events"], 1, report)
         self.assertEqual(report["collection_integrity"], "degraded", report)
+
+    def test_queue_saturation_marks_collection_degraded_and_fails_closed(self) -> None:
+        frames = [_tick(mid="1.1010"), _tick(mid="1.1020"), _tick(mid="1.1030")]
+        connection = FakeConnection(frames)
+        _install_fake_signalrcore(connection)
+        with patch.object(biquote_feed, "MAX_PENDING_TICKS", 1):
+            report = biquote_feed.collect(1, self.db)
+
+        self.assertEqual(report["received"], 3, report)
+        self.assertEqual(report["inserted"], 1, report)
+        self.assertEqual(report["dropped_queue_full"], 2, report)
+        self.assertEqual(report["collection_integrity"], "degraded", report)
+        self.assertEqual(biquote_feed.collection_exit_code(report), 1)
+
+    def test_duplicate_replay_after_restart_is_idempotent(self) -> None:
+        tick = _tick(mid="1.1111")
+        first_connection, first = self._run([tick])
+        self.assertEqual(first["inserted"], 1, first)
+        self.assertTrue(first_connection.stopped)
+
+        second_connection, second = self._run([tick])
+        self.assertTrue(second_connection.stopped)
+        self.assertEqual(second["inserted"], 0, second)
+        self.assertEqual(second["duplicates"], 1, second)
+        self.assertEqual(second["observation_count"], 1, second)
+        self.assertTrue(second["event_chain_valid"], second)
 
     def test_shutdown_stops_connection_and_drains_queue(self) -> None:
         frames = [_tick(mid=f"1.10{index:02d}") for index in range(5)]
