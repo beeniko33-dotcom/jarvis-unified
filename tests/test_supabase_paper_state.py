@@ -30,11 +30,16 @@ class Cursor:
             self.row = self.state.get("prior_run")
         elif "select sequence, event_hash" in normalized:
             self.row = self.state.get("ledger_tail")
+        elif "select sequence, run_id::text" in normalized:
+            self.rows = self.state.get("ledger_rows", [])
         elif "select revision, state::text" in normalized:
             self.row = self.state.get("load_row")
 
     def fetchone(self):
         return self.row
+
+    def fetchall(self):
+        return getattr(self, "rows", [])
 
 
 class Connection:
@@ -132,6 +137,21 @@ class SupabasePaperStateTests(unittest.TestCase):
         self.state["load_row"] = (2, '{"balance":"10"}', "0" * 64, str(uuid4()), "paper")
         with self.assertRaises(PaperStateIntegrityError):
             self.store.load_account("paper-account-1")
+
+    def test_empty_ledger_verifies_with_genesis_tail(self):
+        result = self.store.verify_ledger("paper-account-1")
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["events"], 0)
+        self.assertEqual(result["tail_hash"], "GENESIS")
+
+    def test_remote_ledger_detects_hash_tampering(self):
+        from research.supabase_paper_state import PaperStateIntegrityError
+        self.state["ledger_rows"] = [(
+            1, str(uuid4()), "cycle.completed", self.now,
+            {"orders": 0}, "GENESIS", "0" * 64,
+        )]
+        with self.assertRaises(PaperStateIntegrityError):
+            self.store.verify_ledger("paper-account-1")
 
     def test_load_rejects_non_paper_mode(self):
         self.state["load_row"] = (1, '{"balance":"10"}', "fake", str(uuid4()), "live")
