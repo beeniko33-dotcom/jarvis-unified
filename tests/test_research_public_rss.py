@@ -72,6 +72,41 @@ class PublicRssTests(unittest.TestCase):
                 allowed_article_hosts=self.article_hosts, retrieved_at=self.now,
             )
 
+    def test_rejects_utf16_dtd_and_entity_payloads(self):
+        payload = '<!DOCTYPE rss [<!ENTITY x "boom">]><rss/>'.encode("utf-16")
+        with self.assertRaises(ValueError):
+            parse_public_feed(
+                payload, publisher="Example", feed_url=self.feed,
+                allowed_feed_hosts=self.feed_hosts,
+                allowed_article_hosts=self.article_hosts, retrieved_at=self.now,
+            )
+
+    def test_rejects_utf32_dtd_and_entity_payloads(self):
+        payload = '<!DOCTYPE rss [<!ENTITY x "boom">]><rss/>'.encode("utf-32")
+        with self.assertRaises(ValueError):
+            parse_public_feed(
+                payload, publisher="Example", feed_url=self.feed,
+                allowed_feed_hosts=self.feed_hosts,
+                allowed_article_hosts=self.article_hosts, retrieved_at=self.now,
+            )
+
+    def test_rejects_non_utf8_xml_declaration(self):
+        payload = b'<?xml version="1.0" encoding="UTF-16"?><rss/>'
+        with self.assertRaises(ValueError):
+            parse_public_feed(
+                payload, publisher="Example", feed_url=self.feed,
+                allowed_feed_hosts=self.feed_hosts,
+                allowed_article_hosts=self.article_hosts, retrieved_at=self.now,
+            )
+
+    def test_rejects_overlong_publisher(self):
+        with self.assertRaises(ValueError):
+            parse_public_feed(
+                b"<rss/>", publisher="x" * 201, feed_url=self.feed,
+                allowed_feed_hosts=self.feed_hosts,
+                allowed_article_hosts=self.article_hosts, retrieved_at=self.now,
+            )
+
     def test_rejects_naive_retrieval_time(self):
         with self.assertRaises(ValueError):
             parse_public_feed(

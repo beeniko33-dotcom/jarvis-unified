@@ -22,6 +22,9 @@ from urllib.parse import urlparse
 MAX_FEED_BYTES = 1_000_000
 MAX_ITEMS = 500
 MAX_TITLE_LENGTH = 500
+MAX_PUBLISHER_LENGTH = 200
+MAX_URL_LENGTH = 4096
+_XML_ENCODING = re.compile(r"^\s*<\?xml[^>]*encoding\s*=\s*['\"]([^'\"]+)['\"]", re.IGNORECASE)
 _TAGS = re.compile(r"<[^>]*>")
 
 
@@ -83,8 +86,22 @@ def parse_public_feed(
     """Parse RSS 2.0 or Atom 1.0 headline metadata with explicit host allowlists."""
     if not isinstance(payload, bytes) or len(payload) > MAX_FEED_BYTES:
         raise ValueError("feed payload must be bytes within the 1 MB limit")
-    if not publisher.strip():
-        raise ValueError("publisher is required")
+    if (not isinstance(publisher, str) or not publisher.strip()
+            or len(publisher.strip()) > MAX_PUBLISHER_LENGTH):
+        raise ValueError("publisher is required and must be at most 200 characters")
+    if not isinstance(feed_url, str) or len(feed_url) > MAX_URL_LENGTH:
+        raise ValueError("feed_url must be a string of at most 4096 characters")
+    # Deliberately accept UTF-8 XML only. Decoding before declaration scanning
+    # prevents UTF-16/32 NUL-interleaved DTD/entity declarations bypassing the guard.
+    try:
+        xml_text = payload.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError("feed XML must be UTF-8 encoded") from exc
+    if chr(0) in xml_text:
+        raise ValueError("feed XML must be UTF-8 encoded without NUL characters")
+    declaration = _XML_ENCODING.match(xml_text)
+    if declaration and declaration.group(1).lower().replace("_", "-") not in {"utf-8", "utf8"}:
+        raise ValueError("feed XML declaration must specify UTF-8")
     feed_host = _host(feed_url)
     feed_allow = {h.lower().strip() for h in allowed_feed_hosts if h.strip()}
     article_allow = {h.lower().strip() for h in allowed_article_hosts if h.strip()}
@@ -93,11 +110,11 @@ def parse_public_feed(
     if not article_allow:
         raise ValueError("at least one article host must be allowlisted")
     retrieved = _utc(retrieved_at, "retrieved_at")
-    upper = payload.upper()
-    if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
+    upper = xml_text.upper()
+    if "<!DOCTYPE" in upper or "<!ENTITY" in upper:
         raise ValueError("DTD and entity declarations are not permitted")
     try:
-        root = ET.fromstring(payload)
+        root = ET.fromstring(xml_text)
     except ET.ParseError as exc:
         raise ValueError("feed XML is malformed") from exc
 
@@ -130,6 +147,8 @@ def parse_public_feed(
 
         title = _clean_title(title_node.text if title_node is not None else "")
         if not title or not link:
+            continue
+        if len(link) > MAX_URL_LENGTH:
             continue
         try:
             article_host = _host(link)
