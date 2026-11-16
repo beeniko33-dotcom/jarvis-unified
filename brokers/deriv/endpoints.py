@@ -12,6 +12,7 @@ def validate_demo_websocket_url(url: str) -> str:
     """Return the URL only for the exact demo endpoint with one non-empty OTP."""
     if not isinstance(url, str) or not url:
         raise ValueError("demo WebSocket URL is required")
+    parsed = None
     try:
         parsed = urlsplit(url)
         # Parse strictly and require exactly one parameter. This prevents extra
@@ -28,7 +29,8 @@ def validate_demo_websocket_url(url: str) -> str:
         valid_port = False
 
     if (
-        parsed.scheme != "wss"
+        parsed is None
+        or parsed.scheme != "wss"
         or parsed.hostname != DEMO_WS_HOST
         or not valid_port
         or parsed.username is not None
