@@ -207,6 +207,21 @@ class CollectorLifecycleTests(unittest.TestCase):
         self.assertTrue(report["event_chain_valid"], report)
         self.assertEqual(report["unexpected_disconnects"], 0, report)
 
+    def test_out_of_order_delivery_is_persisted_as_candidate_without_trust_promotion(self) -> None:
+        # Delivery order deliberately differs from source timestamp order.
+        frames = [
+            _tick(seconds_ago=10, mid="1.1010"),
+            _tick(seconds_ago=2, mid="1.1020"),
+            _tick(seconds_ago=20, mid="1.1000"),
+        ]
+        _, report = self._run(frames)
+        self.assertEqual(report["inserted"], 3, report)
+        self.assertEqual(report["rejected"], 0, report)
+        self.assertTrue(report["event_chain_valid"], report)
+        self.assertEqual(report["trust_classification"], "candidate_unverified")
+        self.assertFalse(report["evidence_credit"])
+        self.assertFalse(report["level_3_certification"])
+
     def test_report_never_grants_evidence_credit(self) -> None:
         _, report = self._run([_tick()])
         self.assertFalse(report["evidence_credit"])
