@@ -71,6 +71,15 @@ def fetch_latest_completed_candle(
     if max_age_seconds < 1:
         raise ValueError("max_age_seconds must be positive")
 
+    from urllib.parse import urlencode
+    query = urlencode({"symbol": symbol})
+    exchange_info = _get_json("/api/v3/exchangeInfo?" + query, opener=opener)
+    if not isinstance(exchange_info, dict) or not isinstance(exchange_info.get("symbols"), list):
+        raise ValueError("Binance exchangeInfo response is malformed")
+    listed = [item for item in exchange_info["symbols"] if isinstance(item, dict) and item.get("symbol") == symbol]
+    if len(listed) != 1 or listed[0].get("status") != "TRADING" or listed[0].get("isSpotTradingAllowed") is not True:
+        raise ValueError("Binance symbol is not uniquely listed and enabled for Spot trading")
+
     server = _get_json("/api/v3/time", opener=opener)
     if not isinstance(server, dict) or isinstance(server.get("serverTime"), bool):
         raise ValueError("Binance server-time response is malformed")
@@ -81,7 +90,6 @@ def fetch_latest_completed_candle(
     if server_ms <= 0:
         raise ValueError("Binance server time must be positive")
 
-    from urllib.parse import urlencode
     query = urlencode({"symbol": symbol, "interval": interval, "limit": 3})
     candles = _get_json("/api/v3/klines?" + query, opener=opener)
     if not isinstance(candles, list) or not candles:
