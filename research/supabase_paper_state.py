@@ -275,6 +275,7 @@ class SupabasePaperStateStore:
         with closing(self._connect()) as db:
             with db:
                 with db.cursor() as cur:
+                    cur.execute("set transaction isolation level repeatable read")
                     cur.execute(
                         """select revision, last_run_id::text, state_sha256
                            from jarvis_private.paper_accounts where account_id = %s""",
