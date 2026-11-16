@@ -66,6 +66,9 @@ create trigger paper_ledger_events_append_only
 before update or delete on jarvis_private.paper_ledger_events
 for each row execute function jarvis_private.reject_paper_ledger_mutation();
 
+revoke all on function jarvis_private.reject_paper_ledger_mutation()
+    from public, anon, authenticated, service_role;
+
 comment on table jarvis_private.paper_accounts is
     'Latest durable paper-only account snapshot. State hash and revision are checked on every load/commit.';
 comment on table jarvis_private.paper_runs is
