@@ -149,11 +149,14 @@ class SupabasePaperStateTests(unittest.TestCase):
         self.assertEqual(result["tail_hash"], "GENESIS")
 
     def test_remote_ledger_detects_hash_tampering(self):
+        run_id = str(uuid4())
+        self.state["integrity_account"] = (1, run_id, "a" * 64)
+        self.state["run_rows"] = [(run_id, 0, 1, "a" * 64)]
         self.state["ledger_rows"] = [(
-            1, str(uuid4()), "cycle.completed", self.now,
+            1, run_id, "cycle.completed", self.now,
             {"orders": 0}, "GENESIS", "0" * 64,
         )]
-        with self.assertRaises(PaperStateIntegrityError):
+        with self.assertRaisesRegex(PaperStateIntegrityError, "event hash mismatch"):
             self.store.verify_ledger("paper-account-1")
 
     def test_account_history_requires_contiguous_runs_and_matching_tail(self):
