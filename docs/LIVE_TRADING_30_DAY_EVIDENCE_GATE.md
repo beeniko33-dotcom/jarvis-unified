@@ -19,7 +19,7 @@ Thresholds are prototype defaults and must be configurable only through reviewed
 ## Outcomes
 
 1. Any missing, invalid, incomplete or failed criterion returns `blocked`.
-2. Passing the quantitative demo criteria returns `eligible_for_manual_review` only.
+2. Passing the quantitative demo criteria is only a metrics result. The current prototype still returns `blocked` because trusted demo-ledger ingestion, provider authenticity and demo-account identity attestation are not implemented.
 3. A separate independent check must attest provider authenticity, demo-account identity, ledger provenance, security posture and risk configuration.
 4. A separate explicit owner approval and a reviewed live-adapter release are required before any live capability can be enabled.
 5. The live adapter must continue to enforce the central risk engine, position/exposure limits, durable idempotency and emergency stop. Risk-reducing exits and emergency close behavior require their own tested design.
@@ -30,7 +30,7 @@ Thresholds are prototype defaults and must be configurable only through reviewed
 - The repository currently has no authenticated Deriv demo execution adapter; the existing paper broker is simulated and is not a Deriv demo account.
 - The current paper report cannot calculate risk-rejected-entry rate and often has no slippage coverage, so it cannot satisfy this gate.
 - Local hashes prove integrity of recorded bytes, not provider authenticity or that the records came from a broker demo account.
-- The live-readiness assessor is deliberately not wired to enable execution. Its success result is review eligibility only.
+- The live-readiness assessor is deliberately not wired to enable execution. Its quantitative pass result is not an approval; the current integration gaps keep the overall result blocked.
 
 Therefore the 30-day clock must not start from synthetic fixtures, historical replay, CI, screenshots, imported spreadsheets, process heartbeats or simulated fills. It starts only after a future demo adapter and trusted evidence collector are implemented and independently validated. The demo evidence may inform the decision, but cannot prove that live execution will be profitable or safe.
 
