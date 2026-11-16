@@ -66,3 +66,28 @@ therefore failed closed before subscribing to ticks. The documented [`active_sym
 and [`ticks`](https://developers.deriv.com/docs/data/ticks/) requests require an active symbol;
 do not substitute another instrument or claim evidence until EUR/USD is actually listed and
 the provider-provenance gate in issue #9 is independently resolved.
+
+## Binance public spot market-data candidate
+
+A read-only Binance Spot collector is available in `research/binance_public_feed.py`.
+It uses Binance's documented market-data-only REST host (no API key) to fetch the
+server clock and the newest **completed** candle for a configured spot symbol
+(default `BTCUSDT`, `1m`). It rejects an open candle, malformed OHLC values,
+unsupported symbols/interval syntax, and candles older than its freshness window.
+The raw server-time/candle response is retained with a SHA-256 digest.
+
+Example:
+
+```bash
+python -m research.binance_public_feed --symbol BTCUSDT --interval 1m
+```
+
+This is a read-only collector and one-shot observation writer, not a continuous
+worker or a paper execution engine. It does not authenticate individual exchange
+messages or independently prove provider provenance. Stored observations remain
+`unverified_candidate`, `provenance_verified=false`, and
+`evidence_credit=false`. No live order endpoint, account stream, API key, or broker
+credential is used. Binance spot candles must not be relabelled as Deriv FX quotes.
+The collector must pass CI and a separate operator-run read-only smoke check before
+any strategy-to-paper-broker wiring is enabled. A completed-candle observation can
+only drive a candle-close strategy, never a tick-scalping strategy.
