@@ -208,16 +208,19 @@ def collect(
                 counts["rejected"] += 1
 
     def subscribe():
-        # Re-subscribe after initial connection and every successful reconnect.
+        # Subscribe on the initial open; reconnects use on_reconnect below.
         with lock:
             counts["connection_open_events"] += 1
         connection.send("Subscribe", [INSTRUMENT])
 
     def on_reconnect():
-        # Any reconnect creates an unmeasured market-data gap. Without a
+        # signalrcore 1.0.x calls on_reconnect after the reconnect handshake;
+        # it does not call on_open for that transition. Re-subscribe here.
+        # Any reconnect still creates an unmeasured market-data gap. Without a
         # separately verified backfill, this session cannot be called complete.
         with lock:
             counts["reconnect_events"] += 1
+        connection.send("Subscribe", [INSTRUMENT])
 
     def on_close():
         with lock:
