@@ -28,7 +28,7 @@ A local SHA-256 chain establishes tamper evidence relative to the local chain st
 
 1. Start in read-only mode. No order-capable adapter is constructed by default.
 2. Load the API credential from a secret manager or process environment. Never accept it in chat, command-line arguments, URLs, repository files, test snapshots, exception text or logs.
-3. Validate the configured endpoint against an exact allowlist. Reject live endpoints, unknown hosts, redirects, insecure transport, URL user-info, fragments and unexpected ports.
+3. Validate the configured endpoint against an exact allowlist. For the current Options demo endpoint, require `wss://api.derivws.com/trading/v1/options/ws/demo` with exactly one non-empty `otp` query parameter. Reject extra or duplicate query parameters, live endpoints, unknown hosts, redirects, insecure transport, URL user-info, fragments and unexpected ports. Never log or persist the OTP.
 4. Establish TLS with certificate validation and hostname checking. Bind the session record to the observed socket and endpoint; caller-supplied booleans are not proof.
 5. Send authorization and validate the provider response. Obtain account identity/type from provider-returned data, then enforce a demo-only allowlist. Missing, ambiguous, inconsistent or live account metadata must fail closed.
 6. Keep the session read-only until an explicit operator action enables a demo session. That action must not bypass the shared execution service, risk engine, exposure reservations or emergency stop.
