@@ -125,10 +125,6 @@ class DerivFeedTests(unittest.TestCase):
             )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
     def test_live_history_reconciliation_exact_match(self):
         from research.deriv_feed import reconcile_live_history
         report = reconcile_live_history(
@@ -171,3 +167,7 @@ if __name__ == "__main__":
                 [(100, "1.1")],
                 {"msg_type": "history", "history": {"times": [100], "prices": []}},
             )
+
+
+if __name__ == "__main__":
+    unittest.main()
