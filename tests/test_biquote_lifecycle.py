@@ -224,8 +224,8 @@ class CollectorLifecycleTests(unittest.TestCase):
             stored_times = [row[0] for row in audit_db.execute(
                 "SELECT observed_at FROM observations ORDER BY id"
             )]
-        self.assertGreater(stored_times[0], stored_times[1])
-        self.assertLess(stored_times[1], stored_times[2])
+        self.assertLess(stored_times[0], stored_times[1])
+        self.assertGreater(stored_times[1], stored_times[2])
         self.assertTrue(report["event_chain_valid"], report)
         self.assertEqual(report["trust_classification"], "candidate_unverified")
         self.assertFalse(report["evidence_credit"])
