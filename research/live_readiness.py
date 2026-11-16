@@ -28,7 +28,6 @@ class DemoEvidenceSummary:
     rejected_entry_rate: Decimal | None
     slippage_coverage_pct: Decimal | None
     open_positions_at_end: int
-    ledger_integrity_verified: bool
 
 
 @dataclass(frozen=True)
@@ -36,6 +35,7 @@ class LiveReadinessAssessment:
     status: LiveReadinessStatus
     reasons: tuple[str, ...]
     live_trading_enabled: bool = False
+    quantitative_thresholds_met: bool = False
 
 
 def assess_live_readiness(
@@ -59,8 +59,6 @@ def assess_live_readiness(
             raise ValueError(f"{name} must be a finite non-negative Decimal")
 
     reasons: list[str] = []
-    if not evidence.ledger_integrity_verified:
-        reasons.append("demo ledger integrity has not been verified")
     if evidence.consecutive_utc_days < required_days:
         reasons.append(f"requires {required_days} consecutive UTC demo days")
     if evidence.realized_trade_events < minimum_realized_events:
@@ -99,17 +97,17 @@ def assess_live_readiness(
         reasons.append(f"slippage coverage must be at least {minimum_slippage_coverage_pct}%")
     if evidence.open_positions_at_end != 0:
         reasons.append("all demo positions must be closed and reconciled")
-    if reasons:
-        return LiveReadinessAssessment(LiveReadinessStatus.BLOCKED, tuple(reasons))
-
-    # This is deliberately unconditional: the prototype has no independently
-    # accepted provider-authenticity/demo-account attestation or live adapter.
+    # Even when every metric passes, this prototype has no trusted demo-ledger
+    # ingestion, provider/account attestation or live adapter. Keep the gate shut.
+    quantitative_failures = list(reasons)
+    reasons.extend((
+        "trusted demo-ledger integrity and account identity integration is not implemented",
+        "independent provider authenticity attestation is not implemented",
+        "separate security/risk review and explicit owner approval are required",
+    ))
     return LiveReadinessAssessment(
-        LiveReadinessStatus.ELIGIBLE_FOR_MANUAL_REVIEW,
-        (
-            "30-day demo evidence thresholds met",
-            "independent provider authenticity and demo-account identity attestation is still required",
-            "separate security/risk review and explicit owner approval are required",
-            "live execution remains unavailable in this prototype",
-        ),
+        LiveReadinessStatus.BLOCKED,
+        tuple(reasons),
+        live_trading_enabled=False,
+        quantitative_thresholds_met=not quantitative_failures,
     )
