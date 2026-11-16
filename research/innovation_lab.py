@@ -1,6 +1,8 @@
 """Deterministic, non-executing evaluation gate for strategy experiments.
 
-This module scores recorded experiment evidence only. It never places orders,
+The prototype has no independent provider-authenticity verifier. Consequently,
+caller-supplied records can never assert trusted provenance or advance a
+candidate to human-review eligibility. This module never places orders,
 changes runtime strategy configuration, or grants execution permission.
 """
 from __future__ import annotations
@@ -27,7 +29,6 @@ class ExperimentEvidence:
     baseline_max_drawdown_pct: Decimal
     transaction_costs_included: bool
     out_of_sample: bool
-    data_provenance_verified: bool
 
 
 @dataclass(frozen=True)
@@ -52,11 +53,12 @@ def assess_experiment(
     minimum_sample_size: int = 100,
     maximum_candidate_drawdown_pct: Decimal = Decimal("10"),
 ) -> ExperimentAssessment:
-    """Assess a candidate; even a strong result requires human review.
+    """Assess a candidate without accepting caller-asserted provenance.
 
-    Unverified provenance, in-sample-only results, or omitted costs restrict the
-    result to research-only. Weak sample size or risk-adjusted performance is
-    rejected. No assessment can authorize broker execution.
+    All imported experiment records remain research-only until an independent,
+    provider-authenticity verifier is implemented and its result is represented
+    by a trusted internal evidence type. Local hashes and booleans are not such
+    verification. No assessment can authorize broker execution.
     """
     if not evidence.experiment_id.strip() or not evidence.strategy_id.strip():
         raise ValueError("experiment_id and strategy_id are required")
@@ -69,44 +71,29 @@ def assess_experiment(
         "baseline_max_drawdown_pct",
     ):
         _valid_percentage(getattr(evidence, name), name)
-    if maximum_candidate_drawdown_pct < 0 or not maximum_candidate_drawdown_pct.is_finite():
+    if (
+        not maximum_candidate_drawdown_pct.is_finite()
+        or maximum_candidate_drawdown_pct < 0
+    ):
         raise ValueError("maximum_candidate_drawdown_pct must be finite and non-negative")
     if evidence.candidate_max_drawdown_pct < 0 or evidence.baseline_max_drawdown_pct < 0:
         raise ValueError("drawdown percentages must be non-negative")
+    if evidence.sample_size < 0:
+        raise ValueError("sample_size must be non-negative")
 
     return_delta = evidence.candidate_net_return_pct - evidence.baseline_net_return_pct
     drawdown_delta = evidence.baseline_max_drawdown_pct - evidence.candidate_max_drawdown_pct
-    restrictions = []
-    if not evidence.data_provenance_verified:
-        restrictions.append("data provenance is not independently verified")
+    restrictions = ["independent provider-authenticity verifier is unavailable"]
     if not evidence.out_of_sample:
         restrictions.append("out-of-sample evaluation is missing")
     if not evidence.transaction_costs_included:
         restrictions.append("transaction costs are not included")
-    if restrictions:
-        return ExperimentAssessment(
-            evidence.experiment_id, ExperimentDisposition.RESEARCH_ONLY,
-            tuple(restrictions), return_delta, drawdown_delta,
-        )
 
-    failures = []
-    if evidence.sample_size < minimum_sample_size:
-        failures.append("sample size is below the minimum")
-    if evidence.candidate_max_drawdown_pct > maximum_candidate_drawdown_pct:
-        failures.append("candidate drawdown exceeds the configured limit")
-    if return_delta <= 0:
-        failures.append("candidate does not outperform the baseline after costs")
-    if drawdown_delta < 0:
-        failures.append("candidate drawdown is worse than the baseline")
-    if failures:
-        return ExperimentAssessment(
-            evidence.experiment_id, ExperimentDisposition.REJECTED,
-            tuple(failures), return_delta, drawdown_delta,
-        )
+    # Do not allow caller data to claim provenance or unlock the later gate.
     return ExperimentAssessment(
         evidence.experiment_id,
-        ExperimentDisposition.HUMAN_REVIEW_REQUIRED,
-        ("evidence thresholds met; independent human review is still required",),
+        ExperimentDisposition.RESEARCH_ONLY,
+        tuple(restrictions),
         return_delta,
         drawdown_delta,
     )
