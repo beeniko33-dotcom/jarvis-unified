@@ -258,8 +258,26 @@ def collect(
             "level_3_certification": False,
             "queue_capacity": MAX_PENDING_TICKS,
         })
+        # A valid hash chain only proves stored-row integrity. Queue overflow or
+        # rejected events means the observed stream was not fully ingested.
+        report["collection_integrity"] = (
+            "degraded" if report["dropped_queue_full"] > 0 or report["rejected"] > 0
+            else "candidate_observed" if report["inserted"] > 0
+            else "no_usable_ticks"
+        )
         store.close()
     return report
+
+
+def collection_exit_code(report: dict) -> int:
+    """Return success only for observed, non-degraded candidate collection."""
+    return 0 if (
+        report.get("event_chain_valid")
+        and report.get("inserted", 0) > 0
+        and report.get("dropped_queue_full", 0) == 0
+        and report.get("rejected", 0) == 0
+        and report.get("collection_integrity") == "candidate_observed"
+    ) else 1
 
 
 def main() -> int:
@@ -277,7 +295,7 @@ def main() -> int:
     )
     print(json.dumps(result, indent=2))
     # A valid empty hash chain is not proof the collector received usable data.
-    return 0 if result.get("event_chain_valid") and result.get("inserted", 0) > 0 else 1
+    return collection_exit_code(result)
 
 
 if __name__ == "__main__":
