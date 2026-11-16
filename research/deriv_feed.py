@@ -262,3 +262,56 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def reconcile_live_history(live_ticks: list[tuple[int, str]], response: dict) -> dict:
+    """Cross-check overlapping live ticks against Deriv history, never prove provenance."""
+    if not isinstance(live_ticks, list) or not live_ticks:
+        raise ValueError("at least one live tick is required for reconciliation")
+    if not isinstance(response, dict) or response.get("msg_type") != "history":
+        raise ValueError("Deriv history response has an unexpected message type")
+    history = response.get("history")
+    if not isinstance(history, dict):
+        raise ValueError("Deriv history payload is missing")
+    times, prices = history.get("times"), history.get("prices")
+    if not isinstance(times, list) or not isinstance(prices, list) or len(times) != len(prices):
+        raise ValueError("Deriv history times/prices must be equally sized lists")
+
+    def normalize(pairs, label):
+        normalized = {}
+        for epoch, raw_quote in pairs:
+            if isinstance(epoch, bool) or not isinstance(epoch, int):
+                raise ValueError(f"{label} epoch must be an integer")
+            quote = Decimal(str(raw_quote))
+            if not quote.is_finite() or quote <= 0:
+                raise ValueError(f"{label} quote must be positive and finite")
+            previous = normalized.get(epoch)
+            if previous is not None and previous != quote:
+                raise ValueError(f"conflicting {label} quotes share a provider epoch")
+            normalized[epoch] = quote
+        return normalized
+
+    if any(not isinstance(pair, (tuple, list)) or len(pair) != 2 for pair in live_ticks):
+        raise ValueError("malformed live tick pair")
+    live = normalize(live_ticks, "live")
+    historical = normalize(list(zip(times, prices)), "historical")
+    overlap = sorted(set(live) & set(historical))
+    if not overlap:
+        raise ValueError("live and historical tick samples have no overlapping epochs")
+    mismatches = [
+        {"epoch": epoch, "live_quote": str(live[epoch]), "history_quote": str(historical[epoch])}
+        for epoch in overlap if live[epoch] != historical[epoch]
+    ]
+    if mismatches:
+        raise ValueError(f"live/history quote mismatches: {mismatches!r}")
+    return {
+        "overlap_count": len(overlap),
+        "exact_matches": len(overlap),
+        "mismatch_count": 0,
+        "unmatched_live_ticks": len(set(live) - set(historical)),
+        "first_overlap_epoch": overlap[0],
+        "last_overlap_epoch": overlap[-1],
+        "consistency_check": "PASS",
+        "evidence_credit": False,
+        "provenance_verified": False,
+    }
