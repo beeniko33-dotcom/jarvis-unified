@@ -4,6 +4,8 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
+from scripts.deriv_public_smoke import is_response_for_history_request
+
 from research.deriv_feed import (
     DERIV_PUBLIC_WS, build_tick_observation, resolve_eurusd_symbol,
     validate_deriv_observation_binding,
@@ -124,6 +126,19 @@ class DerivFeedTests(unittest.TestCase):
                 transport_session=self.session,
             )
 
+
+
+    def test_correlates_history_response_by_request_id_and_symbol(self):
+        response = {
+            "msg_type": "history",
+            "req_id": 31,
+            "echo_req": {"req_id": 31, "ticks_history": "frxEURUSD"},
+            "history": {"times": [100], "prices": ["1.1"]},
+        }
+        self.assertTrue(is_response_for_history_request(response, 31, "frxEURUSD"))
+        self.assertFalse(is_response_for_history_request(response, 32, "frxEURUSD"))
+        self.assertFalse(is_response_for_history_request(response, 31, "frxGBPUSD"))
+        self.assertFalse(is_response_for_history_request({"msg_type": "tick"}, 31, "frxEURUSD"))
 
     def test_live_history_reconciliation_exact_match(self):
         from research.deriv_feed import reconcile_live_history
