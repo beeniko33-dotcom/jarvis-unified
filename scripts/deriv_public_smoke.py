@@ -42,11 +42,31 @@ def run(duration_seconds: int, timeout_seconds: int) -> dict:
         received = 0
         last_epoch = None
         duplicates = 0
+        last_ping = time.monotonic()
+        # Short receive waits let the bounded loop send application-level keepalives.
+        ws.settimeout(min(5, timeout_seconds))
         while time.monotonic() < deadline:
+            now = time.monotonic()
+            if now - last_ping >= 30:
+                ws.send(json.dumps({"ping": 1, "req_id": 30}))
+                last_ping = now
             try:
                 raw = ws.recv()
             except websocket.WebSocketTimeoutException:
                 continue
+            except websocket.WebSocketConnectionClosedException as exc:
+                return {
+                    "status": "connection_lost",
+                    "provider": "Deriv",
+                    "endpoint": DERIV_PUBLIC_WS,
+                    "symbol": symbol,
+                    "ticks_received": received,
+                    "transport_session": session,
+                    "evidence_credit": False,
+                    "level_3_certification": False,
+                    "trading_actions": 0,
+                    "detail": str(exc),
+                }
             payload = json.loads(raw)
             if payload.get("error"):
                 error = payload["error"]
@@ -65,6 +85,7 @@ def run(duration_seconds: int, timeout_seconds: int) -> dict:
                     }
                 raise RuntimeError(f"Deriv returned an API error: {error!r}")
             if payload.get("msg_type") != "tick":
+                # Ping/pong and other protocol acknowledgements are not market ticks.
                 continue
             tick = payload.get("tick")
             if not isinstance(tick, dict) or tick.get("symbol") != symbol:
