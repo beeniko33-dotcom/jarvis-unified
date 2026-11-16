@@ -43,6 +43,9 @@ class PaperOutcomeReport:
     unique_fill_ids: int
     approved_decisions: int
     rejected_decisions: int
+    entry_attempts: int
+    rejected_entry_attempts: int
+    rejected_entry_rate: str | None
     reservation_rejections: int
     broker_submission_errors: int
     close_events: int
@@ -143,11 +146,22 @@ def build_paper_outcome_report(
     drawdown_observations = 0
     missing_drawdown = 0
     approved = rejected = reservation_rejections = broker_errors = 0
+    entry_attempt_ids: set[str] = set()
+    rejected_entry_attempt_ids: set[str] = set()
     daily: dict[str, dict[str, Any]] = {}
 
     for event in events:
         event_type = event["event_type"]
         data = event["data"]
+        if event_type in {"risk_approved", "risk_rejected", "reservation_rejected"}:
+            # A reservation rejection follows a risk approval for the same
+            # attempted order. Deduplicate by client_order_id so it is one
+            # rejected entry attempt, not two observations in the denominator.
+            identity = data.get("client_order_id") or event["event_id"]
+            entry_attempt_ids.add(str(identity))
+            if event_type in {"risk_rejected", "reservation_rejected"}:
+                rejected_entry_attempt_ids.add(str(identity))
+
         if event_type == "risk_approved":
             approved += 1
         elif event_type == "risk_rejected":
@@ -274,6 +288,12 @@ def build_paper_outcome_report(
         unique_fill_ids=len(fill_ids),
         approved_decisions=approved,
         rejected_decisions=rejected,
+        entry_attempts=len(entry_attempt_ids),
+        rejected_entry_attempts=len(rejected_entry_attempt_ids),
+        rejected_entry_rate=(
+            str(Decimal(len(rejected_entry_attempt_ids)) / Decimal(len(entry_attempt_ids)))
+            if entry_attempt_ids else None
+        ),
         reservation_rejections=reservation_rejections,
         broker_submission_errors=broker_errors,
         close_events=close_count,
@@ -288,6 +308,7 @@ def build_paper_outcome_report(
         by_utc_day=daily_reports,
         limitations=(
             "Realized P&L and commission are attributed to source ledger events and UTC days, not individual entry orders.",
+            "Entry rejection rate uses unique client order IDs; reservation rejections are included once even when preceded by a risk approval.",
             "Missing quote, strategy, experiment or account metadata remains unknown; no values are inferred.",
             "This report is descriptive only and cannot approve, deploy or promote a strategy.",
         ),
