@@ -12,7 +12,6 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from main import APP_VERSION
 
 _LOG = logging.getLogger(__name__)
 
@@ -60,7 +59,7 @@ class ControlPlaneReporter:
                 worker_type="status_api",
                 reported_at=now,
                 started_at=self.started_at,
-                software_version=APP_VERSION,
+                software_version="0.2.0",
                 git_commit=os.getenv("GIT_COMMIT") or None,
                 health=health,
                 details={"component": "read_only_status_api", "mode": "paper"},
