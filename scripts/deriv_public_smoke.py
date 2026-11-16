@@ -16,6 +16,19 @@ from research.deriv_feed import reconcile_live_history, resolve_eurusd_symbol
 from research.transport_session import DERIV_PUBLIC_WS, build_deriv_public_session
 
 
+def is_response_for_history_request(payload: dict, req_id: int, symbol: str) -> bool:
+    """Correlate a Deriv response to our bounded history request, not stream ticks."""
+    if not isinstance(payload, dict):
+        return False
+    echo = payload.get("echo_req")
+    if not isinstance(echo, dict):
+        return False
+    return (
+        (payload.get("req_id") == req_id or echo.get("req_id") == req_id)
+        and echo.get("ticks_history") == symbol
+    )
+
+
 def run(duration_seconds: int, timeout_seconds: int) -> dict:
     import websocket
 
@@ -140,13 +153,7 @@ def run(duration_seconds: int, timeout_seconds: int) -> dict:
             except websocket.WebSocketTimeoutException:
                 continue
             payload = json.loads(raw)
-            echo = payload.get("echo_req") if isinstance(payload, dict) else None
-            response_req_id = payload.get("req_id") if isinstance(payload, dict) else None
-            correlated = (
-                response_req_id == history_req_id
-                or (isinstance(echo, dict) and echo.get("req_id") == history_req_id)
-            )
-            if not correlated:
+            if not is_response_for_history_request(payload, history_req_id, symbol):
                 # Ignore late subscription ticks and unrelated keepalive responses.
                 continue
             if payload.get("error"):
