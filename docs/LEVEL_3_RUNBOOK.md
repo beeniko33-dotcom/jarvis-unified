@@ -91,3 +91,41 @@ credential is used. Binance spot candles must not be relabelled as Deriv FX quot
 The collector must pass CI and a separate operator-run read-only smoke check before
 any strategy-to-paper-broker wiring is enabled. A completed-candle observation can
 only drive a candle-close strategy, never a tick-scalping strategy.
+
+## Evidence tooling: attribution, rejections, reconciliation, daily check
+
+These tools measure and report. None of them place orders, change risk limits, release the kill
+switch, or count toward the Level 3 gate by themselves.
+
+```bash
+python scripts/paper_session.py --allow-entries --ledger var/paper_ledger.jsonl
+python scripts/paper_report.py var/paper_ledger.jsonl --observations-db var/paper_ledger.observations.sqlite3
+python scripts/paper_reconcile.py var/paper_ledger.jsonl
+python scripts/paper_daily_check.py var/paper_ledger.jsonl --observations-db var/paper_ledger.observations.sqlite3
+```
+
+- **Attribution.** Fills now write `strategy_id`, `strategy_version`, `quote_source` and the other
+  sanitized lineage keys onto the JSONL row when the order carried them. `paper_session.py` labels its
+  fills `paper_session_smoke` / `synthetic_fixture`: the prices are fixed, so they are never market
+  evidence. Closing fills carry no lineage yet, so attribution coverage in a session is about 50%.
+- **Rejected entries.** `paper_session.py` journals every risk decision into a hash-chained SQLite
+  journal (`<ledger>.observations.sqlite3`). `paper_report.py --observations-db` verifies the chain
+  and reports the rejected-entry rate (rejected entries over decided entries). Without the flag the
+  rate is reported as unavailable, as before.
+- **Reconciliation.** `paper_reconcile.py` replays fills from scratch and compares realized P&L,
+  commission, balance and open-position count with every recorded row. It is exact for immediate
+  full fills; working or partially filled orders are reported as unsupported and the result is
+  `incomplete`, never `reconciled`. A match shows internal consistency only, not data authenticity.
+- **Daily check.** `paper_daily_check.py` reports missing days, a broken streak, future-dated events,
+  open positions, reconciliation status and journal integrity, and exits non-zero when any need
+  operator attention. Its streak is informational and always reports that it does not count toward
+  Level 3. Run it from your own scheduler; it never backfills or repairs.
+
+### Known limitation: appended sessions are not one account
+
+`paper_session.py` builds a fresh broker on every run, so each run restarts at the starting balance
+with zeroed cumulative figures, but it appends to the same ledger file. A file built by running it
+daily is therefore several independent accounts, not one continuous account. `paper_reconcile.py`
+detects this (cumulative commission falls) and says so in `suspected_session_boundaries`, and the
+daily check will report the ledger as not reconciled. Until the runner uses a persistent account, use
+a fresh dated ledger per session or the persistent SQLite broker for multi-day validation.

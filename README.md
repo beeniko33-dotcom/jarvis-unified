@@ -31,6 +31,8 @@ python -m unittest discover -s tests -v
 python scripts/diagnose.py
 python scripts/paper_session.py --allow-entries --ledger var/paper_ledger.jsonl
 python scripts/paper_report.py var/paper_ledger.jsonl --min-days 30
+python scripts/paper_reconcile.py var/paper_ledger.jsonl
+python scripts/paper_daily_check.py var/paper_ledger.jsonl --observations-db var/paper_ledger.observations.sqlite3
 python main.py --import-paper-ledger --paper-ledger-db var/paper/paper.sqlite --learning-db var/learning/observations.sqlite3
 python main.py --paper-outcomes --learning-db var/learning/observations.sqlite3
 python main.py --paper-reflections --learning-db var/learning/observations.sqlite3 --reflection-db var/learning/reflections.sqlite3

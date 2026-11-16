@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -20,6 +21,16 @@ from core.execution import ExecutionService
 from core.models import OrderRequest, Side
 from core.portfolio import PortfolioTracker
 from core.risk import RiskEngine, RiskLimits
+from research.execution_observations import ExecutionObservationJournal
+
+# Honest labels: this runner replays fixed prices, so its fills are never market evidence.
+SESSION_LINEAGE = {
+    "research_lineage": {
+        "strategy_id": "paper_session_smoke",
+        "strategy_version": "1",
+        "quote_source": "synthetic_fixture",
+    }
+}
 
 
 def main() -> int:
@@ -27,9 +38,20 @@ def main() -> int:
     parser.add_argument("--ledger", default="var/paper_ledger.jsonl", help="JSONL audit path")
     parser.add_argument("--balance", default="10000", help="Starting paper balance")
     parser.add_argument("--allow-entries", action="store_true", help="Explicitly release kill switch for this session")
+    parser.add_argument(
+        "--observations-db",
+        default=None,
+        help="hash-chained SQLite journal of risk decisions and rejections "
+        "(default: <ledger>.observations.sqlite3)",
+    )
     args = parser.parse_args()
 
     ledger = Path(args.ledger)
+    observations_db = (
+        Path(args.observations_db)
+        if args.observations_db
+        else ledger.with_suffix(".observations.sqlite3")
+    )
     broker = PaperBroker(
         Decimal(args.balance),
         commission_per_side=Decimal("0.1"),
@@ -40,7 +62,8 @@ def main() -> int:
     if args.allow_entries:
         risk.release_kill_switch(explicit_operator_action=True)
 
-    exec_svc = ExecutionService(broker, risk)
+    journal = ExecutionObservationJournal(observations_db)
+    exec_svc = ExecutionService(broker, risk, observation_journal=journal)
     tracker = PortfolioTracker(broker)
 
     events: list[dict] = []
@@ -60,9 +83,12 @@ def main() -> int:
 
     record("session_start", kill_switch=risk.halted)
 
+    # Unique per run: the observation journal refuses reused client order IDs,
+    # and one journal accumulates every daily session.
+    session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     orders = [
-        OrderRequest("EURUSD", Side.BUY, Decimal("1"), Decimal("1.10"), "sess-1"),
-        OrderRequest("GBPUSD", Side.BUY, Decimal("1"), Decimal("1.25"), "sess-2"),
+        OrderRequest("EURUSD", Side.BUY, Decimal("1"), Decimal("1.10"), f"sess-{session_id}-1", dict(SESSION_LINEAGE)),
+        OrderRequest("GBPUSD", Side.BUY, Decimal("1"), Decimal("1.25"), f"sess-{session_id}-2", dict(SESSION_LINEAGE)),
     ]
 
     for order in orders:
@@ -86,7 +112,18 @@ def main() -> int:
             record("close_error", symbol=pos.symbol, reason=str(exc))
 
     record("session_end")
-    print(json.dumps({"ok": True, "events": events, "ledger": str(ledger)}, indent=2))
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "events": events,
+                "ledger": str(ledger),
+                "observations_db": str(observations_db),
+                "observations_chain_verified": journal.verify(),
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
