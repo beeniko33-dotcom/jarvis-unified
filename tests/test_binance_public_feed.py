@@ -33,12 +33,12 @@ class BinancePublicFeedTests(unittest.TestCase):
             "12.5", self.close_ms, "812500.0", 100, "5.0", "325000.0", "0",
         ]
 
-    def opener_for(self, candles=None, server_ms=None):
+    def opener_for(self, candles=None, server_ms=None, symbol_status="TRADING", spot_allowed=True):
         def opener(request, timeout=10):
             path = urlparse(request.full_url).path
             if path.endswith("/exchangeInfo"):
                 return _Response({"symbols": [{
-                    "symbol": "BTCUSDT", "status": "TRADING", "isSpotTradingAllowed": True,
+                    "symbol": "BTCUSDT", "status": symbol_status, "isSpotTradingAllowed": spot_allowed,
                 }]})
             if path.endswith("/time"):
                 return _Response({"serverTime": server_ms or self.server_ms})
@@ -94,6 +94,12 @@ class BinancePublicFeedTests(unittest.TestCase):
             fetch_latest_completed_candle(
                 opener=self.opener_for([bad]), now=lambda: self.now,
             )
+
+    def test_rejects_paused_or_non_spot_symbol(self):
+        with self.assertRaisesRegex(ValueError, "not uniquely listed"):
+            fetch_latest_completed_candle(opener=self.opener_for(symbol_status="BREAK"), now=lambda: self.now)
+        with self.assertRaisesRegex(ValueError, "not uniquely listed"):
+            fetch_latest_completed_candle(opener=self.opener_for(spot_allowed=False), now=lambda: self.now)
 
     def test_rejects_invalid_symbol_and_interval(self):
         with self.assertRaises(ValueError):
