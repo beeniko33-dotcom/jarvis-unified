@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from research.biquote_feed import (
-    BIQUOTE_HUB, PROVIDER, build_tick_observation,
+    BIQUOTE_HUB, PROVIDER, build_tick_observation, collection_exit_code,
 )
 
 
@@ -115,6 +115,21 @@ class BiquoteFeedTests(unittest.TestCase):
                 self.assertEqual(stored["evidence_class"], "unverified_candidate")
             finally:
                 store.close()
+
+    def test_collection_exit_code_rejects_queue_loss_or_rejected_events(self):
+        healthy = {
+            "event_chain_valid": True, "inserted": 12, "dropped_queue_full": 0,
+            "rejected": 0, "collection_integrity": "candidate_observed",
+        }
+        self.assertEqual(collection_exit_code(healthy), 0)
+        for degraded in (
+            dict(healthy, dropped_queue_full=1, collection_integrity="degraded"),
+            dict(healthy, rejected=1, collection_integrity="degraded"),
+            dict(healthy, inserted=0, collection_integrity="no_usable_ticks"),
+            dict(healthy, event_chain_valid=False),
+        ):
+            with self.subTest(degraded=degraded):
+                self.assertEqual(collection_exit_code(degraded), 1)
 
     def test_hub_is_public_https_endpoint(self):
         self.assertEqual(BIQUOTE_HUB, "https://biquote.io/hubs/tick")
