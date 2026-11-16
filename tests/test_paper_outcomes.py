@@ -44,6 +44,9 @@ class PaperOutcomeAnalyticsTests(unittest.TestCase):
         report = build_paper_outcome_report(self.journal)
         self.assertEqual(report.approved_decisions, 1)
         self.assertEqual(report.rejected_decisions, 0)
+        self.assertEqual(report.entry_attempts, 1)
+        self.assertEqual(report.rejected_entry_attempts, 0)
+        self.assertEqual(report.rejected_entry_rate, "0")
         self.assertEqual(report.order_count, 2)
         self.assertEqual(report.filled_orders, 2)
         self.assertEqual(report.close_events, 1)
@@ -65,10 +68,48 @@ class PaperOutcomeAnalyticsTests(unittest.TestCase):
 
         report = build_paper_outcome_report(self.journal)
         self.assertEqual(report.rejected_decisions, 1)
+        self.assertEqual(report.entry_attempts, 1)
+        self.assertEqual(report.rejected_entry_attempts, 1)
+        self.assertEqual(report.rejected_entry_rate, "1")
         self.assertEqual(report.imported_ledger_events, 0)
         self.assertEqual(report.gross_realized_pnl, "0")
         self.assertEqual(report.commission_paid, "0")
         self.assertEqual(report.order_count, 0)
+
+    def test_reservation_rejection_counts_one_attempt_after_risk_approval(self):
+        self.journal.append(
+            event_id="decision:reserve-1", event_type="risk_approved",
+            data={"client_order_id": "reserve-1"}, occurred_at=self.clock(),
+        )
+        self.journal.append(
+            event_id="reservation-rejected:reserve-1", event_type="reservation_rejected",
+            data={"client_order_id": "reserve-1", "risk_reason": "exposure cap"},
+            occurred_at=self.clock(),
+        )
+
+        report = build_paper_outcome_report(self.journal)
+
+        self.assertEqual(report.approved_decisions, 1)
+        self.assertEqual(report.reservation_rejections, 1)
+        self.assertEqual(report.entry_attempts, 1)
+        self.assertEqual(report.rejected_entry_attempts, 1)
+        self.assertEqual(report.rejected_entry_rate, "1")
+
+    def test_mixed_entry_attempts_have_fractional_rejection_rate(self):
+        self.journal.append(
+            event_id="decision:approved", event_type="risk_approved",
+            data={"client_order_id": "approved"}, occurred_at=self.clock(),
+        )
+        self.journal.append(
+            event_id="decision:rejected", event_type="risk_rejected",
+            data={"client_order_id": "rejected"}, occurred_at=self.clock(),
+        )
+
+        report = build_paper_outcome_report(self.journal)
+
+        self.assertEqual(report.entry_attempts, 2)
+        self.assertEqual(report.rejected_entry_attempts, 1)
+        self.assertEqual(report.rejected_entry_rate, "0.5")
 
     def test_execution_order_is_visible_before_ledger_import(self):
         broker = PaperBroker(Decimal("1000"))
