@@ -33,9 +33,14 @@ switch SQLite-backed components automatically.
 ## Control-plane heartbeat and audit adapter (opt-in)
 
 `research.supabase_control_plane.SupabaseControlPlaneStore` writes worker heartbeat
-snapshots and append-only runtime audit events. It is not automatically enabled by
-the worker runtime. Use it only from a trusted backend process with
-`JARVIS_DATABASE_URL`; it is never suitable for browser/mobile clients.
+snapshots and append-only runtime audit events. The read-only status API has an
+additional best-effort lifecycle reporter in `research.control_plane_runtime`.
+Enable it only with `JARVIS_SUPABASE_CONTROL_PLANE_ENABLED=true` and a backend-only
+`JARVIS_DATABASE_URL` in the trusted worker's secret manager. It is disabled by
+default and never suitable for browser/mobile clients. Startup, shutdown and periodic
+heartbeat writes are best-effort: database failures are logged by exception type
+only and must never prevent the local paper status API from serving. A stopped
+heartbeat is not proof of a clean shutdown; monitor heartbeat age externally.
 
 Heartbeat writes hard-code `mode='paper'`, reject invalid health values and
 out-of-order heartbeat timestamps. Audit events are insert-only and include a
