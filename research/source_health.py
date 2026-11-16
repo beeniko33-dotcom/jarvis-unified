@@ -6,6 +6,7 @@ market data, or make observations eligible for strategy scoring.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import floor
 from datetime import datetime, timezone
 from typing import Iterable
 
@@ -59,7 +60,11 @@ def assess_source_health(
 
     Events are sorted by event time. Repeated timestamps do not create extra
     cadence intervals. Missing intervals are estimates based on configured
-    cadence, not proof that a provider failed to publish a market event.
+    cadence, not proof that a provider failed to publish a market event. Each
+    gap is rounded to the nearest expected interval (half-up); this avoids
+    losing a full missing interval when timestamp delay is close to 2x cadence.
+    Duplicate counts reflect only duplicate flags supplied by the caller. A
+    persistence layer that discards duplicates cannot reconstruct those events.
     """
     if not source_id.strip():
         raise ValueError("source_id is required")
@@ -74,8 +79,9 @@ def assess_source_health(
     missing_intervals = 0
     for previous, current in zip(unique_times, unique_times[1:]):
         elapsed = (current - previous).total_seconds()
-        # Five percent tolerance avoids gaps caused by ordinary timestamp jitter.
-        elapsed_intervals = int((elapsed / expected_interval_seconds) + 0.05)
+        # Round to the nearest expected interval (half-up). Small timestamp
+        # jitter is absorbed, while a 1.9x cadence gap still counts as 2 slots.
+        elapsed_intervals = floor((elapsed / expected_interval_seconds) + 0.5)
         missing_intervals += max(0, elapsed_intervals - 1)
 
     last_event = unique_times[-1] if unique_times else None
