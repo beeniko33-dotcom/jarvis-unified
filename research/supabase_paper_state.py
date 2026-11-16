@@ -218,6 +218,15 @@ class SupabasePaperStateStore:
                     tail = cur.fetchone()
                     sequence = int(tail[0]) if tail else 0
                     previous_hash = tail[1] if tail else _GENESIS
+                    # The run row references its account, so create a first snapshot
+                    # inside this same transaction before inserting the run/ledger rows.
+                    if row is None:
+                        cur.execute(
+                            """insert into jarvis_private.paper_accounts
+                               (account_id, mode, revision, state, state_sha256, last_run_id, updated_at)
+                               values (%s, 'paper', %s, %s::jsonb, %s, %s, %s)""",
+                            (account_id, expected_revision + 1, state_json, state_hash, run_uuid, now),
+                        )
                     cur.execute(
                         """insert into jarvis_private.paper_runs
                            (run_id, account_id, mode, status, revision_before, revision_after,
@@ -245,16 +254,14 @@ class SupabasePaperStateStore:
                              payload_json, previous_hash, digest),
                         )
                         previous_hash = digest
-                    cur.execute(
-                        """insert into jarvis_private.paper_accounts
-                           (account_id, mode, revision, state, state_sha256, last_run_id, updated_at)
-                           values (%s, 'paper', %s, %s::jsonb, %s, %s, %s)
-                           on conflict (account_id) do update set
-                             mode = 'paper', revision = excluded.revision,
-                             state = excluded.state, state_sha256 = excluded.state_sha256,
-                             last_run_id = excluded.last_run_id, updated_at = excluded.updated_at""",
-                        (account_id, expected_revision + 1, state_json, state_hash, run_uuid, now),
-                    )
+                    if row is not None:
+                        cur.execute(
+                            """update jarvis_private.paper_accounts
+                               set mode = 'paper', revision = %s, state = %s::jsonb,
+                                   state_sha256 = %s, last_run_id = %s, updated_at = %s
+                               where account_id = %s""",
+                            (expected_revision + 1, state_json, state_hash, run_uuid, now, account_id),
+                        )
         return {
             "account_id": account_id, "run_id": run_uuid,
             "revision": expected_revision + 1, "state_sha256": state_hash,
