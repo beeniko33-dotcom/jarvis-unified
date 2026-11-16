@@ -72,7 +72,10 @@ class FakeConnection:
         return False
 
     def cursor(self):
-        return FakeCursor(self)
+        return FakeCursor(self.state)
+
+    def close(self):
+        pass
 
 
 class PostgresEvidenceStoreTests(unittest.TestCase):
