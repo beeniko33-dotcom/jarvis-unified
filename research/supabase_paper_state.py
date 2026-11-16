@@ -127,6 +127,7 @@ class SupabasePaperStateStore:
         _, actual_hash = _validate_json(state)
         if actual_hash != expected_hash:
             raise PaperStateIntegrityError("stored account state hash mismatch")
+        self.verify_ledger(account_id)
         return {
             "account_id": account_id,
             "mode": "paper",
@@ -267,3 +268,45 @@ class SupabasePaperStateStore:
             "revision": expected_revision + 1, "state_sha256": state_hash,
             "duplicate": False, "mode": "paper",
         }
+    
+    def verify_ledger(self, account_id: str) -> dict:
+        """Verify every remote ledger event, including ordering and hash-chain continuity."""
+        account_id = self._account_id(account_id)
+        previous_hash = _GENESIS
+        expected_sequence = 1
+        with closing(self._connect()) as db:
+            with db:
+                with db.cursor() as cur:
+                    cur.execute(
+                        """select sequence, run_id::text, event_type, occurred_at,
+                                  payload, previous_hash, event_hash
+                           from jarvis_private.paper_ledger_events
+                           where account_id = %s order by sequence asc""",
+                        (account_id,),
+                    )
+                    rows = cur.fetchall()
+        for sequence, run_id, event_type, occurred_at, payload, stored_previous, stored_hash in rows:
+            if int(sequence) != expected_sequence or stored_previous != previous_hash:
+                raise PaperStateIntegrityError("paper ledger sequence or previous hash mismatch")
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except json.JSONDecodeError as exc:
+                    raise PaperStateIntegrityError("paper ledger payload is invalid JSON") from exc
+            if not isinstance(occurred_at, datetime) or occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
+                raise PaperStateIntegrityError("paper ledger timestamp is not timezone-aware")
+            material = json.dumps(
+                {"account_id": account_id, "sequence": int(sequence),
+                 "run_id": str(run_id), "event_type": event_type,
+                 "occurred_at": occurred_at.astimezone(timezone.utc).isoformat(),
+                 "payload": payload},
+                sort_keys=True, separators=(",", ":"), allow_nan=False,
+            )
+            actual_hash = hashlib.sha256((previous_hash + "|" + material).encode()).hexdigest()
+            if actual_hash != stored_hash:
+                raise PaperStateIntegrityError("paper ledger event hash mismatch")
+            previous_hash = actual_hash
+            expected_sequence += 1
+        return {"account_id": account_id, "events": expected_sequence - 1,
+                "tail_hash": previous_hash, "verified": True}
+
