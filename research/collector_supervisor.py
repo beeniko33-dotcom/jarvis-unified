@@ -221,13 +221,13 @@ def run_one_session(
         record = SessionRecord(
             session_id=sid, started_at=started, ended_at=_utc_now_iso(),
             exit_code=None, duration_seconds=duration_seconds,
-            command=list(command), db_path=str(db_path), status="skipped_lock",
+            command=[], db_path=str(db_path), status="skipped_lock",
         )
         logger.warning("skipped session %s — lock held", sid)
         return write_record(record)
 
     try:
-        logger.info("starting session %s: %s", sid, " ".join(command))
+        logger.info("starting session %s (executable=%s, argument_count=%s)", sid, Path(command[0]).name if command else "<none>", max(0, len(command) - 1))
         with stdout_path.open("w", encoding="utf-8") as stdout_file, stderr_path.open(
             "w", encoding="utf-8"
         ) as stderr_file:
@@ -263,7 +263,7 @@ def run_one_session(
         record = SessionRecord(
             session_id=sid, started_at=started, ended_at=_utc_now_iso(),
             exit_code=exit_code, duration_seconds=duration_seconds,
-            command=list(command), db_path=str(db_path), status=status,
+            command=[], db_path=str(db_path), status=status,
         )
         logger.info("session %s finished status=%s exit=%s", sid, status, exit_code)
         return write_record(record)
@@ -272,7 +272,7 @@ def run_one_session(
         record = SessionRecord(
             session_id=sid, started_at=started, ended_at=_utc_now_iso(),
             exit_code=127, duration_seconds=duration_seconds,
-            command=list(command), db_path=str(db_path), status="failed",
+            command=[], db_path=str(db_path), status="failed",
         )
         logger.exception("could not start session %s", sid)
         return write_record(record)
