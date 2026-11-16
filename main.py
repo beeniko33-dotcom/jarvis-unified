@@ -378,10 +378,18 @@ def main(argv: Sequence[str] | None = None) -> None:
         def status():
             return build_status_payload(broker, settings, risk)
 
+        from research.control_plane_runtime import ControlPlaneReporter
+
+        reporter = ControlPlaneReporter.from_environment()
+        if reporter is not None:
+            reporter.start()
         try:
             serve(host, port, status, allow_container_bind=args.container_bind)
         except RuntimeError as exc:
             raise SystemExit(str(exc)) from exc
+        finally:
+            if reporter is not None:
+                reporter.stop()
         return
     parser.print_help()
 
