@@ -107,7 +107,7 @@ class SupabaseControlPlaneTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "16 KiB"):
             self.store.append_audit_event(
                 event_type="worker.started", occurred_at=self.now,
-                component="collector", payload={"data": "x" * 17000},
+                component="collector", payload={f"field_{index}": "x" * 4000 for index in range(5)},
             )
 
 
