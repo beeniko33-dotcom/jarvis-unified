@@ -79,9 +79,9 @@ class FakeConnection:
             self._handlers["ReceiveTick"]([frame])
             if self._reconnect_after is not None and index == self._reconnect_after:
                 # Reconnect callback records the gap; on_open must re-subscribe.
+                # signalrcore fires on_reconnect after the reconnect
+                # handshake; it does not fire on_open a second time.
                 for handler in self._reconnect_handlers:
-                    handler()
-                for handler in self._open_handlers:
                     handler()
 
     def stop(self):
