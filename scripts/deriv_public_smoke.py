@@ -11,7 +11,7 @@ import ssl
 import time
 from datetime import datetime, timezone
 
-from research.deriv_feed import resolve_eurusd_symbol
+from research.deriv_feed import reconcile_live_history, resolve_eurusd_symbol
 from research.transport_session import DERIV_PUBLIC_WS, build_deriv_public_session
 
 
@@ -42,6 +42,7 @@ def run(duration_seconds: int, timeout_seconds: int) -> dict:
         received = 0
         last_epoch = None
         duplicates = 0
+        live_ticks = []
         last_ping = time.monotonic()
         # Short bounded receive waits let the probe schedule keepalives.
         ws.settimeout(min(5, timeout_seconds))
@@ -101,10 +102,73 @@ def run(duration_seconds: int, timeout_seconds: int) -> dict:
                 if epoch == last_epoch:
                     duplicates += 1
             last_epoch = epoch
+            live_ticks.append((epoch, str(quote)))
+            # Bound memory and the historical request to the most recent 500 ticks.
+            if len(live_ticks) > 500:
+                live_ticks.pop(0)
             received += 1
 
+        if not live_ticks or last_epoch is None:
+            return {
+                "status": "no_ticks_observed",
+                "provider": "Deriv",
+                "endpoint": DERIV_PUBLIC_WS,
+                "symbol": symbol,
+                "ticks_received": received,
+                "transport_session": session,
+                "evidence_credit": False,
+                "level_3_certification": False,
+                "trading_actions": 0,
+            }
+
+        # Request an overlapping, bounded historical sample on the same public socket.
+        history_req_id = 31
+        ws.send(json.dumps({
+            "ticks_history": symbol,
+            "end": last_epoch,
+            "count": min(500, len(live_ticks)),
+            "style": "ticks",
+            "req_id": history_req_id,
+        }))
+        ws.settimeout(timeout_seconds)
+        history_deadline = time.monotonic() + timeout_seconds
+        history_response = None
+        while time.monotonic() < history_deadline:
+            try:
+                raw = ws.recv()
+            except websocket.WebSocketTimeoutException:
+                continue
+            payload = json.loads(raw)
+            echo = payload.get("echo_req") if isinstance(payload, dict) else None
+            response_req_id = payload.get("req_id") if isinstance(payload, dict) else None
+            correlated = (
+                response_req_id == history_req_id
+                or (isinstance(echo, dict) and echo.get("req_id") == history_req_id)
+            )
+            if not correlated:
+                # Ignore late subscription ticks and unrelated keepalive responses.
+                continue
+            if payload.get("error"):
+                raise RuntimeError(f"Deriv history API returned an error: {payload['error']!r}")
+            if payload.get("msg_type") != "history":
+                raise RuntimeError("correlated Deriv history response has unexpected message type")
+            if not isinstance(echo, dict) or echo.get("ticks_history") != symbol:
+                raise RuntimeError("Deriv history response symbol/request binding mismatch")
+            history_response = payload
+            break
+        if history_response is None:
+            raise TimeoutError("timed out waiting for correlated Deriv ticks_history response")
+
+        reconciliation = reconcile_live_history(live_ticks, history_response)
         return {
-            "status": "ticks_observed" if received else "no_ticks_observed",
+            "status": "ticks_observed_history_consistent",
+            "provider": "Deriv",
+            "endpoint": DERIV_PUBLIC_WS,
+            "symbol": symbol,
+            "ticks_received": received,
+            "duplicate_second_timestamps": duplicates,
+            "last_provider_epoch": last_epoch,
+            "history_reconciliation": reconciliation,
             "provider": "Deriv",
             "endpoint": DERIV_PUBLIC_WS,
             "symbol": symbol,
