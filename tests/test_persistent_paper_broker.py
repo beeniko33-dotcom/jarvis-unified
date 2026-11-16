@@ -87,6 +87,35 @@ class PersistentPaperBrokerTests(unittest.TestCase):
         after = recovered.get_account()
         self.assertEqual(after.peak_equity, Decimal("1000"))
         self.assertEqual(after.drawdown_pct, first.drawdown_pct)
+    def test_export_and_restore_snapshot_across_fresh_runner_databases(self):
+        source = self.broker()
+        source.place_order(self.order(qty="2", price="15"))
+        source.set_last_price("EURUSD", "17")
+        exported = source.export_state()
+
+        target_db = Path(self.tmp.name) / "next-runner.sqlite3"
+        target = PersistentPaperBroker(
+            Decimal("1000"), database_path=target_db,
+            clock=lambda: self.now,
+        )
+        target.restore_state(exported)
+
+        self.assertEqual(target.export_state(), exported)
+        self.assertEqual(target.get_account().balance, source.get_account().balance)
+        self.assertEqual(target.get_positions()[0].quantity, Decimal("2"))
+        self.assertTrue(target.verify_ledger())
+
+    def test_restore_rejects_non_json_and_preserves_existing_state(self):
+        broker = self.broker()
+        broker.place_order(self.order())
+        before = broker.export_state()
+
+        with self.assertRaises(ValueError):
+            broker.restore_state({"balance": float("nan")})
+
+        self.assertEqual(broker.export_state(), before)
+        self.assertTrue(broker.verify_ledger())
+
     def test_tampered_event_is_detected_and_broker_fails_closed(self):
         broker = self.broker()
         broker.place_order(self.order())

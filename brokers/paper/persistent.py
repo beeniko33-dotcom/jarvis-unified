@@ -429,6 +429,53 @@ class PersistentPaperBroker(PaperBroker):
         with self._db() as db:
             return int(db.execute("SELECT COUNT(*) FROM paper_events").fetchone()[0])
 
+    def export_state(self) -> dict:
+        """Return a verified, JSON-safe snapshot suitable for external paper-state storage."""
+        with self._persistent_lock, self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                self._refresh_from_db(db)
+                state = self._snapshot()
+                # Ensure the exported snapshot is serializable without NaN/Infinity.
+                json.dumps(state, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                db.commit()
+                return state
+            except Exception:
+                db.rollback()
+                raise
+
+    def restore_state(self, state: dict) -> None:
+        """Restore a previously verified paper snapshot into this local SQLite instance.
+
+        This is intended for a fresh, short-lived paper runner. The imported snapshot
+        is committed with a local audit event; it never connects to a live broker.
+        """
+        if not isinstance(state, dict):
+            raise ValueError("paper state must be a JSON object")
+        try:
+            json.dumps(state, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("paper state must be finite JSON data") from exc
+
+        with self._persistent_lock, self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            prior_state = None
+            try:
+                self._refresh_from_db(db)
+                prior_state = self._snapshot()
+                self._restore(state)
+                restored = self._snapshot()
+                self._save_snapshot(db)
+                self._append_event(
+                    db, "external_paper_restore", restored, Decimal("0"), Decimal("0")
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
+                if prior_state is not None:
+                    self._restore(prior_state)
+                raise
+
     def reconcile(self) -> dict:
         with self._persistent_lock, self._db() as db:
             db.execute("BEGIN IMMEDIATE")
