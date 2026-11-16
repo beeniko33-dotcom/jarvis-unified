@@ -87,6 +87,7 @@ class SupabaseControlPlaneStore:
             raise RuntimeError("Postgres support requires the optional 'postgres' dependencies") from exc
         return psycopg.connect(
             self.dsn, connect_timeout=5, sslmode="require",
+            options="-c statement_timeout=5000 -c lock_timeout=2000",
             application_name="jarvis-unified-control-plane",
         )
 
