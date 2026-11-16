@@ -125,6 +125,9 @@ class BiquoteFeedTests(unittest.TestCase):
         for degraded in (
             dict(healthy, dropped_queue_full=1, collection_integrity="degraded"),
             dict(healthy, rejected=1, collection_integrity="degraded"),
+            dict(healthy, reconnect_events=1, collection_integrity="degraded"),
+            dict(healthy, unexpected_disconnects=1, collection_integrity="degraded"),
+            dict(healthy, hub_errors=1, collection_integrity="degraded"),
             dict(healthy, inserted=0, collection_integrity="no_usable_ticks"),
             dict(healthy, event_chain_valid=False),
         ):
