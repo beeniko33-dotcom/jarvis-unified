@@ -1,0 +1,42 @@
+name: Deriv public feed smoke
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "research/deriv_feed.py"
+      - "research/transport_session.py"
+      - "scripts/deriv_public_smoke.py"
+      - ".github/workflows/deriv-public-feed-smoke.yml"
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */6 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deriv-public-feed-smoke
+  cancel-in-progress: false
+
+jobs:
+  public-feed-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install pinned runtime dependencies
+        run: |
+          python -m pip install "pip==26.3"
+          python -m pip install -r requirements-lock.txt
+          python -m pip check
+
+      - name: Probe Deriv public EURUSD feed (read-only, bounded)
+        run: python -m scripts.deriv_public_smoke --duration-seconds 120 --timeout-seconds 15
