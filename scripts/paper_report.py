@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Sequence
+
+# Allow `python scripts/paper_report.py` from the repo root to import `research`.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 def load_rows(path: Path) -> list[dict]:
@@ -71,7 +77,46 @@ def _utc_timestamp(value: object) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def summarize(rows: list[dict]) -> dict:
+def decision_stats(events: list[dict]) -> dict:
+    """Count entry decisions from execution-observation events.
+
+    The rate is rejected entries over decided entries (risk_approved + risk_rejected).
+    A reservation rejection happens after a risk approval, so it adds to the rejected
+    count without adding to the denominator.
+    """
+    counts = {"risk_approved": 0, "risk_rejected": 0, "reservation_rejected": 0, "broker_submission_error": 0}
+    for event in events:
+        kind = event.get("event_type")
+        if kind in counts:
+            counts[kind] += 1
+    decided = counts["risk_approved"] + counts["risk_rejected"]
+    rejected = counts["risk_rejected"] + counts["reservation_rejected"]
+    return {
+        "decided_entries": decided,
+        "rejected_entries": rejected,
+        "broker_submission_errors": counts["broker_submission_error"],
+        "rejected_entry_rate": str(Decimal(rejected) / Decimal(decided)) if decided else None,
+    }
+
+
+def _rejection_fields(decisions: list[dict] | None) -> dict:
+    if decisions is None:
+        return {
+            "rejected_entry_rate": None,
+            "rejected_entry_rate_note": (
+                "Unavailable: this fill-only ledger does not record risk-rejected entries; "
+                "pass --observations-db to include them."
+            ),
+        }
+    stats = decision_stats(decisions)
+    if stats["rejected_entry_rate"] is None:
+        stats["rejected_entry_rate_note"] = (
+            "No entry decisions were recorded in the observations journal."
+        )
+    return stats
+
+
+def summarize(rows: list[dict], decisions: list[dict] | None = None) -> dict:
     if not rows:
         raise ValueError("ledger contains no filled-order records")
 
@@ -166,10 +211,7 @@ def summarize(rows: list[dict]) -> dict:
         "notional_weighted_slippage_bps": slippage_bps,
         "attributed_fill_count": attributed_fill_count,
         "attribution_coverage": str(Decimal(attributed_fill_count) / len(rows)),
-        "rejected_entry_rate": None,
-        "rejected_entry_rate_note": (
-            "Unavailable: this fill-only ledger does not record risk-rejected entries."
-        ),
+        **_rejection_fields(decisions),
         "ending_balance": str(rows[-1]["balance"]),
         "ending_equity": str(rows[-1]["equity"]),
         "open_positions_at_end": int(rows[-1]["open_positions"]),
@@ -188,13 +230,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=1,
         help="fail unless the ledger has this many consecutive UTC calendar days with events",
     )
+    parser.add_argument(
+        "--observations-db",
+        type=Path,
+        default=None,
+        help="execution-observation journal written by paper_session.py; enables rejected-entry rate",
+    )
     args = parser.parse_args(argv)
     if args.min_days < 1:
         parser.error("--min-days must be at least 1")
     if not args.ledger.is_file():
         parser.error(f"ledger not found: {args.ledger}")
+    decisions = None
+    if args.observations_db is not None:
+        if not args.observations_db.is_file():
+            parser.error(f"observations journal not found: {args.observations_db}")
+        from research.execution_observations import ExecutionObservationJournal
+
+        journal = ExecutionObservationJournal(args.observations_db)
+        if not journal.verify():
+            parser.error("observations journal failed hash-chain verification; refusing to report")
+        decisions = journal.list_events(limit=10000)
     try:
-        result = summarize(load_rows(args.ledger))
+        result = summarize(load_rows(args.ledger), decisions)
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
     print(json.dumps(result, indent=2))

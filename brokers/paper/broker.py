@@ -149,6 +149,13 @@ class PaperBroker:
             "commission_paid": str(self._commission_paid),
             "open_positions": len(self._positions),
         }
+        # Flatten already-sanitized research lineage onto the row so reports can
+        # measure attribution coverage. Fills without lineage stay unattributed.
+        lineage = result.metadata.get("research_lineage") if isinstance(result.metadata, dict) else None
+        if isinstance(lineage, dict):
+            for key in sorted(_LINEAGE_KEYS):
+                if key in lineage and key not in record:
+                    record[key] = lineage[key]
         with self._ledger_path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record) + "\n")
 
