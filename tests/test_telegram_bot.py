@@ -52,6 +52,46 @@ class TelegramStatusBotTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "local health endpoint"):
             TelegramStatusBot("token", "12345", "https://example.com/health")
 
+    def test_run_backs_off_on_transient_failures_and_resets_after_success(self):
+        outcomes = iter([RuntimeError("down"), RuntimeError("still down"), None, RuntimeError("blip")])
+
+        def poll_once():
+            outcome = next(outcomes)
+            if outcome is not None:
+                raise outcome
+
+        self.bot.poll_once = poll_once
+        delays = []
+        with self.assertLogs("apps.telegram.bot", level="WARNING"):
+            self.bot.run(sleep=delays.append, max_iterations=4)
+
+        # 2s, then doubled to 4s; a successful poll resets the delay back to 2s.
+        self.assertEqual(delays, [2.0, 4.0, 2.0])
+
+    def test_run_backoff_is_capped(self):
+        self.bot.poll_once = lambda: (_ for _ in ()).throw(RuntimeError("down"))
+        delays = []
+        with self.assertLogs("apps.telegram.bot", level="WARNING"):
+            self.bot.run(sleep=delays.append, max_iterations=10)
+
+        self.assertEqual(max(delays), 60.0)
+        self.assertEqual(delays[:6], [2.0, 4.0, 8.0, 16.0, 32.0, 60.0])
+
+    def test_run_does_not_swallow_unexpected_errors(self):
+        def poll_once():
+            raise KeyError("bug")
+
+        self.bot.poll_once = poll_once
+        with self.assertRaises(KeyError):
+            self.bot.run(sleep=lambda _: None, max_iterations=1)
+
+    def test_retry_log_never_contains_the_bot_token(self):
+        self.bot.poll_once = lambda: (_ for _ in ()).throw(RuntimeError("Telegram getUpdates request could not reach Telegram"))
+        with self.assertLogs("apps.telegram.bot", level="WARNING") as logs:
+            self.bot.run(sleep=lambda _: None, max_iterations=1)
+
+        self.assertNotIn("not-a-real-token", "\n".join(logs.output))
+
 
 if __name__ == "__main__":
     unittest.main()

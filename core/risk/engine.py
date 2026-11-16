@@ -112,6 +112,10 @@ class RiskEngine:
                 return RiskDecision(False, "symbol is required")
             if not isinstance(order.side, Side):
                 return RiskDecision(False, "unsupported order side")
+            # OrderRequest does not enforce field types. Reject non-Decimal values explicitly so a
+            # float/str/None cannot raise from inside the gate instead of being declined.
+            if not isinstance(order.quantity, Decimal) or not isinstance(order.price, Decimal):
+                return RiskDecision(False, "quantity and price must be Decimal values")
             if (
                 not order.quantity.is_finite()
                 or not order.price.is_finite()
@@ -128,6 +132,8 @@ class RiskEngine:
                 correlated_exposure,
                 reserved_group_notional,
             )
+            if any(not isinstance(value, Decimal) for value in pnl_values):
+                return RiskDecision(False, "risk and exposure inputs must be Decimal values")
             if any(not value.is_finite() for value in pnl_values):
                 return RiskDecision(False, "risk and exposure inputs must be finite")
             if (

@@ -1,9 +1,11 @@
 // Caches ONLY the static app shell listed below. Anything else (health, status,
 // features, self-check, the API root) is never touched here, so live account and
 // health data can never be served from cache.
-const CACHE_NAME = 'jarvis-dashboard-v2';
+const CACHE_NAME = 'jarvis-dashboard-v3';
 const APP_SHELL = [
   '/dashboard',
+  '/dashboard.css',
+  '/dashboard.js',
   '/manifest.webmanifest',
   '/icon.svg',
   '/icons/icon-192.png',

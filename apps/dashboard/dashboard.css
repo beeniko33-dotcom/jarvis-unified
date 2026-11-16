@@ -1,0 +1,23 @@
+:root { color-scheme: dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+body { margin: 0; background: #0b1020; color: #e8eefc; }
+main { max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+.sub { color: #9bb0d0; margin-bottom: 1.5rem; }
+.card { background: #141b2f; border: 1px solid #243056; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+.row { display: flex; justify-content: space-between; gap: 1rem; padding: 0.35rem 0; border-bottom: 1px solid #1c2644; }
+.row:last-child { border-bottom: 0; }
+.label { color: #9bb0d0; }
+.ok { color: #5ddea6; }
+.warn { color: #f0c14a; }
+.err { color: #ff7b7b; }
+button { background: #2a3c5a; color: #e8eefc; border: 1px solid #3a4f7a; border-radius: 8px; padding: 0.5rem 0.9rem; cursor: pointer; }
+button:hover { background: #354e78; }
+code { font-size: 0.85rem; color: #b7c8e8; }
+@media (max-width: 520px) {
+  main { margin: 1.25rem auto; }
+  .card { padding: 0.85rem; }
+  .row { align-items: flex-start; }
+  .row code { overflow-wrap: anywhere; text-align: right; }
+  button { min-height: 44px; width: 100%; }
+}
+.note { margin-top: 1rem; }

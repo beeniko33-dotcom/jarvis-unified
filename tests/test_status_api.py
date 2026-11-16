@@ -136,6 +136,111 @@ class StatusApiTests(unittest.TestCase):
         with urlopen(self.base + path, timeout=2) as response:
             return response.read()
 
+    def test_dashboard_has_strict_csp_and_no_inline_code(self):
+        import re
+
+        _, response = self._raw_get("/dashboard", "127.0.0.1")
+        csp = response.headers["Content-Security-Policy"]
+        for directive in (
+            "default-src 'none'",
+            "script-src 'self'",
+            "style-src 'self'",
+            "connect-src 'self'",
+            "frame-ancestors 'none'",
+            "base-uri 'none'",
+        ):
+            self.assertIn(directive, csp)
+        self.assertNotIn("unsafe-inline", csp)
+        self.assertNotIn("unsafe-eval", csp)
+
+        html = self._get("/dashboard").decode()
+        # The CSP only holds if the page really has no inline script, style, or handlers.
+        self.assertIsNone(re.search(r"<script(?![^>]*\bsrc=)", html))
+        self.assertNotIn("<style", html)
+        self.assertIsNone(re.search(r"\sstyle\s*=", html))
+        self.assertIsNone(re.search(r"\son[a-z]+\s*=", html))
+
+    def test_csp_is_only_needed_on_html_and_assets_have_correct_types(self):
+        _, js = self._raw_get("/dashboard.js", "127.0.0.1")
+        _, css = self._raw_get("/dashboard.css", "127.0.0.1")
+        self.assertIn("text/javascript", js.headers["Content-Type"])
+        self.assertIn("text/css", css.headers["Content-Type"])
+        self.assertIsNone(js.headers["Content-Security-Policy"])
+
+    def test_every_local_asset_the_page_loads_is_in_the_offline_shell(self):
+        import re
+
+        html = self._get("/dashboard").decode()
+        referenced = set(re.findall(r'(?:href|src)="(/[^"?#]*)"', html))
+        self.assertIn("/dashboard.js", referenced)
+        self.assertIn("/dashboard.css", referenced)
+        worker = self._get("/service-worker.js").decode()
+        shell = set(re.findall(r"'(/[^']*)'", worker.split("APP_SHELL = [", 1)[1].split("];", 1)[0]))
+        for path in referenced:
+            with self.subTest(path=path):
+                self.assertIn(path, shell)
+
+    def _raw_get(self, path, host):
+        import http.client
+
+        connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=2)
+        try:
+            connection.putrequest("GET", path, skip_host=True)
+            if host is not None:
+                connection.putheader("Host", host)
+            connection.endheaders()
+            response = connection.getresponse()
+            response.read()
+            return response.status, response
+        finally:
+            connection.close()
+
+    def test_unexpected_host_header_is_rejected(self):
+        # DNS-rebinding defence: a page on evil.example resolving to 127.0.0.1 must get nothing.
+        for host in ("evil.example", "evil.example:8787", "127.0.0.1.evil.example", "localhost.evil.example", "", None):
+            with self.subTest(host=host):
+                status, _ = self._raw_get("/status", host)
+                self.assertEqual(status, 403)
+
+    def test_expected_host_headers_are_accepted_on_any_port(self):
+        for host in ("127.0.0.1", "127.0.0.1:8787", "localhost:9999", "LOCALHOST", "[::1]:8787", "jarvis:8787"):
+            with self.subTest(host=host):
+                status, _ = self._raw_get("/health", host)
+                self.assertEqual(status, 200)
+
+    def test_security_headers_are_sent_on_every_response(self):
+        for path in ("/health", "/dashboard", "/missing"):
+            with self.subTest(path=path):
+                _, response = self._raw_get(path, "127.0.0.1")
+                self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
+                self.assertEqual(response.headers["X-Frame-Options"], "DENY")
+                self.assertEqual(response.headers["Referrer-Policy"], "no-referrer")
+        _, rejected = self._raw_get("/status", "evil.example")
+        self.assertEqual(rejected.headers["X-Content-Type-Options"], "nosniff")
+
+    def test_provider_failure_returns_plain_500_without_internals(self):
+        def broken():
+            raise RuntimeError("secret internal detail")
+
+        handler = type("BrokenHandler", (StatusHandler,), {"status_provider": staticmethod(broken)})
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with self.assertRaises(HTTPError) as error:
+                urlopen(f"http://127.0.0.1:{server.server_port}/status", timeout=2)
+            body = error.exception.read().decode()
+            error.exception.close()
+            self.assertEqual(error.exception.code, 500)
+            self.assertNotIn("secret internal detail", body)
+            # The server survives and keeps answering.
+            with urlopen(f"http://127.0.0.1:{server.server_port}/health", timeout=2) as response:
+                self.assertEqual(response.status, 200)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
     def test_serve_reports_port_in_use(self):
         occupied = ThreadingHTTPServer(("127.0.0.1", 0), StatusHandler)
         port = occupied.server_port

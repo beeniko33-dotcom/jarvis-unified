@@ -4,7 +4,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any
+import time
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
@@ -18,6 +19,8 @@ _ALLOWED_HEALTH_URLS = {
 }
 _HEALTH_MESSAGE = "Jarvis Unified is healthy (paper-only; live trading disabled)."
 _UNAVAILABLE_MESSAGE = "Jarvis Unified health is unavailable."
+_BACKOFF_INITIAL_SECONDS = 2.0
+_BACKOFF_MAX_SECONDS = 60.0
 
 
 def _open_direct(request: Request, timeout: int):
@@ -135,10 +138,30 @@ class TelegramStatusBot:
                 self._offset = max(self._offset or 0, update_id + 1)
             self.handle_update(update)
 
-    def run(self) -> None:
+    def run(
+        self,
+        *,
+        sleep: Callable[[float], None] = time.sleep,
+        max_iterations: int | None = None,
+    ) -> None:
+        """Poll until stopped, backing off on transient Telegram or network failures.
+
+        Only RuntimeError (the bot's own connectivity/response errors, which never carry the
+        token) is retried. Anything else is a bug and propagates so the supervisor restarts us.
+        """
         _LOG.info("Starting read-only Telegram status polling")
-        while True:
-            self.poll_once()
+        delay = _BACKOFF_INITIAL_SECONDS
+        iterations = 0
+        while max_iterations is None or iterations < max_iterations:
+            iterations += 1
+            try:
+                self.poll_once()
+            except RuntimeError as exc:
+                _LOG.warning("Telegram polling failed (%s); retrying in %.0fs", exc, delay)
+                sleep(delay)
+                delay = min(delay * 2, _BACKOFF_MAX_SECONDS)
+            else:
+                delay = _BACKOFF_INITIAL_SECONDS
 
 
 def main() -> None:
