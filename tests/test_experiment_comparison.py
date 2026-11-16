@@ -73,6 +73,38 @@ class ExperimentComparisonTests(unittest.TestCase):
         self.assertIn("source_ledger_hash_missing", report.reasons)
         self.assertEqual(report.metric_deltas, {})
 
+    def test_legacy_verified_labels_are_downgraded_during_schema_migration(self):
+        item = self.record("legacy", {}, {"net_pnl": 0})
+        with self.store._connect() as db:
+            db.execute("DROP INDEX IF EXISTS idx_experiment_source_verifications")
+            db.execute(
+                "ALTER TABLE experiment_source_verifications "
+                "RENAME TO experiment_source_verifications_new"
+            )
+            db.execute("""
+                CREATE TABLE experiment_source_verifications (
+                    verification_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    experiment_id TEXT NOT NULL REFERENCES research_experiments(experiment_id),
+                    ledger_hash TEXT NOT NULL,
+                    journal_hash TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('verified','mismatch')),
+                    checked_at TEXT NOT NULL
+                )
+            """)
+            db.execute("""
+                INSERT INTO experiment_source_verifications
+                (experiment_id,ledger_hash,journal_hash,status,checked_at)
+                VALUES(?,?,?,?,?)
+            """, (item.experiment_id, self.ledger_hash, self.journal_hash,
+                  "verified", self.start.isoformat()))
+            db.execute("DROP TABLE experiment_source_verifications_new")
+            db.commit()
+
+        migrated = ExperienceStore(self.root / "experience.sqlite3")
+        stored = next(
+            row for row in migrated.list() if row.experiment_id == item.experiment_id
+        )
+        self.assertEqual(stored.evidence_status, "integrity_matched_unverified")
     def test_source_artifact_mismatch_is_persisted_and_blocks_comparison(self):
         left = self.record("left", {}, {"pnl": 1})
         right = self.record("right", {}, {"pnl": 2})
