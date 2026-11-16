@@ -111,6 +111,13 @@ class PaperOutcomeAnalyticsTests(unittest.TestCase):
         self.assertEqual(report.rejected_entry_attempts, 1)
         self.assertEqual(report.rejected_entry_rate, "0.5")
 
+    def test_rejection_rate_is_unknown_without_entry_attempts(self):
+        report = build_paper_outcome_report(self.journal)
+
+        self.assertEqual(report.entry_attempts, 0)
+        self.assertEqual(report.rejected_entry_attempts, 0)
+        self.assertIsNone(report.rejected_entry_rate)
+
     def test_execution_order_is_visible_before_ledger_import(self):
         broker = PaperBroker(Decimal("1000"))
         risk = RiskEngine(RiskLimits(Decimal("5"), Decimal("50"), 3, False))
