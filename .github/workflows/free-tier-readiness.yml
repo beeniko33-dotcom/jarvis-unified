@@ -1,0 +1,53 @@
+name: Free-tier paper readiness monitor
+
+on:
+  schedule:
+    # GitHub cron runs at :00, :25 and :50 (the final gap each hour is 10m).
+    # Scheduled starts can be delayed by GitHub; this is not a persistent worker.
+    - cron: "*/25 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jarvis-free-tier-readiness
+  cancel-in-progress: true
+
+jobs:
+  paper-readiness:
+    name: Local paper-mode readiness (not market collection)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    env:
+      JARVIS_MODE: paper
+      KILL_SWITCH: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Validate paper-only startup
+        run: python main.py --check
+
+      - name: Verify read-only runtime report
+        run: |
+          python main.py --report > /tmp/jarvis-readiness.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("/tmp/jarvis-readiness.json").read_text())
+          assert report["ok"] is True, report
+          assert report["mode"] == "paper", report
+          assert report["broker"] == "paper", report
+          assert report["kill_switch"] is True, report
+          assert report["open_positions"] == 0, report
+          print("Paper-only local readiness passed; no orders or market data were used.")
+          PY
