@@ -59,6 +59,25 @@ class ResearchEvidencePipelineTests(unittest.TestCase):
         self.pipeline.ingest(self.observation(source="feed-b", value=101), now=self.now)
         self.assertEqual(self.pipeline.report(source_id="feed-a")["observations"], 1)
 
+    def test_source_health_report_detects_persisted_gaps(self):
+        self.pipeline.ingest(self.observation(180, value=1), now=self.now)
+        self.pipeline.ingest(self.observation(0, value=2), now=self.now)
+        report = self.pipeline.source_health_report(
+            "feed-a", expected_interval_seconds=60,
+            outage_after_seconds=180, now=self.now,
+        )
+        self.assertEqual(report.missing_intervals, 2)
+        self.assertEqual(report.status, "GAPS_DETECTED")
+        self.assertFalse(report.evidence_eligible)
+
+    def test_source_health_report_for_unknown_source_is_no_data(self):
+        report = self.pipeline.source_health_report(
+            "missing-feed", expected_interval_seconds=60,
+            outage_after_seconds=180, now=self.now,
+        )
+        self.assertEqual(report.status, "NO_DATA")
+        self.assertFalse(report.evidence_eligible)
+
     def test_timezone_is_required(self):
         with self.assertRaises(ValueError):
             MarketObservation("feed", datetime(2026, 1, 1), self.now, "EURUSD", "1m", {"mid": 1})
