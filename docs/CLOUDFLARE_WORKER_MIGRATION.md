@@ -18,7 +18,7 @@ Set these in the Cloudflare dashboard under Workers & Pages → jarvis-control-w
 
 `SUPABASE_URL` is a non-secret variable in `wrangler.jsonc`. Do not commit service-role or secret API keys.
 
-## Stage 2 — persistent paper execution (not yet enabled)
+## One-time operator initialization\n\nThe initial state is fail-closed. After the Worker secret is set, the project owner must explicitly initialize its kill-switch state using the Supabase SQL Editor (never from the public dashboard):\n\n\`\`\`sql\ninsert into public.operator_status (worker_id, reported_at, health, mode, kill_switch_engaged, entries_paused, details)\nvalues ('cloudflare-control-worker', now(), 'blocked', 'paper', false, true, jsonb_build_object('worker_type','cloudflare-python-worker','runtime_stage','control-plane-only','paper_session_execution','disabled_pending_postgres_migration','control_state', jsonb_build_object('kill_switch_engaged',false,'entries_paused',true,'last_paper_session_date',null)))\non conflict (worker_id) do update set reported_at=now(), health='blocked', mode='paper', kill_switch_engaged=false, entries_paused=true, details=excluded.details;\n\`\`\`\n\nThis is a deliberate owner-only local initialization step. It does not enable entries; entries remain paused until the operator sends the normal \`resume_entries\` command. If the operator does not perform this initialization, the worker stays kill-switched and paused.\n\n## Stage 2 — persistent paper execution (not yet enabled)
 
 The existing `research/control_worker.py` and `scripts/paper_session.py` use local files, SQLite, and subprocess execution. They must not be called from a Cloudflare Worker as if those resources were durable or equivalent.
 
