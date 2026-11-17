@@ -62,6 +62,7 @@ jobs:
           try:
               with psycopg.connect(dsn, connect_timeout=10, sslmode="require") as conn:
                   with conn.cursor() as cur:
+                      cur.execute("SET TRANSACTION READ ONLY")
                       cur.execute("""
                           SELECT current_database(),
                                  current_user,
@@ -71,6 +72,8 @@ jobs:
                                  to_regclass('jarvis_private.paper_ledger_events') IS NOT NULL
                       """)
                       db, role, read_only, accounts, runs, events = cur.fetchone()
+                      if read_only != "on":
+                          raise RuntimeError("Preflight transaction is not read-only.")
                       if not (accounts and runs and events):
                           raise RuntimeError("One or more required paper-state tables are missing.")
                       cur.execute("""
@@ -89,8 +92,8 @@ jobs:
               # Deliberately omit exception text: drivers can include connection details.
               import re
               safe_message = str(exc).replace(dsn, "[REDACTED]")
-              safe_message = re.sub(r"(?i)(password\\s*=\\s*)[^\\s]+", r"\\1[REDACTED]", safe_message)
-              safe_message = re.sub(r"(://)[^/@\\s]+@ ", r"\\1[REDACTED]@", safe_message)
+              safe_message = re.sub(r"(?i)(password\s*=\s*)[^\s]+", r"\1[REDACTED]", safe_message)
+              safe_message = re.sub(r"(://)[^/@\s]+@", r"\1[REDACTED]@", safe_message)
               print(f"Preflight failed: {type(exc).__name__}; detail={safe_message[:240]}", file=sys.stderr)
               raise SystemExit(1)
           PY
