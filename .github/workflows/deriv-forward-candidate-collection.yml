@@ -15,6 +15,9 @@ concurrency:
 jobs:
   collect-candidates:
     runs-on: ubuntu-24.04
+    env:
+      JARVIS_SUPABASE_URL: ${{ secrets.JARVIS_SUPABASE_URL }}
+      JARVIS_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.JARVIS_SUPABASE_SERVICE_ROLE_KEY }}
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -41,6 +44,19 @@ jobs:
             --db var/deriv_eurusd_forward.sqlite3 \
             | tee deriv-forward-candidate-report.json
 
+      - name: Persist unverified candidates to Supabase
+        if: ${{ env.JARVIS_SUPABASE_URL != '' && env.JARVIS_SUPABASE_SERVICE_ROLE_KEY != '' }}
+        run: |
+          python -m scripts.ingest_deriv_candidates_to_supabase \
+            --db var/deriv_eurusd_forward.sqlite3 \
+            | tee supabase-candidate-ingest-report.json
+
+      - name: Report that durable ingestion is not configured
+        if: ${{ env.JARVIS_SUPABASE_URL == '' || env.JARVIS_SUPABASE_SERVICE_ROLE_KEY == '' }}
+        run: |
+          echo "::warning::Supabase candidate ingestion skipped: configure JARVIS_SUPABASE_URL and JARVIS_SUPABASE_SERVICE_ROLE_KEY as repository Actions secrets."
+          echo '{"status":"SKIPPED_NOT_CONFIGURED","forward_validation_credit_awarded":false}' > supabase-candidate-ingest-report.json
+
       - name: Preserve candidate database and report
         if: always()
         uses: actions/upload-artifact@v4
@@ -48,6 +64,7 @@ jobs:
           name: deriv-forward-candidates-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             deriv-forward-candidate-report.json
+            supabase-candidate-ingest-report.json
             var/deriv_eurusd_forward.sqlite3
           if-no-files-found: warn
           retention-days: 30
