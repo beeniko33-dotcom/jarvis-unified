@@ -20,9 +20,17 @@ async function sha256(value: string): Promise<string> {
 function positive(value: unknown, field: string): number {
   const n=Number(value); if (!Number.isFinite(n)||n<=0) throw new Error(field+"_invalid"); return n;
 }
+function tokenMatches(supplied: string, expected: string): boolean {
+  const a = new TextEncoder().encode(supplied), b = new TextEncoder().encode(expected);
+  if (a.length !== b.length) return false;
+  let difference = 0;
+  for (let i = 0; i < a.length; i++) difference |= a[i] ^ b[i];
+  return difference === 0;
+}
 Deno.serve(async (req: Request) => {
   if(req.method!=="POST") return json({error:"method_not_allowed"},405);
-  if(!SUPABASE_URL||!SERVICE_ROLE_KEY) return json({error:"server_not_configured"},503);
+  if(!SUPABASE_URL||!SERVICE_ROLE_KEY||!INGEST_TOKEN) return json({error:"server_not_configured"},503);
+  if(!tokenMatches(req.headers.get("x-jarvis-ingest-token")??"",INGEST_TOKEN)) return json({error:"unauthorized_ingest_source"},401);
   if(Number(req.headers.get("content-length")??"0")>MAX_BODY_BYTES) return json({error:"payload_too_large"},413);
   let body: Record<string,unknown>;
   try { const raw=await req.text(); if(new TextEncoder().encode(raw).byteLength>MAX_BODY_BYTES)return json({error:"payload_too_large"},413); body=JSON.parse(raw); }
@@ -36,6 +44,12 @@ Deno.serve(async (req: Request) => {
       if(!input||typeof input!=="object"||Array.isArray(input))throw new Error("observation_invalid");
       const item=input as Record<string,unknown>, symbol=String(item.symbol??"").trim().toUpperCase(), eventDate=new Date(String(item.event_time??""));
       if(!/^[A-Z0-9._-]{3,24}$/.test(symbol)||!Number.isFinite(eventDate.getTime()))throw new Error("symbol_or_event_time_invalid");
+      const allowedSymbols: Record<string,string[]> = {
+        biquote:["EURUSD"],
+        deriv:["FRXEURUSD","FRXGBPUSD","FRXUSDJPY","FRXAUDUSD","FRXUSDCAD","FRXUSDCHF","FRXNZDUSD"],
+        twelvedata:["EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","USDCHF","NZDUSD"],
+      };
+      if(!allowedSymbols[provider].includes(symbol))throw new Error("provider_symbol_not_allowed");
       const bid=positive(item.bid,"bid"),ask=positive(item.ask,"ask"),mid=positive(item.mid,"mid");
       if(ask<bid||mid<bid||mid>ask)throw new Error("quote_relationship_invalid");
       const age=(receivedAt.getTime()-eventDate.getTime())/1000,sourceId=provider+":"+symbol;
