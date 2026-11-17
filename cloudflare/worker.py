@@ -158,17 +158,46 @@ class Default(WorkerEntrypoint):
         )}
 
     async def fetch(self, request):
-        if request.method != "GET":
-            return Response("method not allowed", status=405)
-        if request.url.endswith("/health"):
+        path = request.url.split("?", 1)[0].rstrip("/")
+        if path.endswith("/health"):
+            if request.method != "GET":
+                return Response("method not allowed", status=405)
             return Response.json({
                 "service": WORKER_ID,
-                "runtime_stage": "control-plane-only",
+                "runtime_stage": "control-and-market-data-ingress",
+                "market_data_ingress": "proxy_to_jwt_protected_supabase_function",
                 "paper_session_execution": "disabled_pending_postgres_migration",
                 "mode": "paper",
                 "live_trading": "disabled_by_design",
             })
-        return Response("Jarvis worker is running. Use /health for status.", status=200)
+        if path.endswith("/market-data"):
+            if request.method != "POST":
+                return Response("method not allowed", status=405)
+            if not getattr(self.env, "SUPABASE_URL", None) or not getattr(self.env, "SUPABASE_SERVICE_ROLE_KEY", None):
+                return Response("ingress not configured", status=503)
+            raw = await request.text()
+            if len(raw.encode("utf-8")) > 512 * 1024:
+                return Response("payload too large", status=413)
+            try:
+                payload = json.loads(raw)
+            except (TypeError, ValueError):
+                return Response("invalid JSON", status=400)
+            if not isinstance(payload, dict):
+                return Response("JSON object required", status=400)
+            target = self.env.SUPABASE_URL.rstrip("/") + "/functions/v1/market-data-ingest"
+            upstream = await fetch(target, {
+                "method": "POST",
+                "headers": self._headers(),
+                "body": raw,
+            })
+            body = await upstream.text()
+            return Response(body, status=upstream.status, headers={
+                "content-type": "application/json",
+                "cache-control": "no-store",
+            })
+        if request.method != "GET":
+            return Response("method not allowed", status=405)
+        return Response("Jarvis worker is running. Use /health or POST /market-data.", status=200)
 
     async def scheduled(self, controller, env, ctx):
         try:
