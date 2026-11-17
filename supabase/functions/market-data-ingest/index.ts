@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const INGEST_TOKEN = Deno.env.get("JARVIS_INGEST_TOKEN") ?? "";
-const ALLOWED_PROVIDERS = new Set(["biquote", "deriv", "twelvedata", "gateio"]);
+const ALLOWED_PROVIDERS = new Set(["biquote", "deriv", "twelvedata"]);
 const MAX_BODY_BYTES = 512 * 1024;
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {status, headers: {"content-type":"application/json","cache-control":"no-store"}});
