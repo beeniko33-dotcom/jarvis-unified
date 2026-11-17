@@ -89,6 +89,7 @@
       <div class="stat"><small>Live trading</small><strong class="muted">Disabled by design</strong></div>
     </div>
     <p id="stale" class="warn hidden">No recent heartbeat from the local worker. Commands will wait until it is running.</p>
+    <p id="status-error" class="bad hidden" role="alert"></p>
   </section>
 
   <section class="card" aria-labelledby="actions-title">
@@ -238,8 +239,12 @@ function render(data) {
 let pollTimer = null;
 async function refresh() {
   try {
-    render(await api("status"));
+    const data = await api("status");
+    render(data);
+    show($("status-error"), false);
   } catch (error) {
+    text($("status-error"), `Status readings unavailable: ${error.message}`);
+    show($("status-error"), true);
     toast(error.message);
   }
 }
