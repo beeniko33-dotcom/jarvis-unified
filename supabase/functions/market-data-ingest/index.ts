@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const SECRET_KEYS = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}");
+const SERVICE_ROLE_KEY = SECRET_KEYS.default ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const INGEST_TOKEN = Deno.env.get("JARVIS_INGEST_TOKEN") ?? "";
 const ALLOWED_PROVIDERS = new Set(["biquote", "deriv", "twelvedata"]);
 const MAX_BODY_BYTES = 512 * 1024;
@@ -68,7 +69,7 @@ Deno.serve(async (req: Request) => {
     }
   } catch(e) { return json({error:e instanceof Error?e.message:"observation_invalid"},400); }
   const upstream=await fetch(SUPABASE_URL.replace(/\/$/,"")+"/rest/v1/rpc/jarvis_ingest_market_observations",{
-    method:"POST",headers:{apikey:SERVICE_ROLE_KEY,authorization:"Bearer "+SERVICE_ROLE_KEY,"content-type":"application/json"},
+    method:"POST",headers:{apikey:SERVICE_ROLE_KEY,"content-type":"application/json"},
     body:JSON.stringify({p_observations:normalized})});
   if(!upstream.ok)return json({error:"observation_persistence_failed",upstream_status:upstream.status},502);
   const result=await upstream.json();
