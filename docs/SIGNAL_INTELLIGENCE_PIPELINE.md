@@ -44,7 +44,7 @@ JSON payloads are versioned by the producer. Persist provider timestamps separat
 - Cloudflare remains a control/HTTP-ingestion boundary, not a long-running WebSocket collector. The Worker source now includes a `/market-data` proxy route to the JWT-protected Supabase ingestion function; this route is committed but not deployed pending Worker Python runtime validation and out-of-band secret configuration. Keep a persistent collector or provider push source outside request-lifetime Workers.
 - Do not enable the Cloudflare Cron worker until the service-role secret is configured out-of-band and Python Worker runtime + heartbeat are verified.
 - Do not enable paper-session execution in Cloudflare until Postgres transactional account updates, idempotency, event-chain verification and crash recovery are implemented and tested.
-- The existing Biquote collector still writes to local SQLite. The hosted ingestion endpoint now exists, but the collector-to-edge adapter, endpoint secret configuration, and a real read-only end-to-end smoke test are still required before continuous observations reach the hosted ledger.
+- The collector still writes to local SQLite as its local journal and can additionally forward batches to Cloudflare when configured. The endpoint tokens are intentionally not embedded in source. They must be generated and configured out-of-band in Supabase Edge Function secrets and Cloudflare Worker secrets before a real end-to-end read-only smoke test.
 - Provider provenance remains blocked. No Level 3 clock starts and no performance claim is warranted.
 
 ## Read-only operational checks
@@ -55,9 +55,23 @@ After ingestion is deployed, monitor per-source last event time, quote age, spre
 
 1. Schema (deployed).
 2. Contract and validation tests.
-3. Server-side observation ingestion with strict schema validation, idempotency and rate limits.
-4. Signal generation and audit persistence.
+3. Configure `JARVIS_INGEST_TOKEN` in Supabase Edge Function secrets and `JARVIS_COLLECTOR_TOKEN` plus `JARVIS_INGEST_TOKEN` in Cloudflare Worker secrets; keep `SUPABASE_SERVICE_ROLE_KEY` secret-only.
+4. Validate Cloudflare Python runtime and deploy the Worker proxy; run a bounded EUR/USD collector session and verify observations in Supabase.
+5. Add signal generation and audit persistence only after normalized candle history and feed freshness have been validated.
 5. Paper execution integration with bid/ask, slippage, fees, risk limits and transactional state.
 6. Independent feed provenance review and sustained forward validation.
 
 No paid plan or service was provisioned by this change.
+
+
+## Collector configuration (operator action required)
+
+The source adapter is committed but deliberately inert until configured. Set:
+
+- Collector process: `JARVIS_MARKET_DATA_URL=https://<your-worker-host>/market-data` and `JARVIS_COLLECTOR_TOKEN=<high-entropy-token>`.
+- Supabase Edge Function secret: `JARVIS_INGEST_TOKEN=<different-high-entropy-token>`.
+- Cloudflare Worker secrets: `JARVIS_COLLECTOR_TOKEN`, `JARVIS_INGEST_TOKEN`, and the existing `SUPABASE_SERVICE_ROLE_KEY`.
+
+Use distinct random tokens for collector-to-Cloudflare and Cloudflare-to-Supabase. Do not put them in Git, dashboard client code, or chat. Do not start the collector until the Cloudflare Worker has passed its runtime/health check and the secrets are present. The ingestion function intentionally returns 503 when its secret is absent and 401 for an invalid token.
+
+The database RPC smoke test used a transaction that was explicitly rolled back. It verified first-write and duplicate behavior without leaving a production observation. This is not an end-to-end provider-feed test.
