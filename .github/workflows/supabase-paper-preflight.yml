@@ -2,6 +2,10 @@ name: Supabase paper-state connection preflight
 
 on:
   workflow_dispatch:
+  push:
+    branches: [integration/supabase-paper-cycle-bridge]
+    paths:
+      - ".github/workflows/supabase-paper-preflight.yml"
   pull_request:
     branches: [main]
     paths:
