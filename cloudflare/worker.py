@@ -5,6 +5,7 @@ Paper-session execution remains disabled until the persistent account and execut
 engine have been migrated from local SQLite/files into durable Postgres transactions.
 """
 import json
+import traceback
 from datetime import datetime, timezone
 from urllib.parse import quote
 
@@ -222,4 +223,6 @@ class Default(WorkerEntrypoint):
             print(json.dumps({"event": "cron_complete", **result}, separators=(",", ":")))
         except Exception as exc:
             # Error type only; never emit URLs, headers, payloads, or exception messages.
-            print(json.dumps({"event": "cron_failed", "error_type": type(exc).__name__}))
+            frames = traceback.extract_tb(exc.__traceback__)[-5:]
+            safe_frames = [{"file": frame.filename.rsplit("/", 1)[-1], "line": frame.lineno, "function": frame.name} for frame in frames]
+            print(json.dumps({"event": "cron_failed", "error_type": type(exc).__name__, "frames": safe_frames}, separators=(",", ":")))
