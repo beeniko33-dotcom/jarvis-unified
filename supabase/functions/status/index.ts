@@ -41,7 +41,7 @@ Deno.serve(async (req) => {
     if (workerResult.error) return reply(req, 503, { error: "worker status lookup failed" });
     if (commandResult.error) return reply(req, 503, { error: "command history lookup failed" });
     const workers = (workerResult.data ?? []).map((w) => ({
-      ...w, worker_type: "local-control-worker", software_version: null, git_commit: null,
+      ...w, worker_type: (w.details && typeof w.details.worker_type === "string") ? w.details.worker_type : "local-control-worker", software_version: (w.details && typeof w.details.software_version === "string") ? w.details.software_version : null, git_commit: (w.details && typeof w.details.git_commit === "string") ? w.details.git_commit : null,
       kill_switch_engaged: w.kill_switch_engaged, entries_paused: w.entries_paused,
     }));
     return reply(req, 200, {
