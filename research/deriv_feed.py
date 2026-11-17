@@ -301,10 +301,16 @@ def main() -> int:
     parser.add_argument("--duration-seconds", type=int, default=3600)
     parser.add_argument("--db", type=Path, default=Path("var/deriv_eurusd_forward.sqlite3"))
     parser.add_argument("--timeout", type=int, default=20)
+    parser.add_argument("--max-reconnects", type=int, default=5)
+    parser.add_argument("--reconnect-backoff-seconds", type=float, default=1.0)
     args = parser.parse_args()
-    if args.duration_seconds < 1 or args.timeout < 1:
-        parser.error("duration and timeout must be positive")
-    result = collect(args.duration_seconds, args.db, args.timeout)
+    if args.duration_seconds < 1 or args.timeout < 1 or args.max_reconnects < 0 or args.reconnect_backoff_seconds < 0:
+        parser.error("duration and timeout must be positive; retry settings must be non-negative")
+    result = collect(
+        args.duration_seconds, args.db, args.timeout,
+        max_reconnects=args.max_reconnects,
+        reconnect_backoff_seconds=args.reconnect_backoff_seconds,
+    )
     print(json.dumps(result, indent=2))
     return exit_code_for_report(result)
 
