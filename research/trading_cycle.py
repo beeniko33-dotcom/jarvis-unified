@@ -96,7 +96,7 @@ def evaluate_25_minute_session(
     prices = [row[1] for row in normalized]
     signal = "none"
     rationale = "No crossover detected."
-    entry = stop = target = quantity = None
+    entry = stop = target = None
     if len(prices) >= 21 and not any(r in reasons for r in (
         "duplicate_timestamps", "non_monotonic_timestamps", "future_observation",
         "stale_market_data", "mixed_instruments",
@@ -116,8 +116,10 @@ def evaluate_25_minute_session(
             stop_distance = max(volatility * Decimal("2"), entry * Decimal("0.001"))
             stop = entry - stop_distance if signal == "buy" else entry + stop_distance
             target = entry + stop_distance * Decimal("2") if signal == "buy" else entry - stop_distance * Decimal("2")
-            risk_cash = funds * risk_fraction
-            quantity = risk_cash / stop_distance
+            if stop <= 0:
+                signal = "none"
+                rationale = "Calculated stop price is invalid; trade rejected."
+                entry = stop = target = None
 
     if kill_switch_enabled:
         reasons.append("kill_switch_enabled")
@@ -157,7 +159,9 @@ def evaluate_25_minute_session(
             "entry": str(entry) if entry is not None else None,
             "stop_loss": str(stop) if stop is not None else None,
             "take_profit": str(target) if target is not None else None,
-            "quantity": str(quantity) if quantity is not None else None,
+            "quantity": None,
+            "risk_budget": str(funds * risk_fraction),
+            "sizing_status": "BLOCKED_MISSING_CONTRACT_SPECIFICATION",
             "risk_fraction": str(risk_fraction),
             "reward_to_risk": "2",
         },
