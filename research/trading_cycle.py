@@ -51,7 +51,6 @@ def evaluate_25_minute_session(
     max_observation_age: timedelta = timedelta(seconds=15),
     kill_switch_enabled: bool = True,
     daily_loss_limit_reached: bool = False,
-    provenance_verified: bool = False,
     session_started_at: datetime | None = None,
 ) -> dict:
     """Return a deterministic signal/parameter report; never place an order."""
@@ -74,7 +73,6 @@ def evaluate_25_minute_session(
         stamp = _timestamp(item.get("observed_at", ""))
         price = _decimal(item.get("price"), "price")
         normalized.append((stamp, price, item))
-    normalized.sort(key=lambda row: row[0])
 
     reasons = []
     if len(normalized) < 21:
@@ -125,8 +123,9 @@ def evaluate_25_minute_session(
         reasons.append("kill_switch_enabled")
     if daily_loss_limit_reached:
         reasons.append("daily_loss_limit_reached")
-    if not provenance_verified:
-        reasons.append("market_provenance_unverified")
+    # This repository has no independent provider attestation verifier yet.
+    # Never accept a caller-supplied boolean as proof of provenance.
+    reasons.append("market_provenance_unverified")
     if elapsed >= SESSION_SECONDS:
         reasons.append("session_time_budget_exhausted")
 
