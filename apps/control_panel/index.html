@@ -86,6 +86,9 @@
       <div class="stat"><small>Entries</small><strong id="entries">—</strong></div>
       <div class="stat"><small>Last paper session (UTC)</small><strong id="lastsession">—</strong></div>
       <div class="stat"><small>Last heartbeat</small><strong id="beat">—</strong></div>
+      <div class="stat"><small>Market observations</small><strong id="observations">—</strong></div>
+      <div class="stat"><small>Runtime audit events</small><strong id="audits">—</strong></div>
+      <div class="stat"><small>Latest market data (UTC)</small><strong id="marketlatest">—</strong></div>
       <div class="stat"><small>Live trading</small><strong class="muted">Disabled by design</strong></div>
     </div>
     <p id="stale" class="warn hidden">No recent heartbeat from the local worker. Commands will wait until it is running.</p>
@@ -216,6 +219,11 @@ function render(data) {
     text($("beat"), `${Math.round(age / 1000)}s ago`);
     show($("stale"), stale);
   }
+
+  text($("observations"), data.telemetry?.market_observations ?? 0);
+  text($("audits"), data.telemetry?.runtime_audit_events ?? 0);
+  const latest = data.telemetry?.latest_market_observation_at;
+  text($("marketlatest"), latest ? new Date(latest).toISOString().replace("T", " ").slice(0, 16) : "none");
 
   const tbody = $("commands");
   tbody.replaceChildren();
