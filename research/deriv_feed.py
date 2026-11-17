@@ -166,31 +166,16 @@ def validate_deriv_observation_binding(item: dict) -> bool:
         return False
 
 
-def collect(duration_seconds: int, database: Path, timeout: int = 20) -> dict:
-    try:
-        import websocket
-    except ImportError as exc:
-        raise RuntimeError("Install the optional dependency: pip install -e '.[market-data]'") from exc
-
-    # websocket-client validates the certificate chain and hostname. No token,
-    # account authorization, proposal, buy, sell, or account endpoint is used.
+def _open_public_subscription(websocket, timeout: int, expected_symbol: str | None = None):
+    """Open a fresh TLS socket and subscribe, preserving the canonical instrument."""
     ws = websocket.create_connection(
         DERIV_PUBLIC_WS,
         timeout=timeout,
         sslopt={"cert_reqs": ssl.CERT_REQUIRED, "check_hostname": True},
         enable_multithread=False,
     )
-    session_started_at = datetime.now(timezone.utc)
-    store = ForwardEvidenceStore(
-        database,
-        instrument=INSTRUMENT,
-        provider=PROVIDER,
-        interval=INTERVAL,
-        strategy_id=STRATEGY_ID,
-        strategy_version=STRATEGY_VERSION,
-    )
-    inserted = duplicates = 0
     try:
+        session_started_at = datetime.now(timezone.utc)
         tls_socket = getattr(ws, "sock", None)
         session_record = build_deriv_public_session(
             endpoint=DERIV_PUBLIC_WS,
@@ -202,12 +187,75 @@ def collect(duration_seconds: int, database: Path, timeout: int = 20) -> dict:
         if symbols_response.get("msg_type") != "active_symbols":
             raise RuntimeError("Deriv did not return active_symbols")
         symbol = resolve_eurusd_symbol(symbols_response.get("active_symbols"))
+        if expected_symbol is not None and symbol != expected_symbol:
+            raise RuntimeError("Deriv EUR/USD symbol changed during collection")
         ws.send(json.dumps({"ticks": symbol, "subscribe": 1, "req_id": 2}))
-        deadline = time.monotonic() + duration_seconds
+        return ws, symbol, session_record
+    except Exception:
+        ws.close()
+        raise
+
+
+def _open_with_bounded_retries(websocket, timeout: int, expected_symbol: str | None = None,
+                               max_reconnects: int = 5, backoff_seconds: float = 1.0):
+    """Retry transient transport failures with capped exponential backoff."""
+    last_error = None
+    for attempt in range(max_reconnects + 1):
+        try:
+            return _open_public_subscription(websocket, timeout, expected_symbol)
+        except (OSError, TimeoutError, websocket.WebSocketException) as exc:
+            last_error = exc
+            if attempt >= max_reconnects:
+                break
+            time.sleep(min(backoff_seconds * (2 ** attempt), 8.0))
+    raise RuntimeError("Deriv public WebSocket could not be established after bounded retries") from last_error
+
+
+def collect(duration_seconds: int, database: Path, timeout: int = 20,
+            max_reconnects: int = 5, reconnect_backoff_seconds: float = 1.0) -> dict:
+    try:
+        import websocket
+    except ImportError as exc:
+        raise RuntimeError("Install the optional dependency: pip install -e '.[market-data]'") from exc
+    if duration_seconds < 1 or timeout < 1 or max_reconnects < 0 or reconnect_backoff_seconds < 0:
+        raise ValueError("duration, timeout and retry settings must be non-negative (duration/timeout positive)")
+
+    # Reconnects always create a new TLS-verified socket, re-resolve the active
+    # catalog, require the same canonical EUR/USD symbol, and re-subscribe.
+    ws, symbol, session_record = _open_with_bounded_retries(
+        websocket, timeout, max_reconnects=max_reconnects,
+        backoff_seconds=reconnect_backoff_seconds,
+    )
+    store = ForwardEvidenceStore(
+        database,
+        instrument=INSTRUMENT,
+        provider=PROVIDER,
+        interval=INTERVAL,
+        strategy_id=STRATEGY_ID,
+        strategy_version=STRATEGY_VERSION,
+    )
+    inserted = duplicates = reconnect_count = 0
+    deadline = time.monotonic() + duration_seconds
+    try:
         while time.monotonic() < deadline:
             try:
                 raw = ws.recv()
             except websocket.WebSocketTimeoutException:
+                continue
+            except websocket.WebSocketConnectionClosedException:
+                if reconnect_count >= max_reconnects:
+                    raise RuntimeError("Deriv WebSocket reconnect budget exhausted")
+                reconnect_count += 1
+                try:
+                    ws.close()
+                except Exception:
+                    pass
+                time.sleep(min(reconnect_backoff_seconds * (2 ** (reconnect_count - 1)), 8.0))
+                ws, symbol, session_record = _open_with_bounded_retries(
+                    websocket, timeout, expected_symbol=symbol,
+                    max_reconnects=max_reconnects - reconnect_count,
+                    backoff_seconds=reconnect_backoff_seconds,
+                )
                 continue
             received = datetime.now(timezone.utc)
             item = build_tick_observation(
@@ -225,6 +273,7 @@ def collect(duration_seconds: int, database: Path, timeout: int = 20) -> dict:
             "deriv_symbol": symbol,
             "new_observations_ingested": inserted,
             "duplicates_ignored": duplicates,
+            "reconnect_count": reconnect_count,
             "trading_actions": 0,
             "account_authentication_used": False,
             "level_3_certification": False,
@@ -252,10 +301,16 @@ def main() -> int:
     parser.add_argument("--duration-seconds", type=int, default=3600)
     parser.add_argument("--db", type=Path, default=Path("var/deriv_eurusd_forward.sqlite3"))
     parser.add_argument("--timeout", type=int, default=20)
+    parser.add_argument("--max-reconnects", type=int, default=5)
+    parser.add_argument("--reconnect-backoff-seconds", type=float, default=1.0)
     args = parser.parse_args()
-    if args.duration_seconds < 1 or args.timeout < 1:
-        parser.error("duration and timeout must be positive")
-    result = collect(args.duration_seconds, args.db, args.timeout)
+    if args.duration_seconds < 1 or args.timeout < 1 or args.max_reconnects < 0 or args.reconnect_backoff_seconds < 0:
+        parser.error("duration and timeout must be positive; retry settings must be non-negative")
+    result = collect(
+        args.duration_seconds, args.db, args.timeout,
+        max_reconnects=args.max_reconnects,
+        reconnect_backoff_seconds=args.reconnect_backoff_seconds,
+    )
     print(json.dumps(result, indent=2))
     return exit_code_for_report(result)
 
