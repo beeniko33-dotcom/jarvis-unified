@@ -174,6 +174,20 @@ class Default(WorkerEntrypoint):
         if path.endswith("/market-data"):
             if request.method != "POST":
                 return Response("method not allowed", status=405)
+            if (request.method != "POST"):
+                return Response("method not allowed", status=405)
+            collector_token = getattr(self.env, "JARVIS_COLLECTOR_TOKEN", None)
+            if not collector_token:
+                return Response("collector authentication not configured", status=503)
+            supplied = request.headers.get("authorization", "")
+            expected = "Bearer " + collector_token
+            if len(supplied) != len(expected):
+                return Response("unauthorized", status=401)
+            token_diff = 0
+            for left, right in zip(supplied.encode("utf-8"), expected.encode("utf-8")):
+                token_diff |= left ^ right
+            if token_diff:
+                return Response("unauthorized", status=401)
             if (not getattr(self.env, "SUPABASE_URL", None)
                     or not getattr(self.env, "SUPABASE_SERVICE_ROLE_KEY", None)
                     or not getattr(self.env, "JARVIS_INGEST_TOKEN", None)):
