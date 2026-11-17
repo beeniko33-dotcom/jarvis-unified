@@ -1,0 +1,41 @@
+name: Supabase bounded paper integration
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/supabase-paper-preflight-mainline]
+    paths:
+      - "scripts/supabase_paper_integration_smoke.py"
+      - ".github/workflows/supabase-paper-integration.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jarvis-supabase-paper-integration
+  cancel-in-progress: false
+
+jobs:
+  integration:
+    name: Bounded synthetic paper-state integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      JARVIS_DATABASE_URL: ${{ secrets.JARVIS_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pinned PostgreSQL driver
+        run: python -m pip install --disable-pip-version-check "psycopg[binary]==3.2.9"
+      - name: Require secret without displaying it
+        shell: bash
+        run: |
+          if [ -z "${JARVIS_DATABASE_URL:-}" ]; then
+            echo "::error::JARVIS_DATABASE_URL is not configured."
+            exit 1
+          fi
+          echo "Database secret is present (value withheld)."
+      - name: Run bounded integration smoke test
+        run: python scripts/supabase_paper_integration_smoke.py
