@@ -21,7 +21,7 @@ def _candidate_report(**overrides):
 
 def test_candidate_collection_passes_without_awarding_validation_credit(tmp_path: Path):
     with patch(
-        "scripts.deriv_candidate_collect.collect",
+        "scripts.deriv_forward_candidate_collect.collect",
         return_value=_candidate_report(),
     ):
         report, status = run(60, tmp_path / "candidate.sqlite3", 10)
@@ -41,7 +41,7 @@ def test_candidate_collection_fails_closed_for_empty_or_verified_data(tmp_path: 
         {"trading_actions": 1},
     ):
         with patch(
-            "scripts.deriv_candidate_collect.collect",
+            "scripts.deriv_forward_candidate_collect.collect",
             return_value=_candidate_report(**changes),
         ):
             report, status = run(60, tmp_path / "candidate.sqlite3", 10)
