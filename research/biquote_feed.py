@@ -8,9 +8,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import queue
 import time
 import threading
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -172,13 +175,49 @@ def collect(
         future_tolerance=timedelta(seconds=30),
     )
     pending: queue.Queue = queue.Queue(maxsize=MAX_PENDING_TICKS)
+    hosted_url = os.environ.get("JARVIS_MARKET_DATA_URL", "").strip()
+    hosted_token = os.environ.get("JARVIS_COLLECTOR_TOKEN", "").strip()
+    if hosted_url and not hosted_token:
+        store.close()
+        raise RuntimeError("JARVIS_COLLECTOR_TOKEN is required when hosted ingestion is enabled")
+    hosted_batch = []
     lock = threading.Lock()
     counts = {
         "inserted": 0, "duplicates": 0, "rejected": 0,
         "received": 0, "dropped_queue_full": 0,
         "reconnect_events": 0, "unexpected_disconnects": 0,
         "hub_errors": 0, "connection_open_events": 0,
+        "hosted_sent": 0, "hosted_errors": 0,
     }
+    def flush_hosted():
+        if not hosted_url or not hosted_batch:
+            return
+        payload = {
+            "provider": "biquote",
+            "observations": hosted_batch[:],
+        }
+        request = urllib.request.Request(
+            hosted_url,
+            data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+            headers={
+                "content-type": "application/json",
+                "authorization": "Bearer " + hosted_token,
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                if response.status < 200 or response.status >= 300:
+                    raise RuntimeError("hosted_ingest_http_" + str(response.status))
+                hosted_result = json.loads(response.read().decode("utf-8"))
+                if hosted_result.get("accepted_as") != "candidate_unverified":
+                    raise RuntimeError("hosted_ingest_trust_contract_mismatch")
+            counts["hosted_sent"] += len(hosted_batch)
+            hosted_batch.clear()
+        except (urllib.error.URLError, TimeoutError, ValueError, RuntimeError):
+            counts["hosted_errors"] += len(hosted_batch)
+            hosted_batch.clear()
+
     connection = None
     report = None
     stopping = False
@@ -203,6 +242,19 @@ def collect(
             added = store.ingest(item)
             with lock:
                 counts["inserted" if added else "duplicates"] += 1
+            if hosted_url:
+                hosted_batch.append({
+                    "symbol": INSTRUMENT,
+                    "event_time": item["provider_timestamp"],
+                    "bid": item["bid"],
+                    "ask": item["ask"],
+                    "mid": item["mid"],
+                    "raw_payload": item["raw_payload"],
+                    "source_label": item["provider_source_label"],
+                    "market_state": item["market_state"],
+                })
+                if len(hosted_batch) >= 25:
+                    flush_hosted()
         except (ValueError, TypeError, KeyError):
             with lock:
                 counts["rejected"] += 1
@@ -267,6 +319,7 @@ def collect(
                 process_tick(pending.get_nowait())
             except queue.Empty:
                 break
+        flush_hosted()
     finally:
         stopping = True
         if connection is not None:
@@ -313,6 +366,8 @@ def collection_exit_code(report: dict) -> int:
         and report.get("reconnect_events", 0) == 0
         and report.get("unexpected_disconnects", 0) == 0
         and report.get("hub_errors", 0) == 0
+        and report.get("hosted_errors", 0) == 0
+        and (not os.environ.get("JARVIS_MARKET_DATA_URL") or report.get("hosted_sent", 0) > 0)
         and report.get("collection_integrity") == "candidate_observed"
     ) else 1
 
