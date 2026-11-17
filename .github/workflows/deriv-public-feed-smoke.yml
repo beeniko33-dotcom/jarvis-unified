@@ -39,4 +39,16 @@ jobs:
           python -m pip check
 
       - name: Probe Deriv public EURUSD feed (read-only, bounded)
-        run: python -m scripts.deriv_public_smoke --duration-seconds 120 --timeout-seconds 15
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m scripts.deriv_public_smoke --duration-seconds 120 --timeout-seconds 15 | tee deriv-public-feed-report.json
+
+      - name: Preserve bounded probe report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deriv-public-feed-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: deriv-public-feed-report.json
+          if-no-files-found: warn
+          retention-days: 14
