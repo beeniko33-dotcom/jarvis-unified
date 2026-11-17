@@ -87,7 +87,9 @@ jobs:
                       print("Row counts (accounts, runs, ledger events): " + ", ".join(map(str, counts)))
           except Exception as exc:
               # Deliberately omit exception text: drivers can include connection details.
-              print(f"Preflight failed: {type(exc).__name__}; connection details withheld.", file=sys.stderr)
+              sqlstate = getattr(exc, "sqlstate", None)
+          primary = getattr(getattr(exc, "diag", None), "message_primary", None)
+          print(f"Preflight failed: {type(exc).__name__}; SQLSTATE={sqlstate or 'unknown'}; server message={primary or 'withheld'}", file=sys.stderr)
               raise SystemExit(1)
           PY
 
