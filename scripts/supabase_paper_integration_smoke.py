@@ -6,9 +6,12 @@ No external broker, market feed, or live-order path is imported.
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 from pathlib import Path
 from uuid import uuid4
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from brokers.paper.persistent import PersistentPaperBroker
 from research.paper_state_bridge import commit_paper_cycle, restore_paper_broker
