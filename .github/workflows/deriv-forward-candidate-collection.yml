@@ -1,0 +1,53 @@
+name: Deriv forward candidate collection
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 */2 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deriv-forward-candidate-collection
+  cancel-in-progress: false
+
+jobs:
+  collect-candidates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install pinned runtime dependencies
+        run: |
+          python -m pip install "pip==26.3"
+          python -m pip install -r requirements-lock.txt
+          python -m pip check
+
+      - name: Collect bounded public EURUSD candidates (read-only)
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m scripts.deriv_forward_candidate_collect \
+            --duration-seconds 600 \
+            --timeout-seconds 20 \
+            --db var/deriv_eurusd_forward.sqlite3 \
+            | tee deriv-forward-candidate-report.json
+
+      - name: Preserve candidate database and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deriv-forward-candidates-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            deriv-forward-candidate-report.json
+            var/deriv_eurusd_forward.sqlite3
+          if-no-files-found: warn
+          retention-days: 30
