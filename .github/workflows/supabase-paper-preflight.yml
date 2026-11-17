@@ -88,8 +88,8 @@ jobs:
           except Exception as exc:
               # Deliberately omit exception text: drivers can include connection details.
               sqlstate = getattr(exc, "sqlstate", None)
-          primary = getattr(getattr(exc, "diag", None), "message_primary", None)
-          print(f"Preflight failed: {type(exc).__name__}; SQLSTATE={sqlstate or 'unknown'}; server message={primary or 'withheld'}", file=sys.stderr)
+              primary = getattr(getattr(exc, "diag", None), "message_primary", None)
+              print(f"Preflight failed: {type(exc).__name__}; SQLSTATE={sqlstate or 'unknown'}; server message={primary or 'withheld'}", file=sys.stderr)
               raise SystemExit(1)
           PY
 
