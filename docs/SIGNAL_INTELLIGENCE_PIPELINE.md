@@ -41,7 +41,7 @@ JSON payloads are versioned by the producer. Persist provider timestamps separat
 
 - Supabase migration creates the private signal ledger and lookup indexes. RLS is enabled; browser roles are denied; service-role access is granted for trusted server-side ingestion.
 - Existing private tables already include market observations, paper accounts, paper ledger events, paper runs, runtime audit events and worker heartbeats.
-- Cloudflare remains a control/HTTP-ingestion boundary, not a long-running WebSocket collector. Keep a persistent collector or provider push source outside request-lifetime Workers.
+- Cloudflare remains a control/HTTP-ingestion boundary, not a long-running WebSocket collector. The Worker source now includes a `/market-data` proxy route to the JWT-protected Supabase ingestion function; this route is committed but not deployed pending Worker Python runtime validation and out-of-band secret configuration. Keep a persistent collector or provider push source outside request-lifetime Workers.
 - Do not enable the Cloudflare Cron worker until the service-role secret is configured out-of-band and Python Worker runtime + heartbeat are verified.
 - Do not enable paper-session execution in Cloudflare until Postgres transactional account updates, idempotency, event-chain verification and crash recovery are implemented and tested.
 - The existing Biquote collector still writes to local SQLite. The hosted ingestion endpoint now exists, but the collector-to-edge adapter, endpoint secret configuration, and a real read-only end-to-end smoke test are still required before continuous observations reach the hosted ledger.
