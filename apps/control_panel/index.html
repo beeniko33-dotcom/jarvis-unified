@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0b1020">
+<title>Jarvis Control</title>
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+  :root {
+    --bg: #f5f7fb; --card: #ffffff; --ink: #0f172a; --muted: #5b6475; --line: #e2e8f0;
+    --ok: #15803d; --warn: #b45309; --bad: #b91c1c; --accent: #4f46e5; --accent-ink: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0b1020; --card: #131a2e; --ink: #e6ebf5; --muted: #98a2b8; --line: #243049;
+      --ok: #4ade80; --warn: #fbbf24; --bad: #f87171; --accent: #818cf8; --accent-ink: #0b1020;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b1020; --card: #131a2e; --ink: #e6ebf5; --muted: #98a2b8; --line: #243049;
+    --ok: #4ade80; --warn: #fbbf24; --bad: #f87171; --accent: #818cf8; --accent-ink: #0b1020;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+  }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: .2px; }
+  h2 { font-size: 15px; margin: 0 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 13px; border: 1px solid currentColor; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); } .muted { color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .stat small { color: var(--muted); display: block; }
+  .stat strong { font-size: 18px; }
+  button {
+    font: inherit; border: 0; border-radius: 10px; padding: 12px 14px; cursor: pointer;
+    background: var(--accent); color: var(--accent-ink); font-weight: 600; min-height: 44px;
+  }
+  button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  button.danger { background: var(--bad); color: #fff; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+  input[type=email] {
+    width: 100%; font: inherit; padding: 12px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--ink); min-height: 44px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td, th { text-align: left; padding: 8px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--ink); max-width: 420px; width: calc(100% - 32px); }
+  dialog::backdrop { background: rgba(0,0,0,.55); }
+  .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
+  #toast { position: fixed; left: 16px; right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: none; }
+  .hidden { display: none !important; }
+  @media (max-width: 380px) { body { padding-left: 12px; padding-right: 12px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Jarvis Control <span class="pill muted">paper only</span></h1>
+  <button id="signout" class="secondary hidden">Sign out</button>
+</header>
+
+<section id="signin" class="card hidden" aria-labelledby="signin-title">
+  <h2 id="signin-title">Sign in</h2>
+  <p class="muted">We will email you a one-time sign-in link. Only authorized operators can use this panel.</p>
+  <form id="signin-form">
+    <label for="email" class="muted">Email</label>
+    <input id="email" type="email" autocomplete="email" required>
+    <div class="row"><button type="submit">Send sign-in link</button></div>
+  </form>
+  <p id="signin-msg" class="muted" role="status"></p>
+</section>
+
+<main id="app" class="hidden">
+  <section class="card" aria-labelledby="state-title">
+    <h2 id="state-title">Current state</h2>
+    <div class="grid">
+      <div class="stat"><small>Health</small><strong id="health">—</strong></div>
+      <div class="stat"><small>Kill switch</small><strong id="kill">—</strong></div>
+      <div class="stat"><small>Entries</small><strong id="entries">—</strong></div>
+      <div class="stat"><small>Last paper session (UTC)</small><strong id="lastsession">—</strong></div>
+      <div class="stat"><small>Last heartbeat</small><strong id="beat">—</strong></div>
+      <div class="stat"><small>Live trading</small><strong class="muted">Disabled by design</strong></div>
+    </div>
+    <p id="stale" class="warn hidden">No recent heartbeat from the local worker. Commands will wait until it is running.</p>
+  </section>
+
+  <section class="card" aria-labelledby="actions-title">
+    <h2 id="actions-title">Paper controls</h2>
+    <div class="actions">
+      <button class="secondary" data-action="pause_entries">Pause entries</button>
+      <button class="secondary" data-action="resume_entries">Resume entries</button>
+      <button class="danger" data-action="engage_kill_switch">Engage kill switch</button>
+      <button data-action="run_paper_session">Run paper session</button>
+    </div>
+    <p class="muted">Every action is confirmed, logged and paper-only. Releasing the kill switch can only be done on the worker machine.</p>
+  </section>
+
+  <section class="card" aria-labelledby="log-title">
+    <h2 id="log-title">Recent commands</h2>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Requested (UTC)</th><th>Action</th><th>Status</th><th>Result</th></tr></thead>
+        <tbody id="commands"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<dialog id="confirm">
+  <form method="dialog">
+    <h2 id="confirm-title">Confirm</h2>
+    <p id="confirm-body" class="muted"></p>
+    <div class="row">
+      <button class="secondary" value="cancel">Cancel</button>
+      <button id="confirm-ok" value="ok">Confirm</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script type="module">
+// Public configuration only. The publishable key is designed to be shown in browsers; it grants
+// no privileges beyond sign-in. Never place a service-role key in this file.
+const SUPABASE_URL = "https://zythldptlplyutphgxpg.supabase.co";
+const PUBLISHABLE_KEY = "sb_publishable_5bXO0f6Xpc3PzWifm7AgoA_IuYaVTa-";
+const FUNCTIONS = `${SUPABASE_URL}/functions/v1`;
+const POLL_MS = 20000;
+const STALE_MS = 120000;
+
+const ACTIONS = {
+  pause_entries: { label: "Pause entries", body: "Stops new paper entries. Open paper positions are not changed." },
+  resume_entries: { label: "Resume entries", body: "Allows new paper entries again. Refused while the kill switch is engaged." },
+  engage_kill_switch: { label: "Engage kill switch", body: "Stops all paper entries until the kill switch is released on the worker machine." },
+  run_paper_session: { label: "Run paper session", body: "Runs one paper session for today (UTC). Refused if entries are paused or the kill switch is engaged, or if today's session already ran." },
+};
+
+const $ = (id) => document.getElementById(id);
+const show = (el, on) => el.classList.toggle("hidden", !on);
+const text = (el, value) => { el.textContent = value ?? "—"; };
+
+function toast(message) {
+  const el = $("toast");
+  el.textContent = message;
+  el.style.display = "block";
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => (el.style.display = "none"), 4000);
+}
+
+// Lazy-load the client from a pinned CDN version.
+const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm");
+const supabase = createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+});
+
+async function accessToken() {
+  const { data } = await supabase.auth.getSession();
+  return data.session?.access_token ?? null;
+}
+
+async function api(path, options = {}) {
+  const token = await accessToken();
+  if (!token) throw new Error("sign in required");
+  const response = await fetch(`${FUNCTIONS}/${path}`, {
+    ...options,
+    headers: { "content-type": "application/json", apikey: PUBLISHABLE_KEY, authorization: `Bearer ${token}`, ...(options.headers || {}) },
+  });
+  let body = {};
+  try { body = await response.json(); } catch { /* non-JSON error body */ }
+  if (!response.ok) throw new Error(body.error || `request failed (${response.status})`);
+  return body;
+}
+
+function statusBadge(el, ok, yes, no) {
+  text(el, ok ? yes : no);
+  el.className = ok ? "ok" : "bad";
+}
+
+function render(data) {
+  const worker = data.workers[0];
+  if (!worker) {
+    text($("health"), "no worker");
+    $("health").className = "warn";
+    text($("kill"), "unknown");
+    text($("entries"), "unknown");
+    text($("lastsession"), "—");
+    text($("beat"), "never");
+    show($("stale"), true);
+  } else {
+    const age = Date.now() - new Date(worker.reported_at).getTime();
+    const stale = age > STALE_MS;
+    text($("health"), stale ? "stale" : worker.health);
+    $("health").className = stale ? "warn" : worker.health === "healthy" ? "ok" : worker.health === "degraded" ? "warn" : "bad";
+    statusBadge($("kill"), !worker.kill_switch_engaged, "released", "engaged");
+    $("kill").className = worker.kill_switch_engaged ? "bad" : "ok";
+    statusBadge($("entries"), !worker.entries_paused, "allowed", "paused");
+    text($("lastsession"), worker.last_paper_session_date);
+    text($("beat"), `${Math.round(age / 1000)}s ago`);
+    show($("stale"), stale);
+  }
+
+  const tbody = $("commands");
+  tbody.replaceChildren();
+  for (const command of data.recent_commands) {
+    const row = document.createElement("tr");
+    const cells = [
+      new Date(command.requested_at).toISOString().replace("T", " ").slice(0, 16),
+      ACTIONS[command.action]?.label ?? command.action,
+      command.status,
+      command.result?.reason ?? (command.result && Object.keys(command.result).length ? "ok" : ""),
+    ];
+    for (const value of cells) {
+      const td = document.createElement("td");
+      td.textContent = String(value);
+      row.appendChild(td);
+    }
+    tbody.appendChild(row);
+  }
+}
+
+let pollTimer = null;
+async function refresh() {
+  try {
+    render(await api("status"));
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+function startPolling() {
+  clearInterval(pollTimer);
+  refresh();
+  pollTimer = setInterval(refresh, POLL_MS);
+}
+
+async function enterApp(session) {
+  show($("signin"), false);
+  show($("app"), true);
+  show($("signout"), true);
+  startPolling();
+}
+
+function leaveApp() {
+  clearInterval(pollTimer);
+  show($("app"), false);
+  show($("signout"), false);
+  show($("signin"), true);
+}
+
+$("signin-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const email = $("email").value.trim();
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: location.href.split("#")[0] },
+  });
+  text($("signin-msg"), error ? "Could not send the link. Try again later." : "Check your email for the sign-in link.");
+});
+
+$("signout").addEventListener("click", async () => {
+  await supabase.auth.signOut();
+  leaveApp();
+});
+
+for (const button of document.querySelectorAll("[data-action]")) {
+  button.addEventListener("click", () => {
+    const action = button.dataset.action;
+    const spec = ACTIONS[action];
+    text($("confirm-title"), `${spec.label}?`);
+    text($("confirm-body"), `${spec.body} This is a paper-only action.`);
+    $("confirm").returnValue = "";
+    $("confirm").showModal();
+    $("confirm").dataset.action = action;
+  });
+}
+
+$("confirm").addEventListener("close", async () => {
+  if ($("confirm").returnValue !== "ok") return;
+  const action = $("confirm").dataset.action;
+  try {
+    const result = await api("control", {
+      method: "POST",
+      body: JSON.stringify({ action, idempotency_key: crypto.randomUUID(), reason: "panel" }),
+    });
+    toast(result.duplicate ? "Already queued." : "Command queued for the worker.");
+    refresh();
+  } catch (error) {
+    toast(error.message);
+  }
+});
+
+supabase.auth.onAuthStateChange((event, session) => {
+  if (session) enterApp(session);
+  else leaveApp();
+});
+
+const { data } = await supabase.auth.getSession();
+if (data.session) enterApp(data.session); else show($("signin"), true);
+</script>
+</body>
+</html>
