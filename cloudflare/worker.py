@@ -1,0 +1,179 @@
+"""Cloudflare-hosted Jarvis command controller.
+
+This first migration stage owns the remote command queue and heartbeat only.
+Paper-session execution remains disabled until the persistent account and execution
+engine have been migrated from local SQLite/files into durable Postgres transactions.
+"""
+import json
+from datetime import datetime, timezone
+from urllib.parse import quote
+
+from workers import WorkerEntrypoint, Response, fetch
+
+WORKER_ID = "cloudflare-control-worker"
+ALLOWED_ACTIONS = {"pause_entries", "resume_entries", "engage_kill_switch", "run_paper_session"}
+DEFAULT_STATE = {"entries_paused": True, "kill_switch_engaged": True, "last_paper_session_date": None}
+
+
+def utc_now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+class Default(WorkerEntrypoint):
+    def _headers(self, prefer=None):
+        headers = {
+            "apikey": self.env.SUPABASE_SERVICE_ROLE_KEY,
+            "authorization": "Bearer " + self.env.SUPABASE_SERVICE_ROLE_KEY,
+            "content-type": "application/json",
+        }
+        if prefer:
+            headers["prefer"] = prefer
+        return headers
+
+    async def _db(self, method, path, payload=None, prefer=None):
+        url = self.env.SUPABASE_URL.rstrip("/") + "/rest/v1" + path
+        options = {"method": method, "headers": self._headers(prefer)}
+        if payload is not None:
+            options["body"] = json.dumps(payload, separators=(",", ":"))
+        response = await fetch(url, options)
+        raw = await response.text()
+        if not response.ok:
+            # Never log response bodies: database errors can contain sensitive context.
+            raise RuntimeError("supabase_http_" + str(response.status))
+        return json.loads(raw) if raw else None
+
+    async def _load_state(self):
+        rows = await self._db(
+            "GET",
+            "/operator_status?worker_id=eq." + quote(WORKER_ID) +
+            "&select=details,kill_switch_engaged,entries_paused,last_paper_session_date&limit=1",
+        )
+        if not rows:
+            return dict(DEFAULT_STATE)
+        row = rows[0]
+        details = row.get("details") or {}
+        saved = details.get("control_state") if isinstance(details, dict) else None
+        state = dict(DEFAULT_STATE)
+        if isinstance(saved, dict):
+            if isinstance(saved.get("entries_paused"), bool):
+                state["entries_paused"] = saved["entries_paused"]
+            if isinstance(saved.get("kill_switch_engaged"), bool):
+                state["kill_switch_engaged"] = saved["kill_switch_engaged"]
+            if isinstance(saved.get("last_paper_session_date"), str) or saved.get("last_paper_session_date") is None:
+                state["last_paper_session_date"] = saved.get("last_paper_session_date")
+        # Existing status columns are a second fail-closed source of truth.
+        if isinstance(row.get("entries_paused"), bool):
+            state["entries_paused"] = state["entries_paused"] or row["entries_paused"]
+        if isinstance(row.get("kill_switch_engaged"), bool):
+            state["kill_switch_engaged"] = state["kill_switch_engaged"] or row["kill_switch_engaged"]
+        return state
+
+    async def _save_heartbeat(self, state, processed):
+        health = "blocked" if state["kill_switch_engaged"] else (
+            "degraded" if state["entries_paused"] else "healthy"
+        )
+        details = {
+            "worker_type": "cloudflare-python-worker",
+            "runtime_stage": "control-plane-only",
+            "paper_session_execution": "disabled_pending_postgres_migration",
+            "processed": processed,
+            "control_state": state,
+        }
+        await self._db(
+            "POST",
+            "/operator_status?on_conflict=worker_id",
+            {
+                "worker_id": WORKER_ID,
+                "reported_at": utc_now(),
+                "health": health,
+                "mode": "paper",
+                "kill_switch_engaged": state["kill_switch_engaged"],
+                "entries_paused": state["entries_paused"],
+                "last_paper_session_date": state["last_paper_session_date"],
+                "details": details,
+            },
+            "resolution=merge-duplicates,return=minimal",
+        )
+
+    async def _finish(self, command_id, status, result):
+        await self._db(
+            "PATCH",
+            "/operator_commands?id=eq." + quote(command_id),
+            {"status": status, "completed_at": utc_now(), "result": result},
+            "return=minimal",
+        )
+
+    async def _process(self):
+        if not getattr(self.env, "SUPABASE_URL", None) or not getattr(self.env, "SUPABASE_SERVICE_ROLE_KEY", None):
+            raise RuntimeError("worker_secrets_not_configured")
+        state = await self._load_state()
+        pending = await self._db(
+            "GET",
+            "/operator_commands?status=eq.pending&order=requested_at.asc&limit=10&select=id,action",
+        ) or []
+        processed = 0
+        for command in pending:
+            command_id = command.get("id")
+            action = command.get("action")
+            if not isinstance(command_id, str) or action not in ALLOWED_ACTIONS:
+                continue
+            claimed = await self._db(
+                "PATCH",
+                "/operator_commands?id=eq." + quote(command_id) + "&status=eq.pending",
+                {"status": "claimed", "claimed_by": WORKER_ID, "claimed_at": utc_now()},
+                "return=representation",
+            ) or []
+            if not claimed:
+                continue
+
+            if action == "pause_entries":
+                state["entries_paused"] = True
+                result = {"entries_paused": True, "kill_switch_engaged": state["kill_switch_engaged"]}
+                status = "completed"
+            elif action == "engage_kill_switch":
+                state["kill_switch_engaged"] = True
+                state["entries_paused"] = True
+                result = {"entries_paused": True, "kill_switch_engaged": True}
+                status = "completed"
+            elif action == "resume_entries":
+                if state["kill_switch_engaged"]:
+                    result = {"reason": "kill switch is engaged; resume refused"}
+                    status = "rejected"
+                else:
+                    state["entries_paused"] = False
+                    result = {"entries_paused": False, "kill_switch_engaged": False}
+                    status = "completed"
+            else:
+                # Do not claim that a synthetic local paper-session script ran in this runtime.
+                result = {"reason": "paper session runtime migration is not complete; no session was run"}
+                status = "rejected"
+
+            await self._finish(command_id, status, result)
+            processed += 1
+
+        await self._save_heartbeat(state, processed)
+        return {"worker_id": WORKER_ID, "processed": processed, "health": (
+            "blocked" if state["kill_switch_engaged"] else
+            "degraded" if state["entries_paused"] else "healthy"
+        )}
+
+    async def fetch(self, request):
+        if request.method != "GET":
+            return Response("method not allowed", status=405)
+        if request.url.endswith("/health"):
+            return Response.json({
+                "service": WORKER_ID,
+                "runtime_stage": "control-plane-only",
+                "paper_session_execution": "disabled_pending_postgres_migration",
+                "mode": "paper",
+                "live_trading": "disabled_by_design",
+            })
+        return Response("Jarvis worker is running. Use /health for status.", status=200)
+
+    async def scheduled(self, controller, env, ctx):
+        try:
+            result = await self._process()
+            print(json.dumps({"event": "cron_complete", **result}, separators=(",", ":")))
+        except Exception as exc:
+            # Error type only; never emit URLs, headers, payloads, or exception messages.
+            print(json.dumps({"event": "cron_failed", "error_type": type(exc).__name__}))
