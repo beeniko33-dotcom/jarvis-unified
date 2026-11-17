@@ -131,7 +131,13 @@ def evaluate_25_minute_session(
 
     eligible = signal != "none" and not reasons
     source_hash = hashlib.sha256(json.dumps(
-        [{"observed_at": row[0].isoformat(), "price": str(row[1])} for row in normalized],
+        [{
+            "observed_at": row[0].isoformat(),
+            "price": str(row[1]),
+            "instrument": row[2].get("instrument"),
+            "source_id": row[2].get("source_id"),
+            "provider_event_id": row[2].get("provider_event_id"),
+        } for row in normalized],
         sort_keys=True, separators=(",", ":"),
     ).encode()).hexdigest()
     return {
