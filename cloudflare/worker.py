@@ -165,7 +165,8 @@ class Default(WorkerEntrypoint):
             return Response.json({
                 "service": WORKER_ID,
                 "runtime_stage": "control-and-market-data-ingress",
-                "market_data_ingress": "proxy_to_jwt_protected_supabase_function",
+                "market_data_ingress": "token_protected_supabase_function_proxy",
+                "ingest_token_configured": bool(getattr(self.env, "JARVIS_INGEST_TOKEN", None)),
                 "paper_session_execution": "disabled_pending_postgres_migration",
                 "mode": "paper",
                 "live_trading": "disabled_by_design",
@@ -173,7 +174,9 @@ class Default(WorkerEntrypoint):
         if path.endswith("/market-data"):
             if request.method != "POST":
                 return Response("method not allowed", status=405)
-            if not getattr(self.env, "SUPABASE_URL", None) or not getattr(self.env, "SUPABASE_SERVICE_ROLE_KEY", None):
+            if (not getattr(self.env, "SUPABASE_URL", None)
+                    or not getattr(self.env, "SUPABASE_SERVICE_ROLE_KEY", None)
+                    or not getattr(self.env, "JARVIS_INGEST_TOKEN", None)):
                 return Response("ingress not configured", status=503)
             raw = await request.text()
             if len(raw.encode("utf-8")) > 512 * 1024:
@@ -187,7 +190,10 @@ class Default(WorkerEntrypoint):
             target = self.env.SUPABASE_URL.rstrip("/") + "/functions/v1/market-data-ingest"
             upstream = await fetch(target, {
                 "method": "POST",
-                "headers": self._headers(),
+                "headers": {
+                    **self._headers(),
+                    "x-jarvis-ingest-token": self.env.JARVIS_INGEST_TOKEN,
+                },
                 "body": raw,
             })
             body = await upstream.text()
