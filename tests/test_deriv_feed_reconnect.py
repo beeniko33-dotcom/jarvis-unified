@@ -26,7 +26,7 @@ class DerivReconnectTests(unittest.TestCase):
         self.assertEqual(result, expected)
         self.assertEqual(open_socket.call_count, 3)
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [0.5, 1.0])
-        self.assertEqual(open_socket.call_args.kwargs["expected_symbol"], "frxEURUSD")
+        self.assertEqual(open_socket.call_args.args[2], "frxEURUSD")
 
     def test_retry_budget_exhaustion_fails_closed(self):
         with patch.object(
