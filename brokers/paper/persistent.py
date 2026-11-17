@@ -68,7 +68,10 @@ class PersistentPaperBroker(PaperBroker):
                 if row is None:
                     self._save_snapshot(db)
                     initial = self._snapshot()
-                    self._append_event(db, "initialized", initial, Decimal("0"), Decimal("0"))
+                    self._append_event(
+                        db, "initialized", initial, Decimal("0"), Decimal("0"),
+                        extra={"account_id": str(uuid4())},
+                    )
                     db.commit()
                 else:
                     stored_state = json.loads(row[0])
@@ -227,6 +230,7 @@ class PersistentPaperBroker(PaperBroker):
     def _append_event(
         self, db: sqlite3.Connection, event_type: str, state: dict,
         realized_delta: Decimal, commission_delta: Decimal,
+        extra: dict | None = None,
     ) -> None:
         now = self._clock()
         if now.tzinfo is None or now.utcoffset() is None:
@@ -240,6 +244,9 @@ class PersistentPaperBroker(PaperBroker):
             "state": state, "realized_delta": str(realized_delta),
             "commission_delta": str(commission_delta),
         }
+        if extra:
+            # Hashed with the event, so it is tamper-evident. Absent from legacy databases.
+            event.update(extra)
         payload = json.dumps(event, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256((prev_hash + "|" + payload).encode()).hexdigest()
         db.execute(
@@ -424,6 +431,18 @@ class PersistentPaperBroker(PaperBroker):
             except Exception:
                 db.rollback()
                 raise
+
+    def account_id(self) -> str | None:
+        """Identity of this account, fixed at creation inside the hash-chained genesis event.
+
+        ``None`` for databases created before identities existed; those are never rewritten.
+        """
+        with self._db() as db:
+            row = db.execute("SELECT payload FROM paper_events ORDER BY seq LIMIT 1").fetchone()
+        if row is None:
+            return None
+        value = json.loads(row[0]).get("account_id")
+        return value if isinstance(value, str) else None
 
     def ledger_event_count(self) -> int:
         with self._db() as db:

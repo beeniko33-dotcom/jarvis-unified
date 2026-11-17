@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from brokers.paper import PaperBroker
+from brokers.paper import PaperBroker, PersistentPaperBroker
 from core.execution import ExecutionService
 from core.models import OrderRequest, Side
 from core.portfolio import PortfolioTracker
@@ -44,20 +44,38 @@ def main() -> int:
         help="hash-chained SQLite journal of risk decisions and rejections "
         "(default: <ledger>.observations.sqlite3)",
     )
+    parser.add_argument(
+        "--account-db",
+        default=None,
+        help="use ONE continuous persistent SQLite paper account instead of a per-run in-memory "
+        "broker + JSONL ledger. The account keeps its balance, positions and hash-chained history "
+        "across runs; --balance/--ledger then apply only to the first creation / are unused. "
+        "Reruns on the same UTC day are idempotent and place no new orders.",
+    )
     args = parser.parse_args()
 
     ledger = Path(args.ledger)
-    observations_db = (
-        Path(args.observations_db)
-        if args.observations_db
-        else ledger.with_suffix(".observations.sqlite3")
-    )
-    broker = PaperBroker(
-        Decimal(args.balance),
-        commission_per_side=Decimal("0.1"),
-        slippage_bps=Decimal("5"),
-        ledger_path=ledger,
-    )
+    account_db = Path(args.account_db) if args.account_db else None
+    if args.observations_db:
+        observations_db = Path(args.observations_db)
+    elif account_db is not None:
+        observations_db = account_db.with_suffix(".observations.sqlite3")
+    else:
+        observations_db = ledger.with_suffix(".observations.sqlite3")
+    if account_db is not None:
+        broker = PersistentPaperBroker(
+            Decimal(args.balance),
+            database_path=account_db,
+            commission_per_side=Decimal("0.1"),
+            slippage_bps=Decimal("5"),
+        )
+    else:
+        broker = PaperBroker(
+            Decimal(args.balance),
+            commission_per_side=Decimal("0.1"),
+            slippage_bps=Decimal("5"),
+            ledger_path=ledger,
+        )
     risk = RiskEngine(RiskLimits(Decimal("50"), Decimal("100"), 5, True))
     if args.allow_entries:
         risk.release_kill_switch(explicit_operator_action=True)
@@ -85,7 +103,11 @@ def main() -> int:
 
     # Unique per run: the observation journal refuses reused client order IDs,
     # and one journal accumulates every daily session.
-    session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    if account_db is not None:
+        # Deterministic per UTC day: repeating the command cannot execute the same decision twice.
+        session_id = datetime.now(timezone.utc).strftime("%Y%m%d")
+    else:
+        session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     orders = [
         OrderRequest("EURUSD", Side.BUY, Decimal("1"), Decimal("1.10"), f"sess-{session_id}-1", dict(SESSION_LINEAGE)),
         OrderRequest("GBPUSD", Side.BUY, Decimal("1"), Decimal("1.25"), f"sess-{session_id}-2", dict(SESSION_LINEAGE)),
@@ -117,7 +139,9 @@ def main() -> int:
             {
                 "ok": True,
                 "events": events,
-                "ledger": str(ledger),
+                "ledger": str(ledger) if account_db is None else None,
+                "account_db": str(account_db) if account_db is not None else None,
+                "account_id": broker.account_id() if account_db is not None else None,
                 "observations_db": str(observations_db),
                 "observations_chain_verified": journal.verify(),
             },
