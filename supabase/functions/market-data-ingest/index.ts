@@ -44,7 +44,10 @@ Deno.serve(async (req: Request) => {
         raw_payload:item.raw_payload??null,source_label:typeof item.source_label==="string"?item.source_label.slice(0,128):null,
         market_state:typeof item.market_state==="string"?item.market_state.slice(0,32):null,
         trust_classification:"candidate_unverified",provenance_verified:false,evidence_credit:false};
-      const hash=await sha256(canonical({sourceId,symbol,timeframe:"tick",eventTime:eventDate.toISOString(),values}));
+      const hashInput=canonical({sourceId,symbol,timeframe:"tick",eventTime:eventDate.toISOString(),
+        bid:String(bid),ask:String(ask),mid:String(mid),rawPayload:item.raw_payload??null,
+        sourceLabel:values.source_label});
+      const hash=await sha256(hashInput);
       normalized.push({source_id:sourceId,event_time:eventDate.toISOString(),received_at:receivedAt.toISOString(),
         symbol,timeframe:"tick",schema_version:1,content_hash:hash,values_json:values,out_of_order:false,
         stale:age>120||age< -30,clock_skew:age< -30});
