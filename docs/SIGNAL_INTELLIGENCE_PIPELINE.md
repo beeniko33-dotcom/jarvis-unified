@@ -44,7 +44,7 @@ JSON payloads are versioned by the producer. Persist provider timestamps separat
 - Cloudflare remains a control/HTTP-ingestion boundary, not a long-running WebSocket collector. Keep a persistent collector or provider push source outside request-lifetime Workers.
 - Do not enable the Cloudflare Cron worker until the service-role secret is configured out-of-band and Python Worker runtime + heartbeat are verified.
 - Do not enable paper-session execution in Cloudflare until Postgres transactional account updates, idempotency, event-chain verification and crash recovery are implemented and tested.
-- The existing Biquote collector writes to local SQLite. A secure Postgres adapter and authenticated ingestion path are still required before observations reach the hosted ledger.
+- The existing Biquote collector still writes to local SQLite. The hosted ingestion endpoint now exists, but the collector-to-edge adapter, endpoint secret configuration, and a real read-only end-to-end smoke test are still required before continuous observations reach the hosted ledger.
 - Provider provenance remains blocked. No Level 3 clock starts and no performance claim is warranted.
 
 ## Read-only operational checks
