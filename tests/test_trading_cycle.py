@@ -27,8 +27,7 @@ def test_25_minute_budget_and_explicit_phase_allocations():
 
 def test_unverified_feed_never_becomes_execution_eligible():
     report = evaluate_25_minute_session(
-        ticks(), now=NOW, balance="10000", provenance_verified=False,
-        kill_switch_enabled=False,
+        ticks(), now=NOW, balance="10000", kill_switch_enabled=False,
     )
     assert report["decision"] == "NO_TRADE"
     assert "market_provenance_unverified" in report["block_reasons"]
@@ -37,8 +36,7 @@ def test_unverified_feed_never_becomes_execution_eligible():
 
 def test_kill_switch_and_daily_loss_block_entry_even_with_verified_feed():
     report = evaluate_25_minute_session(
-        ticks(), now=NOW, balance="10000", provenance_verified=True,
-        kill_switch_enabled=True, daily_loss_limit_reached=True,
+        ticks(), now=NOW, balance="10000", kill_switch_enabled=True, daily_loss_limit_reached=True,
     )
     assert report["decision"] == "NO_TRADE"
     assert "kill_switch_enabled" in report["block_reasons"]
@@ -50,6 +48,11 @@ def test_stale_future_duplicate_and_missing_data_fail_closed():
               "price": "1.1", "instrument": "EURUSD"}] * 21
     report = evaluate_25_minute_session(stale, now=NOW, balance="10000")
     assert "stale_market_data" in report["block_reasons"]
+    out_of_order = ticks()
+    out_of_order[-1] = {**out_of_order[-1], "observed_at": (NOW-timedelta(seconds=30)).isoformat()}
+    assert "non_monotonic_timestamps" in evaluate_25_minute_session(
+        out_of_order, now=NOW, balance="10000"
+    )["block_reasons"]
     future = ticks()
     future[-1] = {**future[-1], "observed_at": (NOW+timedelta(seconds=1)).isoformat()}
     assert "future_observation" in evaluate_25_minute_session(
@@ -69,7 +72,7 @@ def test_elapsed_time_exhaustion_blocks_trade():
     started = NOW - timedelta(seconds=1500)
     report = evaluate_25_minute_session(
         ticks(), now=NOW, balance="10000", session_started_at=started,
-        provenance_verified=True, kill_switch_enabled=False,
+        kill_switch_enabled=False,
     )
     assert report["decision"] == "NO_TRADE"
     assert "session_time_budget_exhausted" in report["block_reasons"]
