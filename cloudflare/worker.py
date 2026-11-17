@@ -22,8 +22,7 @@ def utc_now():
 class Default(WorkerEntrypoint):
     def _headers(self, prefer=None):
         headers = {
-            "apikey": self.env.SUPABASE_SERVICE_ROLE_KEY,
-            "authorization": "Bearer " + self.env.SUPABASE_SERVICE_ROLE_KEY,
+            "apikey": self.env.SUPABASE_SECRET_KEY,
             "content-type": "application/json",
         }
         if prefer:
@@ -104,7 +103,7 @@ class Default(WorkerEntrypoint):
         )
 
     async def _process(self):
-        if not getattr(self.env, "SUPABASE_URL", None) or not getattr(self.env, "SUPABASE_SERVICE_ROLE_KEY", None):
+        if not getattr(self.env, "SUPABASE_URL", None) or not getattr(self.env, "SUPABASE_SECRET_KEY", None):
             raise RuntimeError("worker_secrets_not_configured")
         state = await self._load_state()
         pending = await self._db(
@@ -174,8 +173,6 @@ class Default(WorkerEntrypoint):
         if path.endswith("/market-data"):
             if request.method != "POST":
                 return Response("method not allowed", status=405)
-            if (request.method != "POST"):
-                return Response("method not allowed", status=405)
             collector_token = getattr(self.env, "JARVIS_COLLECTOR_TOKEN", None)
             if not collector_token:
                 return Response("collector authentication not configured", status=503)
@@ -189,7 +186,7 @@ class Default(WorkerEntrypoint):
             if token_diff:
                 return Response("unauthorized", status=401)
             if (not getattr(self.env, "SUPABASE_URL", None)
-                    or not getattr(self.env, "SUPABASE_SERVICE_ROLE_KEY", None)
+                    or not getattr(self.env, "SUPABASE_SECRET_KEY", None)
                     or not getattr(self.env, "JARVIS_INGEST_TOKEN", None)):
                 return Response("ingress not configured", status=503)
             raw = await request.text()
