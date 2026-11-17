@@ -66,7 +66,7 @@
   <button id="signout" class="secondary hidden">Sign out</button>
 </header>
 
-<section id="signin" class="card hidden" aria-labelledby="signin-title">
+<section id="signin" class="card" aria-labelledby="signin-title">
   <h2 id="signin-title">Sign in</h2>
   <p class="muted">We will email you a one-time sign-in link. Only authorized operators can use this panel.</p>
   <form id="signin-form">
@@ -155,7 +155,17 @@ function toast(message) {
 }
 
 // Lazy-load the client from a pinned CDN version.
-const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm");
+let createClient;
+try {
+  ({ createClient } = await import("https://esm.sh/@supabase/supabase-js@2.45.4"));
+} catch (primaryError) {
+  try {
+    ({ createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm"));
+  } catch (fallbackError) {
+    text($("signin-msg"), "The sign-in library could not load. Check your connection and reload this page.");
+    throw fallbackError;
+  }
+}
 const supabase = createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
