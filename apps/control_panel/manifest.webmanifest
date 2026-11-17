@@ -1,0 +1,11 @@
+{
+  "name": "Jarvis Control",
+  "short_name": "Jarvis",
+  "description": "Paper-only monitoring and controls for Jarvis Unified. Live trading is disabled by design.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0b1020",
+  "theme_color": "#0b1020",
+  "orientation": "portrait"
+}
