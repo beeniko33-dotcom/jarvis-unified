@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -22,11 +23,24 @@ _LINEAGE_KEYS = frozenset({
     "quote_source", "quote_timestamp",
 })
 _SECRET_MARKERS = ("secret", "password", "token", "private_key", "api_key", "authorization", "bearer")
+_CREDENTIAL_PATTERNS = tuple(re.compile(p, re.IGNORECASE) for p in (
+    r"gh[pousr]_[A-Za-z0-9_]{20,}", r"github_pat_[A-Za-z0-9_]{20,}",
+    r"AKIA[0-9A-Z]{16}", r"xox[baprs]-[A-Za-z0-9-]{10,}",
+    r"(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{12,}", r"sk-[A-Za-z0-9_-]{24,}",
+    r"Bearer\\s+\\S+", r"eyJ[A-Za-z0-9_-]{10,}\\.eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}",
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+))
+
+
+def _looks_like_credential(value: str) -> bool:
+    return any(pattern.search(value) for pattern in _CREDENTIAL_PATTERNS)
 
 
 def _paper_metadata(metadata: dict) -> dict:
     """Persist only bounded, non-secret research lineage; never arbitrary metadata."""
     lineage = metadata.get("research_lineage") if isinstance(metadata, dict) else None
+    if not isinstance(lineage, dict):
+        lineage = metadata if isinstance(metadata, dict) else None
     if not isinstance(lineage, dict):
         return {}
     safe = {}
@@ -35,7 +49,7 @@ def _paper_metadata(metadata: dict) -> dict:
             continue
         value = value.strip()
         lowered = value.lower()
-        if not value or len(value) > 128 or any(marker in lowered for marker in _SECRET_MARKERS):
+        if not value or len(value) > 128 or any(marker in lowered for marker in _SECRET_MARKERS) or _looks_like_credential(value):
             continue
         if key in {"strategy_config_hash", "signal_context_hash", "data_hash"}:
             if not (len(value) == 64 and all(ch in "0123456789abcdefABCDEF" for ch in value)):
