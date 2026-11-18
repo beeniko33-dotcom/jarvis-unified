@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0b1020"><title>Career Giver · Jarvis Unified</title>
+<style>
+:root{color-scheme:dark;font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;background:#0b1020;color:#e8eefc}
+*{box-sizing:border-box}body{margin:0}a{color:#75dcd4}.wrap{max-width:1120px;margin:auto;padding:24px 16px 60px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:22px}
+h1{font-size:26px;margin:0}h2{font-size:18px;margin:0 0 12px}.muted{color:#9aabc5;font-size:13px}
+nav{display:flex;gap:8px;flex-wrap:wrap}.btn,button{border:1px solid #344766;background:#17243a;color:#e8eefc;border-radius:9px;padding:10px 13px;cursor:pointer;font:inherit}.btn.primary,button.primary{background:#3bafa9;color:#06191b;border:0;font-weight:700}.btn:disabled,button:disabled{opacity:.45;cursor:not-allowed}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.card{background:#121d30;border:1px solid #293a58;border-radius:15px;padding:18px;min-width:0;margin-bottom:14px}
+label{display:block;font-size:12px;color:#aabbd3;margin:10px 0 5px}input,textarea,select{width:100%;background:#0c1525;color:#f3f6ff;border:1px solid #344766;border-radius:8px;padding:10px;font:inherit}textarea{min-height:90px;resize:vertical}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.row>*{flex:1}.status{display:inline-block;padding:4px 8px;border:1px solid #38526b;border-radius:30px;font-size:11px;color:#a8d8d4}.notice{padding:12px;border:1px solid #66532c;background:#302819;border-radius:10px;color:#f1d89a;font-size:13px;margin:12px 0}
+.item{border-top:1px solid #2a3a55;padding:12px 0}.item:first-child{border-top:0}.item strong{display:block}.item p{margin:5px 0;color:#aabbd3;font-size:13px}.item small{color:#8295b1}
+#message-list{height:220px;overflow:auto;background:#0c1525;border:1px solid #293a58;border-radius:9px;padding:10px;margin:10px 0}
+.msg{padding:8px 10px;background:#17243a;border-radius:9px;margin:6px 0;max-width:90%}.msg.mine{margin-left:auto;background:#164344}.hidden{display:none!important}
+@media(max-width:760px){.grid{grid-template-columns:1fr}.wrap{padding:16px 12px 40px}h1{font-size:22px}}
+</style>
+</head>
+<body><div class="wrap">
+<header><div><h1>Career Giver</h1><div class="muted">Jobs · verified employers · private application messaging</div></div><nav><a class="btn" href="/">← Jarvis workspace</a><button id="signout">Sign out</button></nav></header>
+<div id="loading" class="card">Checking your secure session…</div>
+<div id="signin" class="card hidden"><h2>Sign in to Career Giver</h2><p class="muted">Use your existing Jarvis Unified account. Your session is shared securely with the main workspace.</p><p><a href="/">Open Jarvis Unified sign-in →</a></p></div>
+<main id="app" class="hidden">
+<div class="notice">Employer accounts start as <strong>pending verification</strong>. Publishing jobs and inviting additional staff are intentionally locked until a trusted verification and onboarding workflow is deployed. Do not treat an unverified employer as authenticated.</div>
+<div class="grid">
+<section class="card"><h2>Your candidate profile</h2>
+<label for="display-name">Display name</label><input id="display-name" maxlength="100" autocomplete="name">
+<label for="headline">Professional headline</label><input id="headline" maxlength="160">
+<label for="bio">About you</label><textarea id="bio" maxlength="4000"></textarea>
+<div class="row"><div><label for="location">Location</label><input id="location" maxlength="120" placeholder="City, country"></div><div><label for="visibility">Profile visibility</label><select id="visibility"><option value="private">Private</option><option value="public">Public</option></select></div></div>
+<p><button class="primary" id="save-profile">Save profile</button></p><p id="profile-status" class="muted" aria-live="polite"></p>
+</section>
+<section class="card"><h2>Employer onboarding</h2>
+<label for="org-name">Organization name</label><input id="org-name" maxlength="160">
+<label for="org-website">Official website</label><input id="org-website" maxlength="500" placeholder="https://">
+<label for="org-description">Organization description</label><textarea id="org-description" maxlength="4000"></textarea>
+<label for="org-country">Country code (2 letters)</label><input id="org-country" maxlength="2" placeholder="NG">
+<p><button class="primary" id="create-org">Submit organization for review</button></p>
+<div id="org-list" class="muted">No organization profile loaded.</div><p id="org-status" class="muted" aria-live="polite"></p>
+</section>
+</div>
+<section class="card"><h2>Open opportunities</h2><p class="muted">Only published listings are shown. Apply using your candidate account.</p><button id="refresh-jobs">Refresh opportunities</button><div id="job-list" class="item muted">Loading opportunities…</div></section>
+<div class="grid">
+<section class="card"><h2>Your applications</h2><div id="application-list" class="muted">Loading…</div></section>
+<section class="card"><h2>Employer draft jobs</h2><p class="muted">Drafts can be prepared only for verified organizations. Publishing is blocked until verification is completed.</p>
+<label for="job-org">Verified organization</label><select id="job-org"><option value="">No verified organization</option></select>
+<label for="job-title">Job title</label><input id="job-title" maxlength="180">
+<label for="job-description">Description (minimum 30 characters)</label><textarea id="job-description" maxlength="20000"></textarea>
+<div class="row"><div><label for="employment-type">Employment</label><select id="employment-type"><option value="full_time">Full time</option><option value="part_time">Part time</option><option value="contract">Contract</option><option value="temporary">Temporary</option><option value="internship">Internship</option></select></div><div><label for="workplace-type">Workplace</label><select id="workplace-type"><option value="remote">Remote</option><option value="hybrid">Hybrid</option><option value="onsite">On-site</option></select></div></div>
+<p><button id="create-job" class="primary" disabled>Create draft job</button></p><p id="job-status" class="muted" aria-live="polite"></p>
+</section>
+</div>
+<section class="card"><h2>Private application messages</h2><p class="muted">Messages are visible only to the candidate and authorized employer members for that application.</p>
+<label for="conversation">Conversation</label><select id="conversation"><option value="">No conversations yet</option></select>
+<div id="message-list" aria-live="polite"><span class="muted">Select a conversation to view messages.</span></div>
+<label for="message-body">Message</label><textarea id="message-body" maxlength="10000" placeholder="Write a professional message…"></textarea>
+<p><button id="send-message" class="primary" disabled>Send message</button></p><p id="message-status" class="muted" aria-live="polite"></p>
+</section>
+</main>
+</div>
+<script type="module">
+const URL="https://zythldptlplyutphgxpg.supabase.co";
+const KEY="sb_publishable_5bXO0f6Xpc3PzWifm7AgoA_IuYaVTa-";
+const {createClient}=await import("https://esm.sh/@supabase/supabase-js@2.45.4");
+const sb=createClient(URL,KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let user=null,orgs=[],apps=[],conversations=[];
+function say(id,msg){$(id).textContent=msg}
+function show(id,on){$(id).classList.toggle("hidden",!on)}
+async function init(){
+ const {data,error}=await sb.auth.getSession();
+ $("loading").classList.add("hidden");
+ if(error||!data.session){show("signin",true);return}
+ user=data.session.user;show("app",true);
+ await Promise.all([loadProfile(),loadOrganizations(),loadJobs(),loadApplications()]);
+ await loadConversations();
+}
+async function loadProfile(){
+ const {data,error}=await sb.from("career_profiles").select("*").eq("user_id",user.id).maybeSingle();
+ if(error){say("profile-status","Profile load failed: "+error.message);return}
+ if(data){$("display-name").value=data.display_name||"";$("headline").value=data.headline||"";$("bio").value=data.bio||"";$("location").value=data.location||"";$("visibility").value=data.visibility||"private"}
+}
+async function loadOrganizations(){
+ const {data,error}=await sb.from("career_organizations").select("id,name,verification_status,created_at").eq("created_by",user.id).order("created_at",{ascending:false});
+ if(error){say("org-status","Organization load failed: "+error.message);return}
+ orgs=data||[];
+ $("org-list").innerHTML=orgs.length?orgs.map(o=>'<div class="item"><strong>'+esc(o.name)+'</strong><span class="status">'+esc(o.verification_status)+'</span></div>').join(""):"No organization submitted yet.";
+ const verified=orgs.filter(o=>o.verification_status==="verified");
+ $("job-org").innerHTML=verified.length?verified.map(o=>'<option value="'+esc(o.id)+'">'+esc(o.name)+'</option>').join(""):'<option value="">No verified organization</option>';
+ $("create-job").disabled=!verified.length;
+}
+async function loadJobs(){
+ const {data,error}=await sb.from("career_jobs").select("id,title,description,employment_type,workplace_type,location,salary_min,salary_max,salary_currency,created_at").eq("status","published").order("created_at",{ascending:false}).limit(50);
+ if(error){$("job-list").textContent="Could not load jobs: "+error.message;return}
+ $("job-list").innerHTML=data?.length?data.map(j=>'<article class="item"><strong>'+esc(j.title)+'</strong><p>'+esc(j.description.slice(0,360))+(j.description.length>360?"…":"")+'</p><small>'+esc(j.employment_type.replace("_"," "))+" · "+esc(j.workplace_type)+(j.location?" · "+esc(j.location):"")+'</small><p><button data-apply="'+esc(j.id)+'">Apply</button></p></article>').join(""):"No published opportunities yet.";
+ $("job-list").querySelectorAll("[data-apply]").forEach(b=>b.addEventListener("click",()=>apply(b.dataset.apply,b)));
+}
+async function apply(jobId,button){
+ button.disabled=true;
+ const {error}=await sb.from("career_applications").insert({job_id:jobId,candidate_id:user.id,status:"submitted"});
+ if(error){say("message-status","Application could not be submitted: "+error.message);button.disabled=false;return}
+ say("message-status","Application submitted. A private conversation is created automatically.");
+ await loadApplications();await loadConversations();
+}
+async function loadApplications(){
+ const {data,error}=await sb.from("career_applications").select("id,job_id,candidate_id,cover_letter,status,created_at,career_jobs(title,organization_id)").order("created_at",{ascending:false}).limit(100);
+ if(error){$("application-list").textContent="Could not load applications: "+error.message;return}
+ apps=data||[];
+ $("application-list").innerHTML=apps.length?apps.map(a=>'<div class="item"><strong>'+esc(a.career_jobs?.title||"Job application")+'</strong><span class="status">'+esc(a.status)+'</span><p><small>'+ (a.candidate_id===user.id?"Your application":"Candidate application") +'</small></p>'+(a.candidate_id===user.id&&a.status!=="withdrawn"?'<button data-withdraw="'+esc(a.id)+'">Withdraw</button>':"")+'</div>').join(""):"No applications visible yet.";
+ $("application-list").querySelectorAll("[data-withdraw]").forEach(b=>b.addEventListener("click",async()=>{b.disabled=true;const {error}=await sb.from("career_applications").update({status:"withdrawn"}).eq("id",b.dataset.withdraw);say("message-status",error?"Could not withdraw: "+error.message:"Application withdrawn.");await loadApplications();await loadConversations()}));
+}
+async function loadConversations(){
+ const ids=apps.map(a=>a.id);if(!ids.length){conversations=[];$("conversation").innerHTML='<option value="">No conversations yet</option>';$("message-list").textContent="No conversations yet.";return}
+ const {data,error}=await sb.from("career_conversations").select("id,application_id,last_message_at").in("application_id",ids).order("last_message_at",{ascending:false});
+ if(error){say("message-status","Conversations unavailable: "+error.message);return}
+ conversations=data||[];
+ $("conversation").innerHTML=conversations.length?conversations.map(c=>{const a=apps.find(x=>x.id===c.application_id);return '<option value="'+esc(c.id)+'">'+esc(a?.career_jobs?.title||"Application conversation")+' · '+esc(a?.status||"")+'</option>'}).join(""):'<option value="">No conversations yet</option>';
+ $("send-message").disabled=!conversations.length;
+ if(conversations.length)await loadMessages(conversations[0].id);
+}
+async function loadMessages(id){
+ const {data,error}=await sb.from("career_messages").select("id,sender_id,body,created_at").eq("conversation_id",id).order("created_at",{ascending:true}).limit(100);
+ if(error){$("message-list").textContent="Messages unavailable: "+error.message;return}
+ $("message-list").innerHTML=data?.length?data.map(m=>'<div class="msg '+(m.sender_id===user.id?"mine":"")+'">'+esc(m.body)+'<div><small>'+esc(new Date(m.created_at).toLocaleString())+'</small></div></div>').join(""):'<span class="muted">No messages yet. Start the conversation.</span>';
+ $("message-list").scrollTop=$("message-list").scrollHeight;
+}
+$("conversation").addEventListener("change",e=>{if(e.target.value)loadMessages(e.target.value)});
+$("save-profile").addEventListener("click",async()=>{
+ const display_name=$("display-name").value.trim();if(!display_name){say("profile-status","Enter a display name.");return}
+ const payload={user_id:user.id,display_name,headline:$("headline").value.trim()||null,bio:$("bio").value.trim()||null,location:$("location").value.trim()||null,visibility:$("visibility").value};
+ const {error}=await sb.from("career_profiles").upsert(payload,{onConflict:"user_id"});
+ say("profile-status",error?"Save failed: "+error.message:"Profile saved.");
+});
+$("create-org").addEventListener("click",async()=>{
+ const name=$("org-name").value.trim();if(name.length<2){say("org-status","Enter an organization name.");return}
+ const country=$("org-country").value.trim().toUpperCase();if(country&&!/^[A-Z]{2}$/.test(country)){say("org-status","Country code must be two letters.");return}
+ const {error}=await sb.from("career_organizations").insert({name,website:$("org-website").value.trim()||null,description:$("org-description").value.trim()||null,country_code:country||null,created_by:user.id});
+ say("org-status",error?"Submission failed: "+error.message:"Organization submitted with pending verification. Job publishing remains locked.");
+ if(!error){$("org-name").value="";await loadOrganizations()}
+});
+$("create-job").addEventListener("click",async()=>{
+ const organization_id=$("job-org").value,title=$("job-title").value.trim(),description=$("job-description").value.trim();
+ if(!organization_id||title.length<3||description.length<30){say("job-status","Select a verified organization and provide a valid title and 30+ character description.");return}
+ const {error}=await sb.from("career_jobs").insert({organization_id,created_by:user.id,title,description,employment_type:$("employment-type").value,workplace_type:$("workplace-type").value,status:"draft"});
+ say("job-status",error?"Draft failed: "+error.message:"Draft saved. Publishing remains controlled by the verified employer workflow.");
+});
+$("send-message").addEventListener("click",async()=>{
+ const conversation_id=$("conversation").value,body=$("message-body").value.trim();if(!conversation_id||!body)return;
+ $("send-message").disabled=true;
+ const {error}=await sb.from("career_messages").insert({conversation_id,sender_id:user.id,body});
+ say("message-status",error?"Message not sent: "+error.message:"Message sent.");
+ if(!error){$("message-body").value="";await loadMessages(conversation_id)}
+ $("send-message").disabled=!conversations.length;
+});
+$("refresh-jobs").addEventListener("click",loadJobs);
+$("signout").addEventListener("click",async()=>{await sb.auth.signOut();location.href="/"});
+sb.auth.onAuthStateChange((event,session)=>{if(!session){show("app",false);show("signin",true)}});
+init().catch(e=>{say("loading","Could not initialize Career Giver: "+e.message)});
+</script></body></html>
