@@ -198,6 +198,7 @@ Deno.serve(async (req: Request) => {
         provider_endpoint: GATE_BASE + "/spot/candlesticks",
         provider_pair: PAIR,
         market_type: "spot",
+        klines: rawKlines,
         candle: { ...latest, open_time: new Date(latest.openTime).toISOString(), close_time: eventTime },
         indicators: { sma20, sma50, rsi14, return_5m_pct: return5mPct, trend },
         quote_age_seconds: quoteAgeSeconds,
