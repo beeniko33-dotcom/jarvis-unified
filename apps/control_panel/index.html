@@ -43,6 +43,7 @@
     <button data-page="portfolio"><span class="nav-icon">▤</span>Portfolio</button>
     <button type="button" id="career-giver-link"><span class="nav-icon">♙</span>Career Giver</button>
     <button type="button" id="marketplace-link"><span class="nav-icon">◇</span>Marketplace</button>
+    <button type="button" id="nikocoin-link"><span class="nav-icon">✧</span>NikoCoin</button>
     <button type="button" id="platform-admin-link"><span class="nav-icon">✓</span>Verification</button>
     <button type="button" id="marketplace-link"><span class="nav-icon">◇</span>Marketplace</button>
     <button data-page="analytics"><span class="nav-icon">▥</span>Analytics</button>
@@ -212,6 +213,7 @@ function leaveApp(){clearInterval(pollTimer);clearInterval(demoTimer);show($("ap
 document.querySelectorAll("[data-page]").forEach(button=>button.addEventListener("click",()=>{document.querySelectorAll("[data-page]").forEach(b=>b.classList.toggle("active",b===button));document.querySelectorAll(".panel").forEach(p=>p.classList.toggle("active",p.id==="page-"+button.dataset.page));set("page-title",button.textContent.trim())}));
 $("career-giver-link").addEventListener("click",()=>{window.location.href="/career.html"});
 $("marketplace-link").addEventListener("click",()=>{window.location.href="/marketplace.html"});
+$("nikocoin-link").addEventListener("click",()=>{window.location.href="/nikocoin.html"});
 $("platform-admin-link").addEventListener("click",()=>{window.location.href="/platform-admin.html"});
 $("marketplace-link").addEventListener("click",()=>{window.location.href="/marketplace.html"});
 $("refresh").addEventListener("click",()=>{refresh();refreshDemo()});
