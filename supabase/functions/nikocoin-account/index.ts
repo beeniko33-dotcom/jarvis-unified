@@ -32,7 +32,7 @@ Deno.serve(async (req: Request) => {
   if (!auth.startsWith("Bearer ")) return reply(req, 401, { error: "sign in required" });
   const url = Deno.env.get("SUPABASE_URL");
   const anon = Deno.env.get("SUPABASE_ANON_KEY");
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  let secretKeys: Record<string,string> = {};\n  try { secretKeys = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}"); } catch { /* use the legacy service-role fallback */ }\n  const serviceKey = secretKeys.default ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!url || !anon || !serviceKey) return reply(req, 503, { error: "rewards service is not configured" });
 
   const raw = await req.text();
