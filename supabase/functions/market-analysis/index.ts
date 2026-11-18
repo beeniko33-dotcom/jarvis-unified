@@ -4,10 +4,10 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SERVICE_ROLE_KEY") ?? "";
 const BINANCE_BASE = "https://data-api.binance.vision";
 const SYMBOL = "BTCUSDT";
-const INTERVAL = "1m";
-const STRATEGY_ID = "btc-sma20-sma50-rsi14";
+const INTERVAL = "5m";
+const STRATEGY_ID = "btc-5m-sma20-sma50-rsi14-wilder";
 const STRATEGY_VERSION = "1.0.0";
-const MAX_AGE_MS = 120_000;
+const MAX_AGE_MS = 360_000;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -197,7 +197,7 @@ Deno.serve(async (req: Request) => {
     };
     const observationResult = await rpc("jarvis_ingest_market_observations", { p_observations: [observation] });
     const signal = {
-      idempotency_key: "binance-btc-1m-sma20-50-rsi14:" + latest.closeTime,
+      idempotency_key: "binance-btc-5m-sma20-50-rsi14:" + latest.closeTime,
       instrument: SYMBOL,
       asset_class: "crypto",
       direction,
