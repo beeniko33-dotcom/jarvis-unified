@@ -8,7 +8,7 @@ This Edge Function fetches Binance public Spot server time and the newest 100 BT
 - Provider data remains `candidate_unverified` / `unverified_market_data`; `evidence_credit=false`.
 - Signal direction is research output, not a trade instruction.
 - Risk gate is blocked; position size is zero; paper execution is disabled; no live orders can be created.
-- The function requires a valid Supabase JWT (`verify_jwt=true`).
+- The function requires a valid Supabase JWT (`verify_jwt=true`) and checks the verified JWT role claim; only `authenticated` and `service_role` callers are accepted (anonymous callers are rejected).
 - The latest closed 1-minute candle must be no more than 120 seconds old and local clock skew must be within 30 seconds.
 - This does not replace the 30-day forward validation or resolve the provider provenance gate.
 
