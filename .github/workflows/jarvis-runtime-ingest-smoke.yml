@@ -9,6 +9,11 @@ on:
       - "supabase/functions/jarvis-runtime-ingest/**"
       - "scripts/ingest_deriv_candidates_to_supabase.py"
       - ".github/workflows/jarvis-runtime-ingest-smoke.yml"
+  pull_request:
+    paths:
+      - "supabase/functions/jarvis-runtime-ingest/**"
+      - "scripts/ingest_deriv_candidates_to_supabase.py"
+      - ".github/workflows/jarvis-runtime-ingest-smoke.yml"
   workflow_dispatch:
 
 permissions:
@@ -22,7 +27,44 @@ jobs:
       JARVIS_SUPABASE_URL: ${{ secrets.JARVIS_SUPABASE_URL }}
       JARVIS_SUPABASE_SECRET_KEY: ${{ secrets.JARVIS_SUPABASE_SERVICE_ROLE_KEY }}
     steps:
+      - name: Reject unauthenticated runtime-ingest requests
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          base_url = os.environ.get("JARVIS_SUPABASE_URL", "").rstrip("/")
+          if not base_url:
+              base_url = "https://zythldptlplyutphgxpg.supabase.co"
+          body = json.dumps({"kind": "audit_event"}).encode()
+          request = urllib.request.Request(
+              base_url + "/functions/v1/jarvis-runtime-ingest",
+              data=body,
+              method="POST",
+              headers={"content-type": "application/json"},
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  raise SystemExit(
+                      "Unauthenticated runtime-ingest unexpectedly returned HTTP "
+                      + str(response.status)
+                  )
+          except urllib.error.HTTPError as exc:
+              if exc.code != 403:
+                  raise SystemExit(
+                      "Unauthenticated runtime-ingest returned HTTP " + str(exc.code)
+                  ) from None
+          print(json.dumps({
+              "status": "PASS",
+              "unauthenticated_request": "rejected",
+              "expected_http_status": 403,
+          }, sort_keys=True))
+          PY
       - name: Submit an authenticated audit-only smoke event
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           python - <<'PY'
