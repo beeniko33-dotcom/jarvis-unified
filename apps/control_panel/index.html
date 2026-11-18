@@ -96,7 +96,7 @@
           <label class="muted" for="demo-quantity" style="display:block;margin-top:12px">Quantity (base asset)</label><input class="field" id="demo-quantity" type="number" min="0.00000001" max="100000" step="0.00000001" placeholder="e.g. 0.001" required>
           <div class="data-row"><div><small>Current live price</small><strong id="demo-selected-price">Waiting for quote…</strong></div><span class="state warn" id="demo-feed-state">Connecting</span></div>
           <p class="notice">Simulated fee: 0.10% per fill. Maximum single trade: 25% of starting demo balance. Market orders may be rejected if prices are stale or risk limits fail.</p>
-          <button class="btn primary" id="demo-submit" type="submit" style="width:100%;margin-top:12px">Place demo order</button>
+          <button class="btn primary" id="demo-submit" type="submit" disabled style="width:100%;margin-top:12px">Place demo order</button>
           <p id="demo-order-message" class="notice" role="status"></p>
         </form>
       </article>
@@ -195,7 +195,7 @@ function renderDemo(data){
  const quoteBody=$("demo-quotes");quoteBody.replaceChildren();
  for(const q of quotes){const tr=document.createElement("tr");addCell(tr,q.symbol.replace("USDT"," / USDT"));addCell(tr,money(q.price));const stamp=addCell(tr,time(q.provider_timestamp));if(q.stale){stamp.className="trade-negative";stamp.textContent+=" · STALE"}quoteBody.appendChild(tr)}
  const latest=quotes[0]?.received_at;set("demo-quote-updated",latest?"Provider response received "+time(latest)+" · "+(quotes[0]?.provider||"Binance Spot"):"No live quotes available");
- const selected=bySymbol[$("demo-symbol").value];const feedStale=!quotes.length||quotes.some(q=>q.stale);setState("demo-feed-state",!quotes.length?"Unavailable":feedStale?"Stale quote":"Live quote",!quotes.length||feedStale?"bad":"");$("demo-submit").disabled=!selected||selected.stale;set("demo-selected-price",selected?money(selected.price)+(selected.stale?" · stale":""):"No quote");
+ const selected=bySymbol[$("demo-symbol").value];setState("demo-feed-state",!selected?"Unavailable":selected.stale?"Stale quote":"Live quote",!selected||selected.stale?"bad":"");$("demo-submit").disabled=!selected||selected.stale;set("demo-selected-price",selected?money(selected.price)+(selected.stale?" · stale":""):"No quote");
  const pt=$("demo-positions");pt.replaceChildren();show($("demo-no-positions"),positions.length===0);
  for(const p of positions){const q=bySymbol[p.symbol],price=Number(q?.price||0),qty=Number(p.quantity),avg=Number(p.average_entry_price),pnl=qty*(price-avg),tr=document.createElement("tr");addCell(tr,p.symbol);addCell(tr,precise(qty));addCell(tr,money(avg));addCell(tr,q?money(price):"Quote unavailable");const pnlCell=addCell(tr,(pnl>=0?"+":"")+money(pnl));pnlCell.className=pnl>=0?"trade-positive":"trade-negative";pt.appendChild(tr)}
  const orders=data.orders||[],ot=$("demo-orders");ot.replaceChildren();show($("demo-no-orders"),orders.length===0);
@@ -207,7 +207,7 @@ async function enterApp(){show($("signin"),false);show($("app"),true);show($("si
 function leaveApp(){clearInterval(pollTimer);clearInterval(demoTimer);show($("app"),false);show($("signout"),false);show($("signin"),true);set("connection-label","Signed out")}
 document.querySelectorAll("[data-page]").forEach(button=>button.addEventListener("click",()=>{document.querySelectorAll("[data-page]").forEach(b=>b.classList.toggle("active",b===button));document.querySelectorAll(".panel").forEach(p=>p.classList.toggle("active",p.id==="page-"+button.dataset.page));set("page-title",button.textContent.trim())}));
 $("refresh").addEventListener("click",()=>{refresh();refreshDemo()});
-$("demo-symbol").addEventListener("change",()=>{const q=demoSnapshot?.quotes?.find(x=>x.symbol===$("demo-symbol").value);set("demo-selected-price",q?money(q.price):"No quote")});
+$("demo-symbol").addEventListener("change",()=>{const q=demoSnapshot?.quotes?.find(x=>x.symbol===$("demo-symbol").value);set("demo-selected-price",q?money(q.price)+(q.stale?" · stale":""):"No quote");setState("demo-feed-state",!q?"Unavailable":q.stale?"Stale quote":"Live quote",!q||q.stale?"bad":"");$("demo-submit").disabled=!q||q.stale});
 $("demo-order-form").addEventListener("submit",async e=>{e.preventDefault();const button=$("demo-submit"),message=$("demo-order-message");button.disabled=true;message.textContent="Fetching a fresh server-side quote and submitting simulated fill…";try{const quantity=Number($("demo-quantity").value);if(!Number.isFinite(quantity)||quantity<=0)throw Error("Enter a valid quantity.");const result=await api("demo-trading",{method:"POST",body:JSON.stringify({symbol:$("demo-symbol").value,side:$("demo-side").value,quantity,idempotency_key:crypto.randomUUID()})});const r=result.result;message.textContent=(r.duplicate?"Duplicate request safely ignored.":"Demo "+r.side.toUpperCase()+" filled.")+" "+precise(r.quantity)+" "+r.symbol+" @ "+money(r.execution_price)+" · fee "+money(r.fee)+". No live order was sent.";toast("Demo order "+(r.duplicate?"already recorded":"filled"));$("demo-quantity").value="";await refreshDemo()}catch(err){message.textContent="Order rejected: "+err.message;toast(err.message)}finally{button.disabled=false}});
 
 let authMode="login";
