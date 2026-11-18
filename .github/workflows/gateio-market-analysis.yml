@@ -1,0 +1,53 @@
+name: Gate.io read-only market analysis
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/gateio-market-analysis.yml"
+      - "supabase/functions/market-analysis/index.ts"
+  schedule:
+    - cron: "*/5 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gateio-btc-market-analysis
+  cancel-in-progress: false
+
+jobs:
+  collect-and-analyze:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    env:
+      JARVIS_SUPABASE_URL: ${{ secrets.JARVIS_SUPABASE_URL }}
+      JARVIS_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.JARVIS_SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - name: Invoke authenticated market-analysis function
+        if: ${{ env.JARVIS_SUPABASE_URL != '' && env.JARVIS_SUPABASE_SERVICE_ROLE_KEY != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --silent --show-error --fail-with-body \\
+            --request POST \\
+            --header "apikey: ${JARVIS_SUPABASE_SERVICE_ROLE_KEY}" \\
+            --header "Authorization: Bearer ${JARVIS_SUPABASE_SERVICE_ROLE_KEY}" \\
+            --header "Content-Type: application/json" \\
+            --data '{}' \\
+            "${JARVIS_SUPABASE_URL%/}/functions/v1/market-analysis" \\
+            | tee market-analysis-report.json
+      - name: Report missing deployment credentials
+        if: ${{ env.JARVIS_SUPABASE_URL == '' || env.JARVIS_SUPABASE_SERVICE_ROLE_KEY == '' }}
+        run: |
+          echo "::warning::Market analysis not invoked. Configure existing Supabase repository secrets."
+          echo '{"status":"SKIPPED_NOT_CONFIGURED","evidence_credit":false,"orders":0}' > market-analysis-report.json
+      - name: Preserve run report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateio-market-analysis-${{ github.run_id }}-${{ github.run_attempt }}
+          path: market-analysis-report.json
+          if-no-files-found: warn
+          retention-days: 30
