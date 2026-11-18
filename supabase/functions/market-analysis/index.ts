@@ -33,6 +33,17 @@ async function getJson(url: string): Promise<any> {
   if (!response.ok) throw new Error("market_provider_http_" + response.status);
   return await response.json();
 }
+function jwtRole(req: Request): string {
+  const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\\s+/i, "");
+  const parts = token.split(".");
+  if (parts.length !== 3) return "";
+  try {
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return typeof payload.role === "string" ? payload.role : "";
+  } catch {
+    return "";
+  }
+}
 function number(value: unknown, label: string): number {
   const n = Number(value);
   if (!Number.isFinite(n)) throw new Error("invalid_" + label);
@@ -89,6 +100,8 @@ async function rpc(name: string, body: unknown): Promise<any> {
 
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+  const callerRole = jwtRole(req);
+  if (callerRole !== "authenticated" && callerRole !== "service_role") return json({ error: "authenticated_operator_required" }, 403);
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY) return json({ error: "server_not_configured" }, 503);
   try {
     const [clock, rawKlines] = await Promise.all([
