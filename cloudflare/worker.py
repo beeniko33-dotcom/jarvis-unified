@@ -68,6 +68,19 @@ class Default(WorkerEntrypoint):
             state["kill_switch_engaged"] = state["kill_switch_engaged"] or row["kill_switch_engaged"]
         return state
 
+    async def _runtime_ingest(self, payload):
+        url = self.env.SUPABASE_URL.rstrip("/") + "/functions/v1/jarvis-runtime-ingest"
+        response = await fetch(
+            url,
+            method="POST",
+            headers=self._headers(),
+            body=json.dumps(payload, separators=(",", ":")),
+        )
+        raw = await response.text()
+        if not response.ok:
+            raise RuntimeError("runtime_ingest_http_" + str(response.status))
+        return json.loads(raw) if raw else None
+
     async def _save_heartbeat(self, state, processed):
         health = "blocked" if state["kill_switch_engaged"] else (
             "degraded" if state["entries_paused"] else "healthy"
@@ -94,6 +107,21 @@ class Default(WorkerEntrypoint):
             },
             "resolution=merge-duplicates,return=minimal",
         )
+
+        # Mirror the real control-worker heartbeat into the private append/UPSERT
+        # ingestion path. Failure is logged but must not break the control plane.
+        try:
+            await self._runtime_ingest({
+                "kind": "heartbeat",
+                "worker_id": WORKER_ID,
+                "worker_type": "cloudflare-python-worker",
+                "software_version": "control-plane-only-v1",
+                "git_commit": getattr(self.env, "JARVIS_GIT_COMMIT", None),
+                "health": health,
+                "details": details,
+            })
+        except Exception as error:
+            print("runtime_ingest_heartbeat_failed", type(error).__name__)
 
     async def _finish(self, command_id, status, result):
         await self._db(
