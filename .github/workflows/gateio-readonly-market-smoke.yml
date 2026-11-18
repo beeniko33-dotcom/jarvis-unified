@@ -1,0 +1,32 @@
+name: Gate.io read-only market data smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "13 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gateio-readonly-market-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pinned project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-lock.txt
+      - name: Fetch and validate public Gate.io market data
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m scripts.gateio_public_smoke --symbol BTCUSDT --interval 1m
