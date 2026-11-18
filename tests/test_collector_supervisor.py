@@ -94,6 +94,47 @@ class FakeReporter:
 
 
 class SupervisorTests(unittest.TestCase):
+    def test_main_forwards_collector_flags_after_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            captured = {}
+            record = SessionRecord(
+                session_id="test-session",
+                started_at="2026-11-18T00:00:00+00:00",
+                ended_at="2026-11-18T00:00:01+00:00",
+                exit_code=0,
+                duration_seconds=86400,
+                command=[],
+                db_path=str(root / "collector.sqlite3"),
+                status="completed",
+            )
+
+            def fake_run_continuous(**kwargs):
+                captured.update(kwargs)
+                return [record]
+
+            with patch.object(cs, "_install_signal_handlers"), patch.object(
+                cs, "run_continuous", side_effect=fake_run_continuous
+            ):
+                result = cs.main([
+                    "--db", str(root / "collector.sqlite3"),
+                    "--duration-seconds", "86400",
+                    "--log-dir", str(root / "sessions"),
+                    "--pause-between", "15",
+                    "--command", sys.executable, "-m", "research.deriv_feed",
+                    "--duration-seconds", "3600",
+                    "--db", str(root / "collector.sqlite3"),
+                ])
+
+            self.assertEqual(result, 0)
+            self.assertEqual(captured["duration_seconds"], 86400)
+            self.assertEqual(captured["command"], [
+                sys.executable, "-m", "research.deriv_feed",
+                "--duration-seconds", "3600",
+                "--db", str(root / "collector.sqlite3"),
+            ])
+
+
     def test_continuous_emits_lifecycle_and_backoff_without_command_details(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
