@@ -30,7 +30,8 @@ async function authorize(req: Request) {
   const url = Deno.env.get("SUPABASE_URL");
   const anon = Deno.env.get("SUPABASE_ANON_KEY");
   let secretKeys: Record<string,string> = {};
-  try { secretKeys = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}"); } catch { /* use the legacy service-role fallback */ }\n  const serviceKey = secretKeys.default ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  try { secretKeys = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}"); } catch { /* use the legacy service-role fallback */ }
+  const serviceKey = secretKeys.default ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!url || !anon || !serviceKey) return reply(req, 503, { error: "admin service is not configured" });
 
   const userClient = createClient(url, anon, {
