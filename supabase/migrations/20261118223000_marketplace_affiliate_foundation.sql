@@ -23,7 +23,7 @@ create policy marketplace_sellers_update on public.marketplace_sellers
   for update to authenticated
   using (owner_id = auth.uid())
   with check (owner_id = auth.uid());
-revoke all on public.marketplace_sellers from anon;
+revoke all on public.marketplace_sellers from public, anon, authenticated;
 grant select, insert on public.marketplace_sellers to authenticated;
 grant update(display_name, description, country_code) on public.marketplace_sellers to authenticated;
 
@@ -73,7 +73,7 @@ create policy marketplace_listings_update on public.marketplace_listings
       where s.id = seller_id and s.owner_id = auth.uid()
         and (status <> 'published' or s.verification_status = 'verified'))
   );
-revoke all on public.marketplace_listings from anon;
+revoke all on public.marketplace_listings from public, anon, authenticated;
 grant select, insert on public.marketplace_listings to authenticated;
 grant update(title, description, listing_type, price, currency, status, published_at)
   on public.marketplace_listings to authenticated;
@@ -100,7 +100,7 @@ create policy marketplace_affiliate_links_create on public.marketplace_affiliate
       where l.id = listing_id and l.status = 'published'
         and s.verification_status = 'verified' and s.owner_id <> auth.uid())
   );
-revoke all on public.marketplace_affiliate_links from anon;
+revoke all on public.marketplace_affiliate_links from public, anon, authenticated;
 grant select on public.marketplace_affiliate_links to authenticated;
 grant insert(listing_id, affiliate_user_id) on public.marketplace_affiliate_links to authenticated;
 
@@ -128,7 +128,7 @@ create policy marketplace_orders_participant_read on public.marketplace_orders
     or exists (select 1 from public.marketplace_sellers s
       where s.id = seller_id and s.owner_id = auth.uid())
   );
-revoke all on public.marketplace_orders from anon, authenticated;
+revoke all on public.marketplace_orders from public, anon, authenticated;
 grant select on public.marketplace_orders to authenticated;
 
 -- A trusted database function snapshots price from the published listing.
