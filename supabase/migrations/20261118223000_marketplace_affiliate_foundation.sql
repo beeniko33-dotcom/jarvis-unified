@@ -101,7 +101,8 @@ create policy marketplace_affiliate_links_create on public.marketplace_affiliate
         and s.verification_status = 'verified' and s.owner_id <> auth.uid())
   );
 revoke all on public.marketplace_affiliate_links from anon;
-grant select, insert on public.marketplace_affiliate_links to authenticated;
+grant select on public.marketplace_affiliate_links to authenticated;
+grant insert(listing_id, affiliate_user_id) on public.marketplace_affiliate_links to authenticated;
 
 create table public.marketplace_orders (
   id uuid primary key default gen_random_uuid(),
