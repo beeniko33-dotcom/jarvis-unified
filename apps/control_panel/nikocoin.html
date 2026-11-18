@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b1020"><title>NikoCoin Rewards · Jarvis Unified</title>
+<style>
+:root{color-scheme:dark;font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;background:#0b1020;color:#e8eefc}*{box-sizing:border-box}body{margin:0}.wrap{max-width:1000px;margin:auto;padding:22px 15px 60px}header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px}h1{font-size:25px;margin:0}h2{font-size:17px;margin:0 0 10px}.muted{color:#9aabc5;font-size:13px}.card{background:#121d30;border:1px solid #293a58;border-radius:14px;padding:18px;margin:12px 0}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.balance{font-size:42px;font-weight:800;letter-spacing:-.04em;color:#78ded7}.tag{display:inline-block;border:1px solid #38526b;border-radius:20px;padding:4px 9px;font-size:11px;color:#a8d8d4}.notice{padding:12px;border:1px solid #66532c;background:#302819;border-radius:10px;color:#f1d89a;font-size:13px}.item{border-top:1px solid #2a3a55;padding:12px 0;display:flex;justify-content:space-between;gap:10px;align-items:center}.item:first-child{border-top:0}.amount{font-weight:700}.positive{color:#7ee0ba}.negative{color:#ff9ca3}.btn,button{border:1px solid #344766;background:#17243a;color:#e8eefc;border-radius:9px;padding:9px 12px;cursor:pointer;text-decoration:none;font:inherit}.hidden{display:none!important}.statusline{font-size:12px;color:#9aabc5;min-height:20px}@media(max-width:700px){.grid{grid-template-columns:1fr}.wrap{padding:14px 11px 40px}h1{font-size:21px}.balance{font-size:34px}}
+</style></head>
+<body><div class="wrap">
+<header><div><h1>NikoCoin Rewards</h1><div class="muted">Jarvis internal rewards ledger</div></div><nav><a class="btn" href="/">Jarvis</a><a class="btn" href="/career.html">Career Giver</a><a class="btn" href="/marketplace.html">Marketplace</a><button id="signout">Sign out</button></nav></header>
+<div class="notice"><strong>Internal points only.</strong> NikoCoin currently has no cash value, cannot be transferred or withdrawn, and is not an on-chain token. Reward earning rules and automated credits are not active yet.</div>
+<div id="loading" class="card">Checking your secure session…</div>
+<div id="signin" class="card hidden"><h2>Sign in required</h2><p class="muted">Use your existing Jarvis Unified account.</p><a class="btn" href="/">Open Jarvis sign-in</a></div>
+<main id="app" class="hidden">
+<div class="grid">
+<section class="card"><div class="muted">Your internal balance</div><div class="balance" id="balance">— NIKO</div><span class="tag" id="status">Loading</span><p class="muted" id="balance-note">No cash value · no transfers · not on-chain</p></section>
+<section class="card"><h2>How rewards work</h2><p class="muted">The ledger is append-only and server-controlled. Future rewards can be issued only after a verified platform event and anti-fraud checks. Marketplace purchases, referrals, hiring milestones and other earning events are not yet connected.</p><p class="muted">No credits have been granted by this page.</p></section>
+</div>
+<section class="card"><div class="item"><strong>Ledger history</strong><button id="refresh">Refresh</button></div><div id="history"><div class="muted">Loading your ledger…</div></div><div id="message" class="statusline" aria-live="polite"></div></section>
+</main></div>
+<script type="module">
+const URL="https://zythldptlplyutphgxpg.supabase.co",KEY="sb_publishable_5bXO0f6Xpc3PzWifm7AgoA_IuYaVTa-",FN=URL+"/functions/v1/nikocoin-account";
+const {createClient}=await import("https://esm.sh/@supabase/supabase-js@2.45.4");
+const sb=createClient(URL,KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+const $=id=>document.getElementById(id),esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function show(id,on){$(id).classList.toggle("hidden",!on)}
+async function load(){
+ $("message").textContent="Refreshing account…";
+ try{
+  const {data}=await sb.auth.getSession(),token=data.session?.access_token;if(!token)throw Error("Sign in required");
+  const res=await fetch(FN,{method:"POST",headers:{apikey:KEY,authorization:"Bearer "+token,"content-type":"application/json"},body:JSON.stringify({limit:50})});
+  const result=await res.json().catch(()=>({}));if(!res.ok)throw Error(result.error||"Could not load NikoCoin account");
+  const b=result.balance||{},h=result.history||{};
+  $("balance").textContent=Number(b.balance||0).toLocaleString()+" "+esc(b.unit||"NIKO");
+  $("status").textContent="Internal reward only";
+  const entries=h.entries||[];
+  $("history").innerHTML=entries.length?entries.map(e=>'<div class="item"><div><strong>'+esc(e.event_code||e.entry_type)+'</strong><div class="muted">'+esc(new Date(e.created_at).toLocaleString())+' · '+esc(e.entry_type)+'</div></div><div class="amount '+(e.entry_type==="credit"?"positive":"negative")+'">'+(e.entry_type==="credit"?"+":"−")+esc(e.amount)+' '+esc(e.unit)+'</div></div>').join(""):'<p class="muted">No ledger entries yet. Reward earning workflows have not been activated.</p>';
+  $("message").textContent="Account loaded. "+(result.note||"");
+ }catch(e){$("message").textContent=e.message}
+}
+const {data}=await sb.auth.getSession();$("loading").classList.add("hidden");if(data.session){show("app",true);await load()}else show("signin",true);
+$("refresh").addEventListener("click",load);
+$("signout").addEventListener("click",async()=>{await sb.auth.signOut();location.href="/"});
+sb.auth.onAuthStateChange((event,session)=>{if(!session){show("app",false);show("signin",true)}});
+</script></body></html>
