@@ -102,7 +102,7 @@
       </article>
       <article class="card">
         <div class="card-head"><div><div class="card-title">Live market prices</div><div class="card-sub">Binance Spot · last-traded price · auto-refresh</div></div><span class="tag">Live data</span></div>
-        <div class="table-wrap"><table><thead><tr><th>Market</th><th>Last price</th><th>Provider time</th></tr></thead><tbody id="demo-quotes"></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>Market</th><th>Last price</th><th>Last trade (UTC)</th></tr></thead><tbody id="demo-quotes"></tbody></table></div>
         <p class="notice" id="demo-quote-updated">Awaiting provider quote.</p>
       </article>
     </div>
@@ -193,10 +193,9 @@ function renderDemo(data){
  for(const p of positions){const q=bySymbol[p.symbol],price=Number(q?.price||0),qty=Number(p.quantity),avg=Number(p.average_entry_price);marketValue+=qty*price;unrealized+=qty*(price-avg)}
  set("demo-cash",money(cash));set("demo-equity",money(cash+marketValue));set("demo-unrealized",(unrealized>=0?"+":"")+money(unrealized));$("demo-unrealized").className="stat-value "+(unrealized>=0?"trade-positive":"trade-negative");set("demo-position-count",positions.length);
  const quoteBody=$("demo-quotes");quoteBody.replaceChildren();
- for(const q of quotes){const tr=document.createElement("tr");addCell(tr,q.symbol.replace("USDT"," / USDT"));addCell(tr,money(q.price));addCell(tr,time(q.provider_timestamp));quoteBody.appendChild(tr)}
+ for(const q of quotes){const tr=document.createElement("tr");addCell(tr,q.symbol.replace("USDT"," / USDT"));addCell(tr,money(q.price));const stamp=addCell(tr,time(q.provider_timestamp));if(q.stale){stamp.className="trade-negative";stamp.textContent+=" · STALE"}quoteBody.appendChild(tr)}
  const latest=quotes[0]?.received_at;set("demo-quote-updated",latest?"Provider response received "+time(latest)+" · "+(quotes[0]?.provider||"Binance Spot"):"No live quotes available");
- setState("demo-feed-state",quotes.length?"Live quote":"Unavailable",quotes.length?"":"bad");
- const selected=bySymbol[$("demo-symbol").value];set("demo-selected-price",selected?money(selected.price):"No quote");
+ const selected=bySymbol[$("demo-symbol").value];const feedStale=!quotes.length||quotes.some(q=>q.stale);setState("demo-feed-state",!quotes.length?"Unavailable":feedStale?"Stale quote":"Live quote",!quotes.length||feedStale?"bad":"");$("demo-submit").disabled=!selected||selected.stale;set("demo-selected-price",selected?money(selected.price)+(selected.stale?" · stale":""):"No quote");
  const pt=$("demo-positions");pt.replaceChildren();show($("demo-no-positions"),positions.length===0);
  for(const p of positions){const q=bySymbol[p.symbol],price=Number(q?.price||0),qty=Number(p.quantity),avg=Number(p.average_entry_price),pnl=qty*(price-avg),tr=document.createElement("tr");addCell(tr,p.symbol);addCell(tr,precise(qty));addCell(tr,money(avg));addCell(tr,q?money(price):"Quote unavailable");const pnlCell=addCell(tr,(pnl>=0?"+":"")+money(pnl));pnlCell.className=pnl>=0?"trade-positive":"trade-negative";pt.appendChild(tr)}
  const orders=data.orders||[],ot=$("demo-orders");ot.replaceChildren();show($("demo-no-orders"),orders.length===0);
