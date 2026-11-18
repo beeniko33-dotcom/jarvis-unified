@@ -83,7 +83,7 @@ async function loadListings(){
 }
 function renderListings(){
  const q=$("search").value.trim().toLowerCase();
- const visible=listings.filter(l=>l.status==="published"&&(!q||(l.title+" "+l.description+" "+(l.marketplace_sellers?.display_name||"")).toLowerCase().includes(q)));
+ const targetListing=new URLSearchParams(location.search).get("listing");\n const visible=listings.filter(l=>l.status==="published"&&(!targetListing||l.id===targetListing)&&(!q||(l.title+" "+l.description+" "+(l.marketplace_sellers?.display_name||"")).toLowerCase().includes(q)));
  $("listing-list").innerHTML=visible.length?visible.map(l=>'<article class="listing"><h3>'+esc(l.title)+'</h3><p class="muted">'+esc(l.marketplace_sellers?.display_name||"Verified seller")+' · '+esc(l.listing_type)+'</p><p>'+esc(l.description.slice(0,320))+(l.description.length>320?"…":"")+'</p><div class="price">'+esc(money(l.price,l.currency))+'</div><div class="actions"><button data-order="'+esc(l.id)+'">Create order intent</button><button data-affiliate="'+esc(l.id)+'">Create affiliate link</button></div></article>').join(""):'<div class="muted">No matching published listings yet.</div>';
  $("listing-list").querySelectorAll("[data-order]").forEach(b=>b.addEventListener("click",()=>createOrder(b.dataset.order,b)));
  $("listing-list").querySelectorAll("[data-affiliate]").forEach(b=>b.addEventListener("click",()=>createAffiliate(b.dataset.affiliate,b)));
@@ -92,7 +92,7 @@ async function loadAffiliateLinks(){
  const {data,error}=await sb.from("marketplace_affiliate_links").select("id,listing_id,code,status,created_at").order("created_at",{ascending:false});
  if(error){$("affiliate-list").textContent="Affiliate links unavailable: "+error.message;return}
  affiliateLinks=data||[];
- $("affiliate-list").innerHTML=affiliateLinks.length?affiliateLinks.map(a=>{const l=listings.find(x=>x.id===a.listing_id);const url=location.origin+location.pathname+"?ref="+encodeURIComponent(a.code);return '<div class="item"><strong>'+esc(l?.title||"Listing referral")+'</strong><p><input readonly value="'+esc(url)+'"></p><span class="status">'+esc(a.status)+'</span><button data-copy="'+esc(url)+'">Copy link</button></div>'}).join(""):"No affiliate links yet.";
+ $("affiliate-list").innerHTML=affiliateLinks.length?affiliateLinks.map(a=>{const l=listings.find(x=>x.id===a.listing_id);const url=location.origin+location.pathname+"?ref="+encodeURIComponent(a.code)+"&listing="+encodeURIComponent(a.listing_id);return '<div class="item"><strong>'+esc(l?.title||"Listing referral")+'</strong><p><input readonly value="'+esc(url)+'"></p><span class="status">'+esc(a.status)+'</span><button data-copy="'+esc(url)+'">Copy link</button></div>'}).join(""):"No affiliate links yet.";
  $("affiliate-list").querySelectorAll("[data-copy]").forEach(b=>b.addEventListener("click",async()=>{try{await navigator.clipboard.writeText(b.dataset.copy);say("seller-status","Affiliate link copied.")}catch{say("seller-status","Copy unavailable. Select the link text manually.")}}));
 }
 async function loadOrders(){
