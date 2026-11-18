@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, deriv-eurusd-readonly-feed, level3-provenance-ops-readiness, feat/deriv-tls-claim-fail-closed, fix/forward-evidence-verifier-injection-closed]
+    branches: [main, feat/gateio-readonly-market-provider, deriv-eurusd-readonly-feed, level3-provenance-ops-readiness, feat/deriv-tls-claim-fail-closed, fix/forward-evidence-verifier-injection-closed]
   pull_request:
     branches: [main, deriv-eurusd-readonly-feed, level3-provenance-ops-readiness, feat/deriv-tls-claim-fail-closed, feat/public-rss-metadata-ingestion, feat/research-source-health-gaps]
   workflow_dispatch:
