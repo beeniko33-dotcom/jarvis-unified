@@ -34,6 +34,10 @@ class Notifier(Protocol):
     def send(self, text: str) -> None: ...
 
 
+class Publisher(Protocol):
+    def publish(self, body: dict) -> None: ...
+
+
 def fetch_closed_bars(symbol: str, interval: str, limit: int, *, opener: Callable = urlopen) -> list[Bar]:
     """Newest `limit` fully closed candles, oldest first. Open candles are always dropped."""
     symbol = symbol.strip().upper()
@@ -89,44 +93,63 @@ def format_alert(kind: str, ts: str, symbol: str, interval: str, payload: dict) 
 class LiveSignalRunner:
     def __init__(self, database: Path, *, symbol: str = "BTCUSDT", interval: str = "15m", fast: int = 10,
                  slow: int = 30, allow_entries: bool = False, notifier: Notifier | None = None,
+                 publisher: Publisher | None = None,
                  opener: Callable = urlopen, starting_cash: Decimal = Decimal("10000")) -> None:
         if interval not in ALLOWED_INTERVALS:
             raise ValueError("unsupported candle interval")
         self.symbol, self.interval, self.slow = symbol.strip().upper(), interval, slow
-        self.notifier, self.opener = notifier, opener
+        self.notifier, self.publisher, self.opener = notifier, publisher, opener
+        self.allow_entries = allow_entries
         self.engine = PaperReplay(database, starting_cash=starting_cash, fast=fast, slow=slow,
                                   allow_entries=allow_entries)
-        self.engine.db.execute("CREATE TABLE IF NOT EXISTS notify_state(id INTEGER PRIMARY KEY CHECK(id=1),last_event_id INTEGER)")
-        self.engine.db.execute("INSERT OR IGNORE INTO notify_state VALUES(1,0)")
+        self.engine.db.execute("CREATE TABLE IF NOT EXISTS sink_state(sink TEXT PRIMARY KEY,last_event_id INTEGER NOT NULL)")
         self.engine.db.commit()
         self._primed = bool(self.engine.db.execute("SELECT 1 FROM bars LIMIT 1").fetchone())
 
     def close(self) -> None:
         self.engine.close()
 
-    def _notified_upto(self) -> int:
-        return self.engine.db.execute("SELECT last_event_id FROM notify_state WHERE id=1").fetchone()[0]
+    def _cursor(self, sink: str) -> int:
+        row = self.engine.db.execute("SELECT last_event_id FROM sink_state WHERE sink=?", (sink,)).fetchone()
+        return row[0] if row else 0
 
-    def _pending_alerts(self) -> list[tuple[int, str, str, dict]]:
+    def _pending_alerts(self, after: int) -> list[tuple[int, str, str, dict]]:
         rows = self.engine.db.execute(
             "SELECT id,ts,kind,payload FROM events WHERE id>? AND (kind IN (?,?,?) OR "
             "(kind='observation' AND json_extract(payload,'$.signal')!='hold')) ORDER BY id",
-            (self._notified_upto(), *_ALERT_KINDS)).fetchall()
+            (after, *_ALERT_KINDS)).fetchall()
         return [(i, ts, kind, json.loads(payload)) for i, ts, kind, payload in rows]
 
+    def _sinks(self) -> dict[str, Callable[[str, str, dict], None]]:
+        sinks: dict[str, Callable[[str, str, dict], None]] = {}
+        if self.notifier is not None:
+            sinks["telegram"] = lambda kind, ts, p: self.notifier.send(format_alert(kind, ts, self.symbol, self.interval, p))
+        if self.publisher is not None:
+            from research.cloudflare_signal_publisher import build_signal_body
+            sinks["cloudflare"] = lambda kind, ts, p: self.publisher.publish(
+                build_signal_body(kind, ts, self.symbol, self.interval, p, entries_allowed=self.allow_entries))
+        return sinks
+
     def flush_alerts(self) -> int:
-        """Send unsent alerts in order. A failed send stops here and is retried next cycle."""
+        """Deliver unsent events to each sink in order. Every sink has its own cursor, so one sink
+        being down never blocks, skips or duplicates another. A failed send is retried next cycle."""
         sent = 0
-        for event_id, ts, kind, payload in self._pending_alerts():
-            if self.notifier is not None:
-                try:
-                    self.notifier.send(format_alert(kind, ts, self.symbol, self.interval, payload))
-                except RuntimeError as exc:
-                    _LOG.warning("Telegram alert not delivered (%s); will retry", exc)
-                    return sent
-            self.engine.db.execute("UPDATE notify_state SET last_event_id=? WHERE id=1", (event_id,))
+        sinks = self._sinks()
+        if not sinks:
+            top = self.engine.db.execute("SELECT COALESCE(MAX(id),0) FROM events").fetchone()[0]
+            self.engine.db.execute("INSERT OR REPLACE INTO sink_state VALUES('none',?)", (top,))
             self.engine.db.commit()
-            sent += 1
+            return 0
+        for name, send in sinks.items():
+            for event_id, ts, kind, payload in self._pending_alerts(self._cursor(name)):
+                try:
+                    send(kind, ts, payload)
+                except RuntimeError as exc:
+                    _LOG.warning("%s delivery failed (%s); will retry", name, exc)
+                    break
+                self.engine.db.execute("INSERT OR REPLACE INTO sink_state VALUES(?,?)", (name, event_id))
+                self.engine.db.commit()
+                sent += 1
         return sent
 
     def step(self) -> dict:
@@ -170,6 +193,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--db", type=Path, default=Path("var/live/live_paper.sqlite3"))
     parser.add_argument("--allow-entries", action="store_true", help="release the paper kill switch so signals open paper positions")
     parser.add_argument("--telegram", action="store_true", help="send alerts using TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID")
+    parser.add_argument("--cloudflare", action="store_true",
+                        help="publish events to your Jarvis Cloudflare worker (JARVIS_WORKER_URL, JARVIS_COLLECTOR_TOKEN)")
     parser.add_argument("--poll-seconds", type=int, default=30)
     parser.add_argument("--once", action="store_true", help="process the latest closed candle once and exit")
     args = parser.parse_args(argv)
@@ -181,9 +206,16 @@ def main(argv: list[str] | None = None) -> int:
             notifier = TelegramNotifier.from_env()
         except ValueError as exc:
             parser.error(str(exc))
+    publisher = None
+    if args.cloudflare:
+        from research.cloudflare_signal_publisher import CloudflareSignalPublisher
+        try:
+            publisher = CloudflareSignalPublisher.from_env()
+        except ValueError as exc:
+            parser.error(str(exc))
     try:
         runner = LiveSignalRunner(args.db, symbol=args.symbol, interval=args.interval, fast=args.fast, slow=args.slow,
-                                  allow_entries=args.allow_entries, notifier=notifier)
+                                  allow_entries=args.allow_entries, notifier=notifier, publisher=publisher)
     except ValueError as exc:
         parser.error(str(exc))
     try:

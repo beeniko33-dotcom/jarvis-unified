@@ -82,6 +82,8 @@ python -m research.live_signal_runner --symbol BTCUSDT --interval 15m --telegram
 # Or in Docker: docker compose --profile signals up --build
 ```
 
+To also record every signal and paper fill in your Jarvis cloud ledger, add `--cloudflare` with `JARVIS_WORKER_URL` (your deployed `jarvis-control-worker` address) and `JARVIS_COLLECTOR_TOKEN` set. Events are POSTed to the worker's `/signals` route, which forwards them to Supabase as `research_only` rows with no evidence credit. Telegram and Cloudflare each keep their own delivery cursor, so one being down never blocks or duplicates the other. See `docs/CLOUDFLARE_WORKER_MIGRATION.md` for the one-time deploy steps.
+
 Alerts contain signal and paper-fill details only, never balances, credentials or broker data. The message layout lives in `format_alert()`. Public candles are unverified, so this never counts toward Level 3 or the 30-day live-trading gate, and live trading stays locked.
 
 ## Local Docker

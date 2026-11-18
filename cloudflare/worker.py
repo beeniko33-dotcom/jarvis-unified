@@ -166,14 +166,17 @@ class Default(WorkerEntrypoint):
                 "service": WORKER_ID,
                 "runtime_stage": "control-and-market-data-ingress",
                 "market_data_ingress": "token_protected_supabase_function_proxy",
+                "signal_ingress": "token_protected_supabase_function_proxy",
                 "ingest_token_configured": bool(getattr(self.env, "JARVIS_INGEST_TOKEN", None)),
                 "paper_session_execution": "disabled_pending_postgres_migration",
                 "mode": "paper",
                 "live_trading": "disabled_by_design",
             })
-        if path.endswith("/market-data"):
+        if path.endswith("/market-data") or path.endswith("/signals"):
             if request.method != "POST":
                 return Response("method not allowed", status=405)
+            ingest_function = "signal-ingest" if path.endswith("/signals") else "market-data-ingest"
+            max_bytes = 16 * 1024 if path.endswith("/signals") else 512 * 1024
             collector_token = getattr(self.env, "JARVIS_COLLECTOR_TOKEN", None)
             if not collector_token:
                 return Response("collector authentication not configured", status=503)
@@ -191,7 +194,7 @@ class Default(WorkerEntrypoint):
                     or not getattr(self.env, "JARVIS_INGEST_TOKEN", None)):
                 return Response("ingress not configured", status=503)
             raw = await request.text()
-            if len(raw.encode("utf-8")) > 512 * 1024:
+            if len(raw.encode("utf-8")) > max_bytes:
                 return Response("payload too large", status=413)
             try:
                 payload = json.loads(raw)
@@ -199,7 +202,7 @@ class Default(WorkerEntrypoint):
                 return Response("invalid JSON", status=400)
             if not isinstance(payload, dict):
                 return Response("JSON object required", status=400)
-            target = self.env.SUPABASE_URL.rstrip("/") + "/functions/v1/market-data-ingest"
+            target = self.env.SUPABASE_URL.rstrip("/") + "/functions/v1/" + ingest_function
             upstream = await fetch(target, {
                 "method": "POST",
                 "headers": {
@@ -215,7 +218,7 @@ class Default(WorkerEntrypoint):
             })
         if request.method != "GET":
             return Response("method not allowed", status=405)
-        return Response("Jarvis worker is running. Use /health or POST /market-data.", status=200)
+        return Response("Jarvis worker is running. Use /health, POST /market-data or POST /signals.", status=200)
 
     async def scheduled(self, controller, env, ctx):
         try:
