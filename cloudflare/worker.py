@@ -35,7 +35,7 @@ class Default(WorkerEntrypoint):
         options = {"method": method, "headers": self._headers(prefer)}
         if payload is not None:
             options["body"] = json.dumps(payload, separators=(",", ":"))
-        response = await fetch(url, options)
+        response = await fetch(url, **options)
         raw = await response.text()
         if not response.ok:
             # Never log response bodies: database errors can contain sensitive context.
@@ -200,14 +200,15 @@ class Default(WorkerEntrypoint):
             if not isinstance(payload, dict):
                 return Response("JSON object required", status=400)
             target = self.env.SUPABASE_URL.rstrip("/") + "/functions/v1/market-data-ingest"
-            upstream = await fetch(target, {
-                "method": "POST",
-                "headers": {
+            upstream = await fetch(
+                target,
+                method="POST",
+                headers={
                     **self._headers(),
                     "x-jarvis-ingest-token": self.env.JARVIS_INGEST_TOKEN,
                 },
-                "body": raw,
-            })
+                body=raw,
+            )
             body = await upstream.text()
             return Response(body, status=upstream.status, headers={
                 "content-type": "application/json",
