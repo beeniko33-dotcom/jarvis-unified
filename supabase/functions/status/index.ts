@@ -30,13 +30,24 @@ Deno.serve(async (req) => {
   const sql = postgres(dbUrl, { max: 1, prepare: false, connect_timeout: 8, idle_timeout: 5 });
   try {
     // The installed local control worker writes public.operator_status, not worker_heartbeats.
-    const [workerResult, commandResult, observationResult, auditResult] = await Promise.all([
+    const [workerResult, commandResult, observationResult, auditResult, latestObservationResult, latestSignalResult] = await Promise.all([
       admin.from("operator_status").select("worker_id,reported_at,health,mode,kill_switch_engaged,entries_paused,last_paper_session_date,details,updated_at")
         .order("reported_at", { ascending: false }).limit(10),
       admin.from("operator_commands").select("id,action,status,requested_at,completed_at,reason,result")
         .order("requested_at", { ascending: false }).limit(25),
       sql`select count(*)::int as count, max(received_at) as latest from jarvis_private.market_observations`,
       sql`select count(*)::int as count, max(recorded_at) as latest from jarvis_private.runtime_audit_events`,
+      sql`select symbol, timeframe, event_time, received_at, provenance, stale, clock_skew,
+          values_json->'candle'->>'close' as close,
+          values_json->'indicators'->>'sma20' as sma20,
+          values_json->'indicators'->>'sma50' as sma50,
+          values_json->'indicators'->>'rsi14' as rsi14,
+          values_json->'raw_payload'->'klines' as klines
+        from jarvis_private.market_observations
+        order by event_time desc limit 1`,
+      sql`select instrument, direction, timeframe, provider, created_at, market_data_trust,
+          evidence_credit, analysis, status
+        from jarvis_private.market_signals order by created_at desc limit 1`,
     ]);
     if (workerResult.error) return reply(req, 503, { error: "worker status lookup failed" });
     if (commandResult.error) return reply(req, 503, { error: "command history lookup failed" });
@@ -49,6 +60,8 @@ Deno.serve(async (req) => {
       workers, recent_commands: commandResult.data ?? [],
       telemetry: { market_observations: observationResult[0]?.count ?? 0,
         latest_market_observation_at: observationResult[0]?.latest ?? null,
+        latest_market: latestObservationResult[0] ?? null,
+        latest_signal: latestSignalResult[0] ?? null,
         runtime_audit_events: auditResult[0]?.count ?? 0, latest_runtime_event_at: auditResult[0]?.latest ?? null },
     });
   } catch (_error) {
