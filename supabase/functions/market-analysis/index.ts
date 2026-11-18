@@ -3,7 +3,8 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SECRET_KEYS = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}");
 const SERVICE_ROLE_KEY = SECRET_KEYS.default ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SERVICE_ROLE_KEY") ?? "";
-const BINANCE_BASE = "https://data-api.binance.vision";
+const GATE_BASE = "https://api.gateio.ws/api/v4";
+const PAIR = "BTC_USDT";
 const SYMBOL = "BTCUSDT";
 const INTERVAL = "5m";
 const STRATEGY_ID = "btc-5m-sma20-sma50-rsi14-wilder";
@@ -98,17 +99,18 @@ function rsi(values: number[], period = 14): number {
   const rs = avgGain / avgLoss;
   return 100 - 100 / (1 + rs);
 }
-function parseCandle(row: unknown): { openTime: number; closeTime: number; open: number; high: number; low: number; close: number; volume: number; trades: number } {
-  if (!Array.isArray(row) || row.length < 9) throw new Error("malformed_kline");
+function parseCandle(row: unknown): { openTime: number; closeTime: number; open: number; high: number; low: number; close: number; volume: number; quoteVolume: number } {
+  if (!Array.isArray(row) || row.length < 7) throw new Error("malformed_gate_candle");
+  const openTime = number(row[0], "open_time") * 1000;
   const c = {
-    openTime: number(row[0], "open_time"),
-    open: number(row[1], "open"),
-    high: number(row[2], "high"),
-    low: number(row[3], "low"),
-    close: number(row[4], "close"),
-    volume: number(row[5], "volume"),
-    closeTime: number(row[6], "close_time"),
-    trades: number(row[8], "trade_count"),
+    openTime,
+    closeTime: openTime + 300_000,
+    quoteVolume: number(row[1], "quote_volume"),
+    close: number(row[2], "close"),
+    high: number(row[3], "high"),
+    low: number(row[4], "low"),
+    open: number(row[5], "open"),
+    volume: number(row[6], "volume"),
   };
   if (c.open <= 0 || c.high <= 0 || c.low <= 0 || c.close <= 0 || c.volume < 0 ||
       c.high < Math.max(c.open, c.close, c.low) || c.low > Math.min(c.open, c.close, c.high)) {
@@ -147,18 +149,18 @@ Deno.serve(async (req: Request) => {
       return json({ error: "operator_not_allowlisted" }, 403);
     }
     const [clock, rawKlines] = await Promise.all([
-      getJson(BINANCE_BASE + "/api/v3/time"),
-      getJson(BINANCE_BASE + "/api/v3/klines?symbol=" + SYMBOL + "&interval=" + INTERVAL + "&limit=100"),
+      getJson(GATE_BASE + "/spot/time"),
+      getJson(GATE_BASE + "/spot/candlesticks?currency_pair=" + PAIR + "&interval=" + INTERVAL + "&limit=100"),
     ]);
     const receivedAt = Date.now();
-    const serverTime = number(clock.serverTime, "server_time");
+    const serverTime = number(clock.server_time, "server_time");
     if (!Array.isArray(rawKlines) || rawKlines.length < 60) throw new Error("insufficient_provider_candles");
-    const parsed = rawKlines.map(parseCandle);
-    const completed = parsed.filter(c => c.closeTime < serverTime);
+    const parsed = rawKlines.map(parseCandle).sort((a, b) => a.openTime - b.openTime);
+    const completed = parsed.filter(c => c.closeTime <= serverTime);
     if (completed.length < 60) throw new Error("insufficient_completed_candles");
     const latest = completed[completed.length - 1];
     const ageMs = serverTime - latest.closeTime;
-    if (ageMs < -5_000 || ageMs > MAX_AGE_MS) throw new Error("latest_completed_candle_stale_or_future");
+    if (ageMs < 0 || ageMs > MAX_AGE_MS) throw new Error("latest_completed_candle_stale_or_future");
     if (Math.abs(receivedAt - serverTime) > 30_000) throw new Error("local_clock_skew_exceeds_30s");
 
     const closes = completed.map(c => c.close);
@@ -178,22 +180,23 @@ Deno.serve(async (req: Request) => {
       rationale = "SMA20 is below SMA50, close is below SMA20, and RSI14 is in the non-extreme bearish band.";
     }
 
-    const rawPayload = { klines: rawKlines };
+    const rawPayload = { candles: rawKlines };
     const digest = await sha256(canonical(rawPayload));
     const eventTime = new Date(latest.closeTime).toISOString();
     const receivedIso = new Date(receivedAt).toISOString();
     const quoteAgeSeconds = Math.max(0, (serverTime - latest.closeTime) / 1000);
     const observation = {
-      source_id: "binance-spot-public-rest:" + SYMBOL,
+      source_id: "gateio-spot-public-rest:" + PAIR,
       event_time: eventTime,
       received_at: receivedIso,
-      symbol: SYMBOL,
+      symbol: "BTCUSDT",
       timeframe: INTERVAL,
       schema_version: 1,
       content_hash: digest,
       values_json: {
-        provider: "Binance",
-        provider_endpoint: BINANCE_BASE + "/api/v3/klines",
+        provider: "Gate.io",
+        provider_endpoint: GATE_BASE + "/spot/candlesticks",
+        provider_pair: PAIR,
         market_type: "spot",
         candle: { ...latest, open_time: new Date(latest.openTime).toISOString(), close_time: eventTime },
         indicators: { sma20, sma50, rsi14, return_5m_pct: return5mPct, trend },
@@ -212,14 +215,14 @@ Deno.serve(async (req: Request) => {
     };
     const observationResult = await rpc("jarvis_ingest_market_observations", { p_observations: [observation] });
     const signal = {
-      idempotency_key: "binance-btc-5m-sma20-50-rsi14:" + latest.closeTime,
+      idempotency_key: "gateio-btc-5m-sma20-50-rsi14:" + latest.closeTime,
       instrument: SYMBOL,
       asset_class: "crypto",
       direction,
       timeframe: INTERVAL,
       strategy_id: STRATEGY_ID,
       strategy_version: STRATEGY_VERSION,
-      provider: "Binance",
+      provider: "Gate.io",
       created_at: receivedIso,
       quote: {
         price_basis: "last_completed_candle_close",
@@ -238,7 +241,7 @@ Deno.serve(async (req: Request) => {
         return_5m_pct: return5mPct,
         completed_candles_used: completed.length,
         rationale,
-        source_endpoint: BINANCE_BASE + "/api/v3/klines",
+        source_endpoint: GATE_BASE + "/spot/candlesticks",
         market_data_trust: "unverified_market_data",
         evidence_credit: false,
       },
@@ -258,7 +261,7 @@ Deno.serve(async (req: Request) => {
     const signalResult = await rpc("jarvis_ingest_market_signal", { p_signal: signal });
     return json({
       ok: true,
-      provider: "Binance public spot REST",
+      provider: "Gate.io public spot REST",
       instrument: SYMBOL,
       timeframe: INTERVAL,
       observation: observationResult,
