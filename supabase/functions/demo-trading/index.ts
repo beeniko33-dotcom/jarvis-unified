@@ -2,7 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 const URL = Deno.env.get("SUPABASE_URL") ?? "";
 const ANON = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const BINANCE = "https://data-api.binance.vision";
+const GATE = "https://api.gateio.ws/api/v4";
 const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
 const ORIGINS = new Set(["https://jarvis-control-panel.pages.dev"]);
 const HEADERS = { "content-type": "application/json", "cache-control": "no-store" };
@@ -37,20 +37,25 @@ async function authorize(req: Request) {
 async function market() {
   const results = await Promise.all(SYMBOLS.map(async (symbol) => {
     try {
-      const response = await fetch(BINANCE + "/api/v3/trades?symbol=" + symbol + "&limit=1", {
+      const pair = symbol.endsWith("USDT") ? symbol.slice(0, -4) + "_USDT" : symbol;
+      const response = await fetch(GATE + "/spot/trades?currency_pair=" + encodeURIComponent(pair) + "&limit=1", {
         signal: AbortSignal.timeout(7000), cache: "no-store",
+        headers: { "accept": "application/json" },
       });
       if (!response.ok) throw new Error("provider_http_" + response.status);
       const rows = await response.json();
       if (!Array.isArray(rows) || !rows.length) throw new Error("trade_missing");
       const trade = rows[rows.length - 1];
-      const price = Number(trade.price), tradeTime = Number(trade.time);
-      if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(tradeTime)) throw new Error("invalid_provider_trade");
+      const price = Number(trade.price);
+      const tradeTime = Number(trade.create_time_ms ?? (Number(trade.create_time) * 1000));
+      if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(tradeTime) || tradeTime <= 0)
+        throw new Error("invalid_provider_trade");
       const receivedAt = Date.now(), age = receivedAt - tradeTime;
       return {
         quote: {
-          symbol, price, provider: "Binance Spot", price_basis: "last_trade",
-          trade_id: String(trade.id), provider_timestamp: new Date(tradeTime).toISOString(),
+          symbol, price, provider: "Gate.io Spot", price_basis: "last_trade",
+          trade_id: String(trade.id ?? trade.sequence_id ?? ""),
+          provider_timestamp: new Date(tradeTime).toISOString(),
           received_at: new Date(receivedAt).toISOString(), quote_age_ms: age,
           stale: age < -5000 || age > 30000,
         },
