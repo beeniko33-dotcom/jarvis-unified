@@ -161,6 +161,12 @@ class ExposureReservationStore:
                     created_at REAL NOT NULL
                 )"""
             )
+            pending_cols = {
+                row[1]
+                for row in db.execute("PRAGMA table_info(exposure_pending)").fetchall()
+            }
+            if "position_id" not in pending_cols:
+                db.execute("ALTER TABLE exposure_pending ADD COLUMN position_id TEXT")
             db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_res_symbol ON exposure_reservations(symbol)"
             )
@@ -461,6 +467,7 @@ class ExposureReservationStore:
         notional: Decimal,
         corr_group: str | None,
         error: str,
+        position_id: str | None = None,
     ) -> None:
         """Persist a fill that still needs reservation→committed conversion."""
         if not reservation_id.strip() or not order_id.strip():
@@ -472,8 +479,8 @@ class ExposureReservationStore:
             try:
                 db.execute(
                     "INSERT INTO exposure_pending"
-                    "(reservation_id,order_id,client_order_id,symbol,notional,corr_group,error,created_at)"
-                    " VALUES(?,?,?,?,?,?,?,?)"
+                    "(reservation_id,order_id,client_order_id,symbol,notional,corr_group,error,created_at,position_id)"
+                    " VALUES(?,?,?,?,?,?,?,?,?)"
                     " ON CONFLICT(reservation_id) DO UPDATE SET"
                     " error=excluded.error, created_at=excluded.created_at",
                     (
@@ -485,6 +492,7 @@ class ExposureReservationStore:
                         corr_group,
                         error,
                         now,
+                        position_id,
                     ),
                 )
                 db.commit()
@@ -498,7 +506,7 @@ class ExposureReservationStore:
             try:
                 rows = db.execute(
                     "SELECT reservation_id,order_id,client_order_id,symbol,notional,"
-                    "corr_group,error,created_at FROM exposure_pending ORDER BY created_at"
+                    "corr_group,error,created_at,position_id FROM exposure_pending ORDER BY created_at"
                 ).fetchall()
                 db.commit()
             except Exception:
@@ -514,9 +522,22 @@ class ExposureReservationStore:
                 "corr_group": r[5],
                 "error": r[6],
                 "created_at": r[7],
+                "position_id": r[8],
             }
             for r in rows
         ]
+
+    def committed_for_position(self, symbol: str, position_id: str) -> Decimal:
+        """Return the exact durable commitment for one broker-scoped position."""
+        symbol = symbol.strip().upper()
+        if not symbol or not position_id.strip():
+            raise ReservationError("symbol and position_id are required")
+        with self._lock, closing(self._connect()) as db:
+            rows = db.execute(
+                "SELECT notional FROM exposure_committed WHERE symbol=? AND position_id=?",
+                (symbol, position_id),
+            ).fetchall()
+        return sum((Decimal(row[0]) for row in rows), Decimal("0"))
 
     def reduce_committed_for_position(
         self,
