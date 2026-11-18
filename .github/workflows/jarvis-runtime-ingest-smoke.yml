@@ -1,5 +1,7 @@
 name: Jarvis runtime ingest authentication smoke
 
+# Writes one audit-only validation event; never creates market or trade evidence.
+
 on:
   push:
     branches: [main]
