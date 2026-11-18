@@ -152,7 +152,7 @@ function render(data){
 let pollTimer=null;
 async function refresh(){try{const data=await api("status");render(data);set("connection-label","Connected");show($("status-error"),false)}catch(e){set("connection-label","Status unavailable");set("status-error","Live status unavailable: "+e.message);show($("status-error"),true);toast(e.message)}}
 function startPolling(){clearInterval(pollTimer);refresh();pollTimer=setInterval(refresh,POLL_MS)}
-function enterApp(){show($("signin"),false);show($("app"),true);show($("signout"),true);set("account-email",supabase.auth.getUser? "Authenticated account":"—");startPolling()}
+async function enterApp(){show($("signin"),false);show($("app"),true);show($("signout"),true);const {data:sessionData}=await supabase.auth.getSession();set("account-email",sessionData.session?.user?.email||"—");startPolling()}
 function leaveApp(){clearInterval(pollTimer);show($("app"),false);show($("signout"),false);show($("signin"),true);set("connection-label","Signed out")}
 document.querySelectorAll("[data-page]").forEach(button=>button.addEventListener("click",()=>{document.querySelectorAll("[data-page]").forEach(b=>b.classList.toggle("active",b===button));document.querySelectorAll(".panel").forEach(p=>p.classList.toggle("active",p.id==="page-"+button.dataset.page));set("page-title",button.textContent.trim())}));
 $("refresh").addEventListener("click",refresh);
