@@ -82,7 +82,7 @@ export default {
     const auth = request.headers.get("authorization") || "";
     const expected = env.JARVIS_MCP_TOKEN;
     if (!expected || !auth.startsWith("Bearer ") || !safeEqual(auth.slice(7), expected)) {
-      return new Response("Unauthorized", { status: 401, headers: { "www-authenticate": "Bearer", "cache-control": "no-store" } });
+      return new Response("Unauthorized: configure the static Authorization header", { status: 401, headers: { "cache-control": "no-store" } });
     }
     const contentType = request.headers.get("content-type") || "";
     if (!contentType.toLowerCase().includes("application/json")) {
