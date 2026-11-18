@@ -1,6 +1,6 @@
 # Binance candidate market-analysis function
 
-This Edge Function fetches Binance public Spot server time and the newest 100 BTCUSDT 1-minute klines, excludes any still-open candle, checks OHLC consistency and freshness, computes SMA20/SMA50/RSI14, and stores one timestamped candidate observation plus an idempotent research-only directional signal.
+This Edge Function fetches Binance public Spot server time and the newest 100 BTCUSDT 5-minute klines, excludes any still-open candle, checks OHLC consistency and freshness, computes SMA20/SMA50/Wilder RSI14, and stores one timestamped candidate observation plus an idempotent research-only directional signal.
 
 ## Safety and trust
 
@@ -9,7 +9,7 @@ This Edge Function fetches Binance public Spot server time and the newest 100 BT
 - Signal direction is research output, not a trade instruction.
 - Risk gate is blocked; position size is zero; paper execution is disabled; no live orders can be created.
 - The function requires a valid Supabase JWT (`verify_jwt=true`), checks the verified JWT role claim, and checks the JWT subject against `public.operator_allowlist`. Only an allowlisted authenticated operator or a service-role scheduler can invoke the collector. Anonymous and ordinary authenticated users are rejected.
-- The latest closed 1-minute candle must be no more than 120 seconds old and local clock skew must be within 30 seconds.
+- The latest closed 5-minute candle must be no more than 360 seconds old and local clock skew must be within 30 seconds.
 - This does not replace the 30-day forward validation or resolve the provider provenance gate.
 
 ## Deploy and invoke
