@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0b1020"><title>Marketplace · Jarvis Unified</title>
+<style>
+:root{color-scheme:dark;font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;background:#0b1020;color:#e8eefc}
+*{box-sizing:border-box}body{margin:0}a{color:#75dcd4}.wrap{max-width:1180px;margin:auto;padding:22px 15px 60px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:20px}
+h1{font-size:26px;margin:0}h2{font-size:18px;margin:0 0 10px}.muted{color:#9aabc5;font-size:13px}
+nav{display:flex;gap:8px;flex-wrap:wrap}.btn,button{border:1px solid #344766;background:#17243a;color:#e8eefc;border-radius:9px;padding:10px 13px;cursor:pointer;font:inherit}.primary{background:#3bafa9;color:#06191b;border:0;font-weight:700}.btn:disabled,button:disabled{opacity:.45;cursor:not-allowed}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.card{background:#121d30;border:1px solid #293a58;border-radius:15px;padding:18px;min-width:0;margin-bottom:14px}
+label{display:block;font-size:12px;color:#aabbd3;margin:10px 0 5px}input,textarea,select{width:100%;background:#0c1525;color:#f3f6ff;border:1px solid #344766;border-radius:8px;padding:10px;font:inherit}textarea{min-height:85px;resize:vertical}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.row>*{flex:1}.notice{padding:12px;border:1px solid #66532c;background:#302819;border-radius:10px;color:#f1d89a;font-size:13px;margin:12px 0}
+.item{border-top:1px solid #2a3a55;padding:12px 0}.item:first-child{border-top:0}.item strong{display:block}.item p{margin:5px 0;color:#aabbd3;font-size:13px}.status{display:inline-block;padding:4px 8px;border:1px solid #38526b;border-radius:30px;font-size:11px;color:#a8d8d4}.hidden{display:none!important}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}.actions button{font-size:12px}.listing{background:#0d1829;border:1px solid #2a3b57;border-radius:12px;padding:14px;margin:9px 0}.listing h3{margin:0 0 5px;font-size:15px}.listing .price{font-size:18px;font-weight:750;color:#7de0d7}
+#listing-list,#orders-list,#seller-list{margin-top:10px}.status-line{min-height:20px;color:#9aabc5;font-size:12px;margin-top:8px}
+@media(max-width:760px){.grid{grid-template-columns:1fr}.wrap{padding:15px 11px 40px}h1{font-size:22px}}
+</style>
+</head>
+<body><div class="wrap">
+<header><div><h1>Jarvis Marketplace</h1><div class="muted">Verified sellers · products and services · affiliate links · order intents</div></div><nav><a class="btn" href="/">← Jarvis workspace</a><a class="btn" href="/career.html">Career Giver</a><button id="signout">Sign out</button></nav></header>
+<div id="loading" class="card">Checking your secure Jarvis session…</div>
+<div id="signin" class="card hidden"><h2>Sign in to Marketplace</h2><p class="muted">Use your existing Jarvis Unified account. Your same-origin session is shared with the main workspace.</p><a class="btn primary" href="/">Open Jarvis sign-in</a></div>
+<main id="app" class="hidden">
+<div class="notice"><strong>Early access foundation.</strong> Seller verification is controlled by trusted administration. Orders created here are order intents only: no payment is collected, no goods are fulfilled, and no NikoCoin rewards or affiliate commissions are issued yet.</div>
+<div class="grid">
+<section class="card"><h2>Become a seller</h2><p class="muted">Submit your store for review. New stores start pending and cannot publish until verified.</p>
+<label for="seller-name">Store / business name</label><input id="seller-name" maxlength="120">
+<label for="seller-country">Country code</label><input id="seller-country" maxlength="2" placeholder="NG">
+<label for="seller-description">Store description</label><textarea id="seller-description" maxlength="4000"></textarea>
+<p><button class="primary" id="submit-seller">Submit seller profile</button></p><div id="seller-status" class="status-line" aria-live="polite"></div><div id="seller-list" class="muted">Your seller profiles will appear here.</div>
+</section>
+<section class="card"><h2>Create a listing</h2><p class="muted">Only verified sellers can create and publish listings.</p>
+<label for="listing-seller">Verified store</label><select id="listing-seller"><option value="">No verified store available</option></select>
+<label for="listing-title">Title</label><input id="listing-title" maxlength="180">
+<label for="listing-description">Description (20–12,000 characters)</label><textarea id="listing-description" maxlength="12000"></textarea>
+<div class="row"><div><label for="listing-type">Type</label><select id="listing-type"><option value="physical">Physical product</option><option value="digital">Digital product</option><option value="service">Service</option></select></div><div><label for="listing-currency">Currency</label><select id="listing-currency"><option value="NGN">NGN</option><option value="USD">USD</option><option value="GBP">GBP</option><option value="EUR">EUR</option></select></div></div>
+<label for="listing-price">Price</label><input id="listing-price" type="number" min="0" step="0.01">
+<p><button class="primary" id="create-listing" disabled>Save draft listing</button></p><div id="listing-status" class="status-line" aria-live="polite"></div><div id="my-listings"></div>
+</section>
+</div>
+<section class="card"><h2>Browse marketplace</h2><p class="muted">Published listings from verified sellers.</p><div class="row"><input id="search" placeholder="Search listings"><button id="refresh">Refresh</button></div><div id="listing-list"><div class="muted">Loading listings…</div></div></section>
+<div class="grid">
+<section class="card"><h2>Affiliate links</h2><p class="muted">Create a referral link for a published listing. Commission rates and payouts are not active.</p><div id="affiliate-list" class="muted">Your affiliate links will appear here.</div></section>
+<section class="card"><h2>Your orders</h2><p class="muted">Order intents visible to you as buyer or seller.</p><div id="orders-list" class="muted">No orders loaded.</div></section>
+</div>
+</main></div>
+<script type="module">
+const SUPABASE_URL="https://zythldptlplyutphgxpg.supabase.co";
+const PUBLISHABLE_KEY="sb_publishable_5bXO0f6Xpc3PzWifm7AgoA_IuYaVTa-";
+const {createClient}=await import("https://esm.sh/@supabase/supabase-js@2.45.4");
+const sb=createClient(SUPABASE_URL,PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const money=(n,c)=>new Intl.NumberFormat(undefined,{style:"currency",currency:c}).format(Number(n));
+let user=null,sellers=[],listings=[],affiliateLinks=[];
+function say(id,message){$(id).textContent=message}
+function show(id,on){$(id).classList.toggle("hidden",!on)}
+async function init(){
+ const {data,error}=await sb.auth.getSession();$("loading").classList.add("hidden");
+ if(error||!data.session){show("signin",true);return}
+ user=data.session.user;show("app",true);
+ await Promise.all([loadSellers(),loadListings()]);\n await Promise.all([loadAffiliateLinks(),loadOrders()]);
+}
+async function loadSellers(){
+ const {data,error}=await sb.from("marketplace_sellers").select("id,owner_id,display_name,country_code,verification_status,description,created_at").order("created_at",{ascending:false});
+ if(error){say("seller-status","Could not load seller profiles: "+error.message);return}
+ sellers=data||[];
+ $("seller-list").innerHTML=sellers.length?sellers.map(s=>'<div class="item"><strong>'+esc(s.display_name)+'</strong><span class="status">'+esc(s.verification_status)+'</span><p>'+esc(s.country_code||"")+'</p></div>').join(""):"No seller profile submitted yet.";
+ const verified=sellers.filter(s=>s.verification_status==="verified"&&s.owner_id===user.id);
+ $("listing-seller").innerHTML=verified.length?verified.map(s=>'<option value="'+esc(s.id)+'">'+esc(s.display_name)+'</option>').join(""):'<option value="">No verified store available</option>';
+ $("create-listing").disabled=!verified.length;
+}
+async function loadListings(){
+ const {data,error}=await sb.from("marketplace_listings").select("id,seller_id,title,description,listing_type,price,currency,status,published_at,marketplace_sellers(display_name)").order("created_at",{ascending:false}).limit(100);
+ if(error){$("listing-list").textContent="Listings unavailable: "+error.message;return}
+ listings=data||[];
+ renderListings();
+ $("my-listings").innerHTML=listings.filter(l=>sellers.some(s=>s.id===l.seller_id&&s.owner_id===user.id)).map(l=>'<div class="item"><strong>'+esc(l.title)+'</strong><span class="status">'+esc(l.status)+'</span>'+(l.status==="draft"?'<button data-publish="'+esc(l.id)+'">Publish listing</button>':"")+'</div>').join("")||'<p class="muted">No listings for your store yet.</p>';
+ $("my-listings").querySelectorAll("[data-publish]").forEach(b=>b.addEventListener("click",async()=>{b.disabled=true;const {error}=await sb.from("marketplace_listings").update({status:"published",published_at:new Date().toISOString()}).eq("id",b.dataset.publish);say("listing-status",error?"Publish rejected: "+error.message:"Listing published.");await loadListings()}));
+}
+function renderListings(){
+ const q=$("search").value.trim().toLowerCase();
+ const visible=listings.filter(l=>l.status==="published"&&(!q||(l.title+" "+l.description+" "+(l.marketplace_sellers?.display_name||"")).toLowerCase().includes(q)));
+ $("listing-list").innerHTML=visible.length?visible.map(l=>'<article class="listing"><h3>'+esc(l.title)+'</h3><p class="muted">'+esc(l.marketplace_sellers?.display_name||"Verified seller")+' · '+esc(l.listing_type)+'</p><p>'+esc(l.description.slice(0,320))+(l.description.length>320?"…":"")+'</p><div class="price">'+esc(money(l.price,l.currency))+'</div><div class="actions"><button data-order="'+esc(l.id)+'">Create order intent</button><button data-affiliate="'+esc(l.id)+'">Create affiliate link</button></div></article>').join(""):'<div class="muted">No matching published listings yet.</div>';
+ $("listing-list").querySelectorAll("[data-order]").forEach(b=>b.addEventListener("click",()=>createOrder(b.dataset.order,b)));
+ $("listing-list").querySelectorAll("[data-affiliate]").forEach(b=>b.addEventListener("click",()=>createAffiliate(b.dataset.affiliate,b)));
+}
+async function loadAffiliateLinks(){
+ const {data,error}=await sb.from("marketplace_affiliate_links").select("id,listing_id,code,status,created_at").order("created_at",{ascending:false});
+ if(error){$("affiliate-list").textContent="Affiliate links unavailable: "+error.message;return}
+ affiliateLinks=data||[];
+ $("affiliate-list").innerHTML=affiliateLinks.length?affiliateLinks.map(a=>{const l=listings.find(x=>x.id===a.listing_id);const url=location.origin+location.pathname+"?ref="+encodeURIComponent(a.code);return '<div class="item"><strong>'+esc(l?.title||"Listing referral")+'</strong><p><input readonly value="'+esc(url)+'"></p><span class="status">'+esc(a.status)+'</span><button data-copy="'+esc(url)+'">Copy link</button></div>'}).join(""):"No affiliate links yet.";
+ $("affiliate-list").querySelectorAll("[data-copy]").forEach(b=>b.addEventListener("click",async()=>{try{await navigator.clipboard.writeText(b.dataset.copy);say("seller-status","Affiliate link copied.")}catch{say("seller-status","Copy unavailable. Select the link text manually.")}}));
+}
+async function loadOrders(){
+ const {data,error}=await sb.from("marketplace_orders").select("id,listing_id,seller_id,quantity,unit_price,currency,status,created_at").order("created_at",{ascending:false}).limit(100);
+ if(error){$("orders-list").textContent="Orders unavailable: "+error.message;return}
+ $("orders-list").innerHTML=data?.length?data.map(o=>'<div class="item"><strong>'+esc(listings.find(l=>l.id===o.listing_id)?.title||"Order")+'</strong><span class="status">'+esc(o.status)+'</span><p>'+esc(o.quantity)+' × '+esc(money(o.unit_price,o.currency))+' · '+esc(new Date(o.created_at).toLocaleString())+'</p></div>').join(""):"No orders yet.";
+}
+async function createOrder(id,b){
+ b.disabled=true;
+ try{
+  const qty=1,ref=new URLSearchParams(location.search).get("ref");
+  const {data,error}=await sb.rpc("marketplace_create_order",{p_listing_id:id,p_quantity:qty,p_affiliate_code:ref});
+  if(error)throw error;
+  say("listing-status","Order intent created: "+data.order_id+". No payment was taken and no reward was issued.");
+  await loadOrders();
+ }catch(e){say("listing-status","Order not created: "+e.message)}finally{b.disabled=false}
+}
+async function createAffiliate(id,b){
+ b.disabled=true;
+ const {error}=await sb.from("marketplace_affiliate_links").insert({listing_id:id,affiliate_user_id:user.id});
+ if(error)say("listing-status","Affiliate link not created: "+error.message);
+ else{say("listing-status","Affiliate link created. No commission or NikoCoin reward is active.");await loadAffiliateLinks()}
+ b.disabled=false;
+}
+$("submit-seller").addEventListener("click",async()=>{
+ const name=$("seller-name").value.trim(),country=$("seller-country").value.trim().toUpperCase();
+ if(name.length<2){say("seller-status","Enter a store name with at least 2 characters.");return}
+ if(country&&!/^[A-Z]{2}$/.test(country)){say("seller-status","Country code must contain exactly two letters.");return}
+ const {error}=await sb.from("marketplace_sellers").insert({owner_id:user.id,display_name:name,country_code:country||null,description:$("seller-description").value.trim()||null});
+ say("seller-status",error?"Submission failed: "+error.message:"Seller profile submitted. Status: pending verification.");
+ if(!error){$("seller-name").value="";await loadSellers()}
+});
+$("create-listing").addEventListener("click",async()=>{
+ const seller_id=$("listing-seller").value,title=$("listing-title").value.trim(),description=$("listing-description").value.trim(),price=Number($("listing-price").value);
+ if(!seller_id||title.length<3||description.length<20||!Number.isFinite(price)||price<0){say("listing-status","Select a verified store and enter valid listing details and price.");return}
+ const {error}=await sb.from("marketplace_listings").insert({seller_id,created_by:user.id,title,description,listing_type:$("listing-type").value,price,currency:$("listing-currency").value,status:"draft"});
+ say("listing-status",error?"Draft not saved: "+error.message:"Draft saved. Publish is allowed only while seller verification remains active.");
+ if(!error){$("listing-title").value="";$("listing-description").value="";await loadListings()}
+});
+$("refresh").addEventListener("click",async()=>{await Promise.all([loadSellers(),loadListings(),loadAffiliateLinks(),loadOrders()])});
+$("search").addEventListener("input",renderListings);
+$("signout").addEventListener("click",async()=>{await sb.auth.signOut();location.href="/"});
+sb.auth.onAuthStateChange((event,session)=>{if(!session){show("app",false);show("signin",true)}});
+await init();
+</script></body></html>
