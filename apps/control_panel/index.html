@@ -161,7 +161,7 @@ function render(data){
    set("market-rsi",Number.isFinite(rsi)?rsi.toFixed(1):"—");
    const raw=market.klines;
    if(Array.isArray(raw)&&raw.length>1){
-     const closes=raw.map(k=>Number(k?.[4])).filter(Number.isFinite);
+     const closeIndex=market.provider==="Gate.io"?2:4;\n     const closes=raw.map(k=>Number(k?.[closeIndex])).filter(Number.isFinite);
      if(closes.length>1){
        const min=Math.min(...closes),max=Math.max(...closes),range=max-min||1;
        const points=closes.map((v,i)=>(12+i*736/(closes.length-1))+","+(202-(v-min)*180/range)).join(" ");
