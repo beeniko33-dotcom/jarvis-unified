@@ -1,0 +1,6 @@
+project_id = "zythldptlplyutphgxpg"
+
+# This service-to-service endpoint authenticates the project secret API key
+# in its handler using a constant-time comparison.
+[functions.jarvis-runtime-ingest]
+verify_jwt = false
