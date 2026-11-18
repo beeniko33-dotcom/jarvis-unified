@@ -34,7 +34,7 @@ async function getJson(url: string): Promise<any> {
   return await response.json();
 }
 function jwtRole(req: Request): string {
-  const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\\s+/i, "");
+  const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
   const parts = token.split(".");
   if (parts.length !== 3) return "";
   try {
