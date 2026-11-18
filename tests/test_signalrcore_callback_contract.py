@@ -7,9 +7,13 @@ from __future__ import annotations
 
 import unittest
 
-from signalrcore.transport.base_transport import BaseTransport, TransportState
+try:
+    from signalrcore.transport.base_transport import BaseTransport, TransportState
+except ImportError:  # optional dependency; contract only checkable where installed
+    BaseTransport = TransportState = None
 
 
+@unittest.skipIf(BaseTransport is None, "signalrcore is not installed")
 class SignalRCallbackContractTests(unittest.TestCase):
     def test_initial_open_and_reconnect_are_distinct_callbacks(self) -> None:
         events: list[str] = []

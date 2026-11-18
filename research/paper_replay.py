@@ -75,6 +75,7 @@ class PaperReplay:
         CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,ts TEXT,symbol TEXT,kind TEXT,payload TEXT,previous_hash TEXT,event_hash TEXT UNIQUE);
         CREATE TABLE IF NOT EXISTS account(id INTEGER PRIMARY KEY CHECK(id=1),cash TEXT,equity TEXT,realized TEXT,peak_equity TEXT,day TEXT,day_start_equity TEXT);
         CREATE TABLE IF NOT EXISTS positions(symbol TEXT PRIMARY KEY,quantity TEXT,entry_price TEXT,entry_fee TEXT,opened_at TEXT);
+        CREATE TABLE IF NOT EXISTS equity_curve(symbol TEXT,ts TEXT,equity TEXT,PRIMARY KEY(symbol,ts));
         """)
         self.db.execute("INSERT OR IGNORE INTO account VALUES(1,?,?,?,?,?,?)",
           (str(starting_cash),str(starting_cash),"0",str(starting_cash),"",str(starting_cash)))
@@ -154,6 +155,7 @@ class PaperReplay:
                     if latest: market_value += Decimal(qty_s) * Decimal(latest[0])
                 equity=cash+market_value
                 peak=max(peak,equity)
+                self.db.execute("INSERT OR REPLACE INTO equity_curve VALUES(?,?,?)",(symbol,bar.timestamp,str(equity)))
                 self._save(cash,equity,realized,peak,day,day_start)
             self.db.commit()
         return self.report()

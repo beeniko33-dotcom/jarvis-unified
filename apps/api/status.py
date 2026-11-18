@@ -5,7 +5,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 from typing import Callable
-from urllib.parse import urlsplit
+from functools import lru_cache
+from urllib.parse import parse_qs, urlsplit
 
 
 _DASHBOARD_DIR = Path(__file__).resolve().parents[1] / "dashboard"
@@ -53,6 +54,22 @@ _DASHBOARD_CSP = "; ".join(
 )
 
 
+@lru_cache(maxsize=16)
+def _showcase(seed: int, bars: int) -> bytes:
+    from research.showcase import run_showcase
+
+    return json.dumps(run_showcase(seed, bars), default=str).encode()
+
+
+def _query_int(query: str, name: str, default: int) -> int:
+    values = parse_qs(query).get(name)
+    if not values:
+        return default
+    if not values[0].isdigit() or len(values[0]) > 10:
+        raise ValueError(f"{name} must be a non-negative integer")
+    return int(values[0])
+
+
 def host_header_allowed(value: str | None) -> bool:
     """Return True when a Host header names one of the allowed local hostnames."""
     if not value:
@@ -82,7 +99,8 @@ class StatusHandler(BaseHTTPRequestHandler):
 
         # Route on the path alone: an installed PWA may be launched with a query string
         # (for example /dashboard?source=pwa), and routing the raw target would 404 it.
-        route = urlsplit(self.path).path
+        parts = urlsplit(self.path)
+        route = parts.path
         if route in _STATIC_ASSETS:
             asset_path, content_type = _STATIC_ASSETS[route]
             try:
@@ -100,7 +118,7 @@ class StatusHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
-        if route not in {"/", "/health", "/status", "/self-check", "/features"}:
+        if route not in {"/", "/health", "/status", "/self-check", "/features", "/gate", "/showcase"}:
             self.send_error(404)
             return
 
@@ -110,6 +128,19 @@ class StatusHandler(BaseHTTPRequestHandler):
             elif route == "/features":
                 from core.feature_registry import feature_state_inventory
                 payload = feature_state_inventory()
+            elif route == "/gate":
+                from research.showcase import gate_payload
+                payload = gate_payload()
+            elif route == "/showcase":
+                from research.showcase import DEFAULT_BARS, DEFAULT_SEED
+                try:
+                    seed = _query_int(parts.query, "seed", DEFAULT_SEED)
+                    bars = _query_int(parts.query, "bars", DEFAULT_BARS)
+                    body = _showcase(seed, bars)
+                except ValueError as exc:
+                    self.send_error(400, str(exc)[:80])
+                    return
+                payload = None
             elif route == "/self-check":
                 payload = {"ok": True, "status": "healthy", "mode": "paper", "kill_switch": True}
             elif route == "/":
@@ -122,6 +153,8 @@ class StatusHandler(BaseHTTPRequestHandler):
                         "/status",
                         "/self-check",
                         "/features",
+                        "/gate",
+                        "/showcase",
                         "/dashboard",
                     ],
                 }
@@ -130,7 +163,8 @@ class StatusHandler(BaseHTTPRequestHandler):
                     payload.update(provider_payload)
             else:
                 payload = self.status_provider()
-            body = json.dumps(payload, default=str).encode()
+            if payload is not None:
+                body = json.dumps(payload, default=str).encode()
         except Exception:
             # Never leak a traceback or internals to the client; the server keeps running.
             self.send_error(500)

@@ -64,6 +64,8 @@ The experiment registry stores canonical local config snapshots (credential-like
 
 ## Local dashboard and mobile
 
+The dashboard is a paper-trading observatory: a seeded, deterministic simulation (`research/showcase.py`) runs the real paper replay engine, risk limits and hash-chained audit trail, and the page charts the equity curve, drawdown, price with moving averages, trade markers, closed-trade ledger and result metrics. Pick any seed to get a different market. The simulation is synthetic: it proves the pipeline works end to end, is labeled as such on screen, and never counts toward Level 3 or the 30-day live-trading gate. The `/gate` route and the gate panel show that live trading is locked and why.
+
 Start `python main.py --serve`, then open `http://127.0.0.1:8787/dashboard`. The status page is a read-only installable web app and works offline only for its static shell; live health and account status are never cached. The API remains bound to localhost. Install steps for Android, iOS and desktop are in `apps/mobile/README.md`.
 
 ## Local Docker
