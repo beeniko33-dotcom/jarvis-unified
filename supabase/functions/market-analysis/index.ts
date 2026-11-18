@@ -33,16 +33,31 @@ async function getJson(url: string): Promise<any> {
   if (!response.ok) throw new Error("market_provider_http_" + response.status);
   return await response.json();
 }
-function jwtRole(req: Request): string {
+function jwtClaims(req: Request): { role: string; sub: string } {
   const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
   const parts = token.split(".");
-  if (parts.length !== 3) return "";
+  if (parts.length !== 3) return { role: "", sub: "" };
   try {
-    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
-    return typeof payload.role === "string" ? payload.role : "";
+    const normalized = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(normalized));
+    return {
+      role: typeof payload.role === "string" ? payload.role : "",
+      sub: typeof payload.sub === "string" ? payload.sub : "",
+    };
   } catch {
-    return "";
+    return { role: "", sub: "" };
   }
+}
+async function isAllowlistedOperator(userId: string): Promise<boolean> {
+  const url = SUPABASE_URL.replace(/\/$/, "") +
+    "/rest/v1/operator_allowlist?user_id=eq." + encodeURIComponent(userId) + "&select=user_id&limit=1";
+  const response = await fetch(url, {
+    headers: { "apikey": SERVICE_ROLE_KEY, "authorization": "Bearer " + SERVICE_ROLE_KEY },
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!response.ok) throw new Error("operator_allowlist_check_failed");
+  const rows = await response.json();
+  return Array.isArray(rows) && rows.length === 1;
 }
 function number(value: unknown, label: string): number {
   const n = Number(value);
@@ -100,10 +115,13 @@ async function rpc(name: string, body: unknown): Promise<any> {
 
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-  const callerRole = jwtRole(req);
-  if (callerRole !== "authenticated" && callerRole !== "service_role") return json({ error: "authenticated_operator_required" }, 403);
+  const caller = jwtClaims(req);
+  if (caller.role !== "authenticated" && caller.role !== "service_role") return json({ error: "authenticated_operator_required" }, 403);
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY) return json({ error: "server_not_configured" }, 503);
   try {
+    if (caller.role !== "service_role" && (!caller.sub || !(await isAllowlistedOperator(caller.sub)))) {
+      return json({ error: "operator_not_allowlisted" }, 403);
+    }
     const [clock, rawKlines] = await Promise.all([
       getJson(BINANCE_BASE + "/api/v3/time"),
       getJson(BINANCE_BASE + "/api/v3/klines?symbol=" + SYMBOL + "&interval=" + INTERVAL + "&limit=100"),
