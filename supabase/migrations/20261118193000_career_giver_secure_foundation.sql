@@ -324,3 +324,17 @@ drop policy career_messages_participant_insert on public.career_messages;
 create policy career_messages_participant_insert on public.career_messages for insert to authenticated
   with check (sender_id=auth.uid() and exists (select 1 from public.career_conversations c
     where c.id=conversation_id and public.career_can_access_application(c.application_id)));
+
+
+-- Prevent clients from rewriting application/job ownership keys through broad UPDATE grants.
+revoke update on public.career_jobs from authenticated;
+grant update(title,description,employment_type,workplace_type,location,
+  salary_min,salary_max,salary_currency,status,published_at)
+  on public.career_jobs to authenticated;
+revoke update on public.career_applications from authenticated;
+grant update(status,cover_letter) on public.career_applications to authenticated;
+
+drop policy career_applications_insert on public.career_applications;
+create policy career_applications_insert on public.career_applications for insert to authenticated
+  with check (candidate_id=auth.uid() and status='submitted' and exists (
+    select 1 from public.career_jobs j where j.id=job_id and j.status='published'));
