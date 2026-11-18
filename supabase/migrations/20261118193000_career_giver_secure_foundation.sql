@@ -235,3 +235,92 @@ comment on table public.career_profiles is 'Career Giver profile; public visibil
 comment on table public.career_organizations is 'Employer organization; verification status is controlled by trusted administration.';
 comment on table public.career_applications is 'Candidate applications; access restricted to the candidate and active employer members.';
 comment on table public.career_messages is 'Private application messages; readable only by application participants.';
+
+
+-- Harden membership lookups without recursive RLS evaluation.
+create or replace function public.career_is_org_member(p_org uuid, p_roles text[] default null)
+returns boolean language sql stable security definer set search_path=''
+as $$
+  select exists (
+    select 1 from public.career_organization_members m
+    where m.organization_id=p_org and m.user_id=auth.uid()
+      and m.membership_status='active'
+      and (p_roles is null or m.member_role = any(p_roles))
+  );
+$$;
+create or replace function public.career_can_access_application(p_application uuid)
+returns boolean language sql stable security definer set search_path=''
+as $$
+  select exists (
+    select 1 from public.career_applications a
+    join public.career_jobs j on j.id=a.job_id
+    where a.id=p_application and (
+      a.candidate_id=auth.uid() or public.career_is_org_member(j.organization_id,null)
+    )
+  );
+$$;
+revoke all on function public.career_is_org_member(uuid,text[]) from public,anon;
+revoke all on function public.career_can_access_application(uuid) from public,anon;
+grant execute on function public.career_is_org_member(uuid,text[]) to authenticated;
+grant execute on function public.career_can_access_application(uuid) to authenticated;
+
+-- Verification is an administrative decision: authenticated organization members
+-- may edit descriptive fields but cannot change verification_status or created_by.
+revoke update on public.career_organizations from authenticated;
+grant update(name,website,description,country_code) on public.career_organizations to authenticated;
+
+-- Membership writes are reserved for trusted administrative onboarding for now.
+drop policy career_org_members_owner_manage on public.career_organization_members;
+revoke insert,update,delete on public.career_organization_members from authenticated;
+grant select on public.career_organization_members to authenticated;
+
+drop policy career_org_read on public.career_organizations;
+create policy career_org_read on public.career_organizations for select to authenticated
+  using (verification_status='verified' or created_by=auth.uid()
+    or public.career_is_org_member(id,null));
+drop policy career_org_members_read on public.career_organization_members;
+create policy career_org_members_read on public.career_organization_members for select to authenticated
+  using (user_id=auth.uid() or public.career_is_org_member(organization_id,null));
+drop policy career_org_update on public.career_organizations;
+create policy career_org_update on public.career_organizations for update to authenticated
+  using (public.career_is_org_member(id,array['owner','admin']))
+  with check (public.career_is_org_member(id,array['owner','admin']));
+
+drop policy career_jobs_read on public.career_jobs;
+create policy career_jobs_read on public.career_jobs for select to authenticated
+  using (status='published' or public.career_is_org_member(organization_id,null));
+drop policy career_jobs_insert on public.career_jobs;
+create policy career_jobs_insert on public.career_jobs for insert to authenticated
+  with check (created_by=auth.uid() and status='draft'
+    and public.career_is_org_member(organization_id,array['owner','admin','recruiter'])
+    and exists (select 1 from public.career_organizations o
+      where o.id=organization_id and o.verification_status='verified'));
+drop policy career_jobs_update on public.career_jobs;
+create policy career_jobs_update on public.career_jobs for update to authenticated
+  using (public.career_is_org_member(organization_id,array['owner','admin','recruiter']))
+  with check (public.career_is_org_member(organization_id,array['owner','admin','recruiter'])
+    and (status<>'published' or exists (select 1 from public.career_organizations o
+      where o.id=organization_id and o.verification_status='verified')));
+
+drop policy career_applications_read on public.career_applications;
+create policy career_applications_read on public.career_applications for select to authenticated
+  using (candidate_id=auth.uid() or exists (select 1 from public.career_jobs j
+    where j.id=job_id and public.career_is_org_member(j.organization_id,null)));
+drop policy career_applications_employer_update on public.career_applications;
+create policy career_applications_employer_update on public.career_applications for update to authenticated
+  using (exists (select 1 from public.career_jobs j where j.id=job_id
+    and public.career_is_org_member(j.organization_id,array['owner','admin','recruiter'])))
+  with check (exists (select 1 from public.career_jobs j where j.id=job_id
+    and public.career_is_org_member(j.organization_id,array['owner','admin','recruiter'])));
+
+drop policy career_conversations_participant_read on public.career_conversations;
+create policy career_conversations_participant_read on public.career_conversations for select to authenticated
+  using (public.career_can_access_application(application_id));
+drop policy career_messages_participant_read on public.career_messages;
+create policy career_messages_participant_read on public.career_messages for select to authenticated
+  using (exists (select 1 from public.career_conversations c
+    where c.id=conversation_id and public.career_can_access_application(c.application_id)));
+drop policy career_messages_participant_insert on public.career_messages;
+create policy career_messages_participant_insert on public.career_messages for insert to authenticated
+  with check (sender_id=auth.uid() and exists (select 1 from public.career_conversations c
+    where c.id=conversation_id and public.career_can_access_application(c.application_id)));
