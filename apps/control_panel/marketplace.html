@@ -49,6 +49,7 @@ label{display:block;font-size:12px;color:#aabbd3;margin:10px 0 5px}input,textare
 <script type="module">
 const SUPABASE_URL="https://zythldptlplyutphgxpg.supabase.co";
 const PUBLISHABLE_KEY="sb_publishable_5bXO0f6Xpc3PzWifm7AgoA_IuYaVTa-";
+const ORDER_FUNCTION=SUPABASE_URL+"/functions/v1/marketplace-orders";
 const {createClient}=await import("https://esm.sh/@supabase/supabase-js@2.45.4");
 const sb=createClient(SUPABASE_URL,PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
 const $=id=>document.getElementById(id);
@@ -82,7 +83,7 @@ async function loadListings(){
 }
 function renderListings(){
  const q=$("search").value.trim().toLowerCase();
- const visible=listings.filter(l=>l.status==="published"&&(!q||(l.title+" "+l.description+" "+(l.marketplace_sellers?.display_name||"")).toLowerCase().includes(q)));
+ const targetListing=new URLSearchParams(location.search).get("listing");\n const visible=listings.filter(l=>l.status==="published"&&(!targetListing||l.id===targetListing)&&(!q||(l.title+" "+l.description+" "+(l.marketplace_sellers?.display_name||"")).toLowerCase().includes(q)));
  $("listing-list").innerHTML=visible.length?visible.map(l=>'<article class="listing"><h3>'+esc(l.title)+'</h3><p class="muted">'+esc(l.marketplace_sellers?.display_name||"Verified seller")+' · '+esc(l.listing_type)+'</p><p>'+esc(l.description.slice(0,320))+(l.description.length>320?"…":"")+'</p><div class="price">'+esc(money(l.price,l.currency))+'</div><div class="actions"><button data-order="'+esc(l.id)+'">Create order intent</button><button data-affiliate="'+esc(l.id)+'">Create affiliate link</button></div></article>').join(""):'<div class="muted">No matching published listings yet.</div>';
  $("listing-list").querySelectorAll("[data-order]").forEach(b=>b.addEventListener("click",()=>createOrder(b.dataset.order,b)));
  $("listing-list").querySelectorAll("[data-affiliate]").forEach(b=>b.addEventListener("click",()=>createAffiliate(b.dataset.affiliate,b)));
@@ -91,7 +92,7 @@ async function loadAffiliateLinks(){
  const {data,error}=await sb.from("marketplace_affiliate_links").select("id,listing_id,code,status,created_at").order("created_at",{ascending:false});
  if(error){$("affiliate-list").textContent="Affiliate links unavailable: "+error.message;return}
  affiliateLinks=data||[];
- $("affiliate-list").innerHTML=affiliateLinks.length?affiliateLinks.map(a=>{const l=listings.find(x=>x.id===a.listing_id);const url=location.origin+location.pathname+"?ref="+encodeURIComponent(a.code);return '<div class="item"><strong>'+esc(l?.title||"Listing referral")+'</strong><p><input readonly value="'+esc(url)+'"></p><span class="status">'+esc(a.status)+'</span><button data-copy="'+esc(url)+'">Copy link</button></div>'}).join(""):"No affiliate links yet.";
+ $("affiliate-list").innerHTML=affiliateLinks.length?affiliateLinks.map(a=>{const l=listings.find(x=>x.id===a.listing_id);const url=location.origin+location.pathname+"?ref="+encodeURIComponent(a.code)+"&listing="+encodeURIComponent(a.listing_id);return '<div class="item"><strong>'+esc(l?.title||"Listing referral")+'</strong><p><input readonly value="'+esc(url)+'"></p><span class="status">'+esc(a.status)+'</span><button data-copy="'+esc(url)+'">Copy link</button></div>'}).join(""):"No affiliate links yet.";
  $("affiliate-list").querySelectorAll("[data-copy]").forEach(b=>b.addEventListener("click",async()=>{try{await navigator.clipboard.writeText(b.dataset.copy);say("seller-status","Affiliate link copied.")}catch{say("seller-status","Copy unavailable. Select the link text manually.")}}));
 }
 async function loadOrders(){
@@ -103,9 +104,13 @@ async function createOrder(id,b){
  b.disabled=true;
  try{
   const qty=1,ref=new URLSearchParams(location.search).get("ref");
-  const {data,error}=await sb.rpc("marketplace_create_order",{p_listing_id:id,p_quantity:qty,p_affiliate_code:ref});
-  if(error)throw error;
-  say("listing-status","Order intent created: "+data.order_id+". No payment was taken and no reward was issued.");
+  const {data:sessionData}=await sb.auth.getSession(),token=sessionData.session?.access_token;
+  if(!token)throw Error("Sign in required");
+  const idempotencyKey=b.dataset.idempotency||crypto.randomUUID();b.dataset.idempotency=idempotencyKey;
+  const response=await fetch(ORDER_FUNCTION,{method:"POST",headers:{apikey:PUBLISHABLE_KEY,authorization:"Bearer "+token,"content-type":"application/json"},body:JSON.stringify({listing_id:id,quantity:qty,affiliate_code:ref,idempotency_key:idempotencyKey})});
+  const result=await response.json().catch(()=>({}));if(!response.ok)throw Error(result.error||"Order request failed");
+  delete b.dataset.idempotency;
+  say("listing-status","Order intent created: "+result.order_id+". No payment was taken and no reward was issued.");
   await loadOrders();
  }catch(e){say("listing-status","Order not created: "+e.message)}finally{b.disabled=false}
 }
