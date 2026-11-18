@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b1020"><title>Platform Verification · Jarvis Unified</title>
+<style>
+:root{color-scheme:dark;font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;background:#0b1020;color:#e8eefc}*{box-sizing:border-box}body{margin:0}.wrap{max-width:1100px;margin:auto;padding:22px 15px 60px}header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px}h1{font-size:25px;margin:0}h2{font-size:17px;margin:0 0 10px}.muted{color:#9aabc5;font-size:13px}.card{background:#121d30;border:1px solid #293a58;border-radius:14px;padding:17px;margin:12px 0}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}button,a{font:inherit}button,.btn{border:1px solid #344766;background:#17243a;color:#e8eefc;border-radius:9px;padding:9px 12px;cursor:pointer;text-decoration:none}.primary{background:#3bafa9;color:#06191b;border:0;font-weight:700}.danger{background:#4a202b;border-color:#71313d}.warn{background:#342a1c;border-color:#66532c}button:disabled{opacity:.5;cursor:not-allowed}input{width:100%;background:#0c1525;color:#f3f6ff;border:1px solid #344766;border-radius:8px;padding:10px;font:inherit;margin:7px 0}.item{border-top:1px solid #2a3a55;padding:14px 0}.item:first-child{border-top:0}.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.row button{flex:1}.status{display:inline-block;border:1px solid #38526b;border-radius:20px;padding:3px 8px;font-size:11px}.notice{padding:12px;border:1px solid #66532c;background:#302819;border-radius:10px;color:#f1d89a;font-size:13px}.hidden{display:none!important}.statusline{font-size:12px;color:#9aabc5;min-height:20px}@media(max-width:700px){.grid{grid-template-columns:1fr}.wrap{padding:14px 11px 40px}h1{font-size:21px}}
+</style></head>
+<body><div class="wrap">
+<header><div><h1>Platform verification</h1><div class="muted">Trusted operator console · audit-logged decisions</div></div><nav><a class="btn" href="/">Jarvis</a><a class="btn" href="/career.html">Career Giver</a><a class="btn" href="/marketplace.html">Marketplace</a><button id="signout">Sign out</button></nav></header>
+<div class="notice">Restricted operator tool. Only accounts on the server-side operator allowlist can view pending applications or change verification status. Verify organizations and sellers only after independently checking their identity and business claims. Record a reason for every decision.</div>
+<div id="loading" class="card">Checking your Jarvis session…</div>
+<div id="signin" class="card hidden"><h2>Sign in required</h2><p class="muted">Sign in through your Jarvis workspace first.</p><a class="btn primary" href="/">Open Jarvis sign-in</a></div>
+<main id="app" class="hidden">
+<div class="row"><button class="primary" id="refresh">Refresh verification queue</button><span id="status" class="statusline" aria-live="polite"></span></div>
+<div class="grid">
+<section class="card"><h2>Career Giver organizations</h2><div id="career-queue" class="muted">Loading…</div></section>
+<section class="card"><h2>Marketplace sellers</h2><div id="seller-queue" class="muted">Loading…</div></section>
+</div>
+</main></div>
+<script type="module">
+const URL="https://zythldptlplyutphgxpg.supabase.co",KEY="sb_publishable_5bXO0f6Xpc3PzWifm7AgoA_IuYaVTa-",FN=URL+"/functions/v1/platform-admin";
+const {createClient}=await import("https://esm.sh/@supabase/supabase-js@2.45.4");
+const sb=createClient(URL,KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+const $=id=>document.getElementById(id),esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function show(id,on){$(id).classList.toggle("hidden",!on)}
+function say(message){$("status").textContent=message}
+async function api(body){const {data}=await sb.auth.getSession(),token=data.session?.access_token;if(!token)throw Error("Sign in required");const res=await fetch(FN,{method:"POST",headers:{apikey:KEY,authorization:"Bearer "+token,"content-type":"application/json"},body:JSON.stringify(body)});const dataBody=await res.json().catch(()=>({}));if(!res.ok)throw Error(dataBody.error||"Admin request failed ("+res.status+")");return dataBody}
+function card(item,type){
+ const name=type==="career_organization"?item.name:item.display_name;
+ const detail=type==="career_organization"?(item.website||item.country_code||"No website provided"):(item.country_code||"No country supplied");
+ return '<article class="item"><strong>'+esc(name)+'</strong><p class="muted">'+esc(detail)+'</p><p class="muted">Submitted '+esc(new Date(item.created_at).toLocaleString())+'</p><label class="muted" for="reason-'+esc(item.id)+'">Decision reason (required)</label><input id="reason-'+esc(item.id)+'" maxlength="1000" placeholder="Record what was checked and why"><div class="row"><button class="primary" data-verify="verified" data-type="'+type+'" data-id="'+esc(item.id)+'">Verify</button><button class="danger" data-verify="rejected" data-type="'+type+'" data-id="'+esc(item.id)+'">Reject</button><button class="warn" data-verify="suspended" data-type="'+type+'" data-id="'+esc(item.id)+'">Suspend</button></div></article>';
+}
+async function load(){
+ say("Loading pending applications…");
+ try{
+  const data=await api({action:"list_pending"});
+  $("career-queue").innerHTML=data.career_organizations?.length?data.career_organizations.map(x=>card(x,"career_organization")).join(""):"No pending organizations.";
+  $("seller-queue").innerHTML=data.marketplace_sellers?.length?data.marketplace_sellers.map(x=>card(x,"marketplace_seller")).join(""):"No pending sellers.";
+  document.querySelectorAll("[data-verify]").forEach(button=>button.addEventListener("click",async()=>{
+   const id=button.dataset.id,type=button.dataset.type,status=button.dataset.verify,reason=$("reason-"+id).value.trim();
+   if(reason.length<5){say("Enter a meaningful reason of at least 5 characters.");return}
+   button.disabled=true;
+   try{await api({action:"verify_entity",entity_type:type,entity_id:id,status,reason});say("Decision recorded and audit entry written.");await load()}
+   catch(e){say(e.message);button.disabled=false}
+  }));
+  say("Queue refreshed.");
+ }catch(e){say(e.message);$("career-queue").textContent="Queue unavailable.";$("seller-queue").textContent="Queue unavailable."}
+}
+$("refresh").addEventListener("click",load);
+$("signout").addEventListener("click",async()=>{await sb.auth.signOut();location.href="/"});
+const {data}=await sb.auth.getSession();$("loading").classList.add("hidden");if(data.session){show("app",true);await load()}else show("signin",true);
+sb.auth.onAuthStateChange((event,session)=>{if(!session){show("app",false);show("signin",true)}});
+</script></body></html>
