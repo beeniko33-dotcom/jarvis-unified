@@ -151,7 +151,7 @@ Deno.serve(async (req: Request) => {
     const sma50 = sma(closes, 50);
     const rsi14 = rsi(closes, 14);
     const previousClose = closes[closes.length - 2];
-    const return1mPct = (latest.close / previousClose - 1) * 100;
+    const return5mPct = (latest.close / previousClose - 1) * 100;
     const trend = sma20 > sma50 ? "bullish" : sma20 < sma50 ? "bearish" : "flat";
     let direction = "neutral";
     let rationale = "Trend and momentum conditions are not aligned; no directional bias.";
@@ -181,7 +181,7 @@ Deno.serve(async (req: Request) => {
         provider_endpoint: BINANCE_BASE + "/api/v3/klines",
         market_type: "spot",
         candle: { ...latest, open_time: new Date(latest.openTime).toISOString(), close_time: eventTime },
-        indicators: { sma20, sma50, rsi14, return_1m_pct: return1mPct, trend },
+        indicators: { sma20, sma50, rsi14, return_5m_pct: return5mPct, trend },
         quote_age_seconds: quoteAgeSeconds,
         provider_server_time: new Date(serverTime).toISOString(),
         collector_received_at: receivedIso,
@@ -189,7 +189,7 @@ Deno.serve(async (req: Request) => {
         trust_classification: "candidate_unverified",
         provenance_verified: false,
         evidence_credit: false,
-        analysis_basis: "completed_1m_candles",
+        analysis_basis: "completed_5m_candles",
       },
       out_of_order: false,
       stale: quoteAgeSeconds > 120,
@@ -220,7 +220,7 @@ Deno.serve(async (req: Request) => {
         sma20,
         sma50,
         rsi14,
-        return_1m_pct: return1mPct,
+        return_5m_pct: return5mPct,
         completed_candles_used: completed.length,
         rationale,
         source_endpoint: BINANCE_BASE + "/api/v3/klines",
