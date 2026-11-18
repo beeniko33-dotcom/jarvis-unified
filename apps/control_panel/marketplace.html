@@ -49,6 +49,7 @@ label{display:block;font-size:12px;color:#aabbd3;margin:10px 0 5px}input,textare
 <script type="module">
 const SUPABASE_URL="https://zythldptlplyutphgxpg.supabase.co";
 const PUBLISHABLE_KEY="sb_publishable_5bXO0f6Xpc3PzWifm7AgoA_IuYaVTa-";
+const ORDER_FUNCTION=SUPABASE_URL+"/functions/v1/marketplace-orders";
 const {createClient}=await import("https://esm.sh/@supabase/supabase-js@2.45.4");
 const sb=createClient(SUPABASE_URL,PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
 const $=id=>document.getElementById(id);
@@ -103,9 +104,13 @@ async function createOrder(id,b){
  b.disabled=true;
  try{
   const qty=1,ref=new URLSearchParams(location.search).get("ref");
-  const {data,error}=await sb.rpc("marketplace_create_order",{p_listing_id:id,p_quantity:qty,p_affiliate_code:ref});
-  if(error)throw error;
-  say("listing-status","Order intent created: "+data.order_id+". No payment was taken and no reward was issued.");
+  const {data:sessionData}=await sb.auth.getSession(),token=sessionData.session?.access_token;
+  if(!token)throw Error("Sign in required");
+  const idempotencyKey=b.dataset.idempotency||crypto.randomUUID();b.dataset.idempotency=idempotencyKey;
+  const response=await fetch(ORDER_FUNCTION,{method:"POST",headers:{apikey:PUBLISHABLE_KEY,authorization:"Bearer "+token,"content-type":"application/json"},body:JSON.stringify({listing_id:id,quantity:qty,affiliate_code:ref,idempotency_key:idempotencyKey})});
+  const result=await response.json().catch(()=>({}));if(!response.ok)throw Error(result.error||"Order request failed");
+  delete b.dataset.idempotency;
+  say("listing-status","Order intent created: "+result.order_id+". No payment was taken and no reward was issued.");
   await loadOrders();
  }catch(e){say("listing-status","Order not created: "+e.message)}finally{b.disabled=false}
 }
