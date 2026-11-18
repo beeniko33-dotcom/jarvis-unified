@@ -69,8 +69,8 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
   // Supabase secret API keys are opaque: callers send them in apikey only.
-  // The platform verify_jwt check remains enabled; this constant-time comparison
-  // additionally restricts this privileged ingestion endpoint to the default secret key.
+  // JWT verification is disabled for this service-to-service function; this
+  // constant-time comparison is the mandatory authentication gate.
   const suppliedApiKey = req.headers.get("apikey") ?? "";
   if (!SECRET_API_KEY || !tokenMatches(suppliedApiKey, SECRET_API_KEY)) {
     return json({ error: "secret_api_key_required" }, 403);
