@@ -42,7 +42,7 @@
       <article class="card"><div class="stat-label">Paper entries <span>↗</span></div><div class="stat-value" id="entries">—</div><div class="stat-note">New simulated entries only</div></article>
     </div>
     <div class="grid layout-main">
-      <article class="card"><div class="card-head"><div><div class="card-title">BTC / USDT · Market intelligence</div><div class="card-sub">Binance Spot · 5-minute analysis pipeline</div></div><span class="tag">Research feed</span></div><div class="chart-empty" id="chart-empty"><div><strong>No verified market series available</strong><p>Jarvis will display a price chart when timestamped provider observations are being persisted. No sample candles or synthetic prices are shown here.</p></div></div><div class="grid two-col" style="margin-top:14px"><div class="data-row"><div><small>Latest observation</small><strong id="marketlatest">—</strong></div><span class="state warn" id="market-state">Awaiting data</span></div><div class="data-row"><div><small>Data trust</small><strong id="trust">Unverified candidate</strong></div><span class="state warn">No evidence credit</span></div></div></article>
+      <article class="card"><div class="card-head"><div><div class="card-title">BTC / USDT · Market intelligence</div><div class="card-sub">Binance Spot · 5-minute analysis pipeline</div></div><span class="tag">Research feed</span></div><div class="chart-empty" id="chart-empty"><div><strong>No verified market series available</strong><p>Jarvis will display a price chart when timestamped provider observations are being persisted. No sample candles or synthetic prices are shown here.</p></div></div><div id="chart-live" class="hidden" style="height:250px;border:1px solid #26374d;border-radius:12px;padding:8px;background:#0a1422"><svg id="price-chart" viewBox="0 0 760 220" role="img" aria-label="BTC USDT provider candle close price chart" style="width:100%;height:100%"></svg></div><div class="grid three-col" style="margin-top:14px"><div class="data-row"><div><small>Last completed close</small><strong id="market-price">—</strong></div></div><div class="data-row"><div><small>SMA20 / SMA50</small><strong id="market-smas">—</strong></div></div><div class="data-row"><div><small>RSI 14</small><strong id="market-rsi">—</strong></div></div></div><div class="grid two-col" style="margin-top:14px"><div class="data-row"><div><small>Latest observation</small><strong id="marketlatest">—</strong></div><span class="state warn" id="market-state">Awaiting data</span></div><div class="data-row"><div><small>Data trust</small><strong id="trust">Unverified candidate</strong></div><span class="state warn">No evidence credit</span></div></div></article>
       <article class="card"><div class="card-head"><div><div class="card-title">Runtime command center</div><div class="card-sub">Authenticated operator controls</div></div><span class="tag">Paper only</span></div><div class="data-row"><div><small>Worker heartbeat</small><strong id="beat">—</strong></div><span id="worker-state" class="state warn">Unknown</span></div><div class="data-row"><div><small>Last paper session</small><strong id="lastsession">—</strong></div></div><div class="data-row"><div><small>Audit events</small><strong id="audits">—</strong></div></div><div class="data-row"><div><small>Live trading</small><strong class="green">Disabled by design</strong></div></div><div class="grid" style="margin-top:16px"><button class="btn primary" data-action="run_paper_session">Run paper session</button><button class="btn" data-action="pause_entries">Pause paper entries</button><button class="btn danger" data-action="engage_kill_switch">Engage kill switch</button></div></article>
     </div>
     <div class="card" style="margin-top:14px"><div class="card-head"><div><div class="card-title">Platform modules</div><div class="card-sub">Connected surfaces and current release scope</div></div></div><div class="grid three-col"><div class="feature"><div class="feature-icon">⌁</div><div><b>Market data</b><p>Provider collector and timestamped observation ledger</p></div></div><div class="feature"><div class="feature-icon">◈</div><div><b>Strategy research</b><p>BTC 5m SMA20 / SMA50 / RSI14 candidate analysis</p></div></div><div class="feature"><div class="feature-icon">⬡</div><div><b>Risk engine</b><p>Fail-closed gates; paper execution remains locked</p></div></div></div></div>
@@ -82,6 +82,31 @@ function render(data){
  set("lastsession",worker?.last_paper_session_date||"—");set("observations",data.telemetry?.market_observations??0);set("m-observations",data.telemetry?.market_observations??0);set("s-observations",data.telemetry?.market_observations??0);
  set("audits",data.telemetry?.runtime_audit_events??0);set("s-audits",data.telemetry?.runtime_audit_events??0);
  const latest=data.telemetry?.latest_market_observation_at;set("marketlatest",time(latest));set("m-last",latest?time(latest):"No data");
+ const market=data.telemetry?.latest_market;
+ if(market){
+   const close=Number(market.close),s20=Number(market.sma20),s50=Number(market.sma50),rsi=Number(market.rsi14);
+   set("market-price",Number.isFinite(close)?close.toLocaleString("en-US",{maximumFractionDigits:2}):"—");
+   set("market-smas",Number.isFinite(s20)&&Number.isFinite(s50)?s20.toFixed(2)+" / "+s50.toFixed(2):"—");
+   set("market-rsi",Number.isFinite(rsi)?rsi.toFixed(1):"—");
+   const raw=market.klines;
+   if(Array.isArray(raw)&&raw.length>1){
+     const closes=raw.map(k=>Number(k?.[4])).filter(Number.isFinite);
+     if(closes.length>1){
+       const min=Math.min(...closes),max=Math.max(...closes),range=max-min||1;
+       const points=closes.map((v,i)=>(12+i*736/(closes.length-1))+","+(202-(v-min)*180/range)).join(" ");
+       const svg=$("price-chart");svg.replaceChildren();
+       const ns="http://www.w3.org/2000/svg";
+       const line=document.createElementNS(ns,"polyline");line.setAttribute("points",points);line.setAttribute("fill","none");line.setAttribute("stroke","#54d6d0");line.setAttribute("stroke-width","2.5");line.setAttribute("stroke-linecap","round");line.setAttribute("stroke-linejoin","round");svg.appendChild(line);
+       const top=document.createElementNS(ns,"text");top.setAttribute("x","12");top.setAttribute("y","14");top.setAttribute("fill","#91a0b5");top.setAttribute("font-size","10");top.textContent="Binance Spot · "+market.timeframe+" · "+time(market.event_time);svg.appendChild(top);
+       show($("chart-empty"),false);show($("chart-live"),true);
+     }
+   }
+   set("trust",market.provenance||"candidate_unverified");
+   setState("market-state",market.stale?"Stale observation":market.provenance||"Candidate",market.stale?"bad":"warn");
+ }
+ const signal=data.telemetry?.latest_signal;
+ if(signal){set("trust",signal.market_data_trust||"unverified_market_data");}
+
  const hasData=(data.telemetry?.market_observations??0)>0;setState("market-state",hasData?"Observations stored":"Awaiting data",hasData?"":"warn");
  set("market-note",latest?"Last received "+time(latest):"No provider observations persisted yet");
  if(hasData){$("market-empty").innerHTML="<strong>Market observations have been persisted</strong>Last received: "+time(latest)+". Chart candles and verified signal detail are not exposed by the current status API.";set("trust","Candidate · verify provenance")}else set("trust","Unverified candidate");
