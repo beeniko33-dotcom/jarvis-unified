@@ -2,6 +2,10 @@ name: Binance BTC market analysis
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/binance-market-analysis.yml"
   schedule:
     - cron: "*/5 * * * *"
 
