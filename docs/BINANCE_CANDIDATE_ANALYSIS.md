@@ -4,7 +4,7 @@ This Edge Function fetches Binance public Spot server time and the newest 100 BT
 
 ## Safety and trust
 
-- Uses public market-data endpoints only; no API key or account authentication.
+- Uses public Binance market-data endpoints; no Binance account or API key is needed. Supabase invocation still requires a verified operator/service-role JWT.
 - Provider data remains `candidate_unverified` / `unverified_market_data`; `evidence_credit=false`.
 - Signal direction is research output, not a trade instruction.
 - Risk gate is blocked; position size is zero; paper execution is disabled; no live orders can be created.
@@ -14,7 +14,7 @@ This Edge Function fetches Binance public Spot server time and the newest 100 BT
 
 ## Deploy and invoke
 
-Deploy as `market-analysis` with JWT verification enabled. Invoke with an authenticated operator session using POST and an empty JSON object. Schedule only after an owner-approved authenticated scheduler is configured; do not expose this function publicly or place service-role credentials in a client.
+Deploy as `market-analysis` with JWT verification enabled. Invoke with an authenticated operator session using POST and an empty JSON object. The repository workflow `.github/workflows/binance-market-analysis.yml` polls every five minutes using the existing GitHub Actions secrets `JARVIS_SUPABASE_URL` and `JARVIS_SUPABASE_SERVICE_ROLE_KEY`. If either secret is absent, the workflow skips collection and records `SKIPPED_NOT_CONFIGURED`. Never place the service-role key in client code. Review the workflow run artifact and Supabase ledger counts to confirm actual persistence.
 
 ## Strategy
 
