@@ -1,7 +1,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SERVICE_ROLE_KEY") ?? "";
+const SECRET_KEYS = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}");
+const SERVICE_ROLE_KEY = SECRET_KEYS.default ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SERVICE_ROLE_KEY") ?? "";
 const BINANCE_BASE = "https://data-api.binance.vision";
 const SYMBOL = "BTCUSDT";
 const INTERVAL = "5m";
@@ -33,6 +34,14 @@ async function getJson(url: string): Promise<any> {
   if (!response.ok) throw new Error("market_provider_http_" + response.status);
   return await response.json();
 }
+function tokenMatches(supplied: string, expected: string): boolean {
+  const a = new TextEncoder().encode(supplied), b = new TextEncoder().encode(expected);
+  if (!a.length || a.length !== b.length) return false;
+  let difference = 0;
+  for (let i = 0; i < a.length; i++) difference |= a[i] ^ b[i];
+  return difference === 0;
+}
+
 function jwtClaims(req: Request): { role: string; sub: string } {
   const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
   const parts = token.split(".");
@@ -125,10 +134,16 @@ async function rpc(name: string, body: unknown): Promise<any> {
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   const caller = jwtClaims(req);
-  if (caller.role !== "authenticated" && caller.role !== "service_role") return json({ error: "authenticated_operator_required" }, 403);
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY) return json({ error: "server_not_configured" }, 503);
+  // Supabase's newer sb_secret API keys are opaque, not JWTs. GitHub Actions
+  // supplies the machine key in the apikey header; compare it to the server-only
+  // secret and keep ordinary authenticated callers on the operator allowlist.
+  const machineAuthorized = tokenMatches(req.headers.get("apikey") ?? "", SERVICE_ROLE_KEY);
+  if (caller.role !== "authenticated" && caller.role !== "service_role" && !machineAuthorized) {
+    return json({ error: "authenticated_operator_required" }, 403);
+  }
   try {
-    if (caller.role !== "service_role" && (!caller.sub || !(await isAllowlistedOperator(caller.sub)))) {
+    if (!machineAuthorized && caller.role !== "service_role" && (!caller.sub || !(await isAllowlistedOperator(caller.sub)))) {
       return json({ error: "operator_not_allowlisted" }, 403);
     }
     const [clock, rawKlines] = await Promise.all([
