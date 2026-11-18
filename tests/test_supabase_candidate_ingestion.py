@@ -79,3 +79,33 @@ def test_ingest_database_counts_inserted_and_idempotent_duplicates(tmp_path: Pat
     assert result["inserted"] == 1
     assert result["duplicates"] == 1
     assert result["forward_validation_credit_awarded"] is False
+
+def test_post_candidate_sends_secret_key_only_in_apikey_header():
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps({
+                "ok": True,
+                "inserted": True,
+                "duplicate": False,
+                "provenance": "candidate_unverified",
+            }).encode()
+
+    with patch("urllib.request.urlopen", return_value=FakeResponse()) as urlopen:
+        result = post_candidate(
+            "https://example.supabase.co",
+            "secret-api-key-not-printed",
+            build_request_body(candidate()),
+        )
+
+    request = urlopen.call_args.args[0]
+    assert request.get_header("Apikey") == "secret-api-key-not-printed"
+    assert request.get_header("Authorization") is None
+    assert result["ok"] is True

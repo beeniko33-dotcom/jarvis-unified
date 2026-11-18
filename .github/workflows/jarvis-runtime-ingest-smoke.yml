@@ -1,0 +1,68 @@
+name: Jarvis runtime ingest authentication smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/functions/jarvis-runtime-ingest/**"
+      - "scripts/ingest_deriv_candidates_to_supabase.py"
+      - ".github/workflows/jarvis-runtime-ingest-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-ingest-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      JARVIS_SUPABASE_URL: ${{ secrets.JARVIS_SUPABASE_URL }}
+      JARVIS_SUPABASE_SECRET_KEY: ${{ secrets.JARVIS_SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - name: Submit an authenticated audit-only smoke event
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+          from datetime import datetime, timezone
+
+          base_url = os.environ.get("JARVIS_SUPABASE_URL", "").rstrip("/")
+          secret_key = os.environ.get("JARVIS_SUPABASE_SECRET_KEY", "")
+          if not base_url or not secret_key:
+              raise SystemExit("Supabase URL or secret API key is not configured")
+
+          body = {
+              "kind": "audit_event",
+              "event_type": "runtime_ingest_auth_smoke_test",
+              "component": "github_actions",
+              "occurred_at": datetime.now(timezone.utc).isoformat(),
+              "correlation_id": os.environ.get("GITHUB_RUN_ID", "manual"),
+              "payload": {
+                  "result": "pass_candidate",
+                  "credential_transport": "apikey_only",
+                  "market_data_or_trade_evidence": False,
+              },
+          }
+          request = urllib.request.Request(
+              base_url + "/functions/v1/jarvis-runtime-ingest",
+              data=json.dumps(body, separators=(",", ":")).encode(),
+              method="POST",
+              headers={
+                  "content-type": "application/json",
+                  "apikey": secret_key,
+              },
+          )
+          with urllib.request.urlopen(request, timeout=20) as response:
+              result = json.loads(response.read().decode("utf-8"))
+              if response.status != 200 or result.get("ok") is not True or result.get("recorded") is not True:
+                  raise SystemExit("Runtime ingest smoke did not confirm persistence")
+          print(json.dumps({
+              "status": "PASS",
+              "event_type": body["event_type"],
+              "event_id": result.get("event_id"),
+              "trade_or_market_evidence": False,
+          }, sort_keys=True))
+          PY

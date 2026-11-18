@@ -1,6 +1,6 @@
 """Upload unverified Deriv candidate ticks to Jarvis' private Supabase ingest endpoint.
 
-Requires a service-role JWT in the CI secret store. Never prints credentials or raw ticks.
+Requires a Supabase secret API key. It is sent only in the apikey header, never as a bearer JWT. Never prints credentials or raw ticks.
 """
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ def load_payloads(database: Path) -> list[dict]:
     return [json.loads(row[0]) for row in rows]
 
 
-def post_candidate(base_url: str, service_role_key: str, body: dict, timeout: int = 15) -> dict:
+def post_candidate(base_url: str, secret_api_key: str, body: dict, timeout: int = 15) -> dict:
     parsed = urllib.parse.urlsplit(base_url)
     if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
         raise ValueError("Supabase URL must be a valid HTTPS origin")
@@ -68,8 +68,7 @@ def post_candidate(base_url: str, service_role_key: str, body: dict, timeout: in
         endpoint, data=encoded, method="POST",
         headers={
             "content-type": "application/json",
-            "apikey": service_role_key,
-            "authorization": "Bearer " + service_role_key,
+            "apikey": secret_api_key,
         },
     )
     try:
@@ -87,13 +86,13 @@ def post_candidate(base_url: str, service_role_key: str, body: dict, timeout: in
     return result
 
 
-def ingest_database(database: Path, base_url: str, service_role_key: str) -> dict:
-    if not service_role_key.strip():
-        raise ValueError("service-role credential is required")
+def ingest_database(database: Path, base_url: str, secret_api_key: str) -> dict:
+    if not secret_api_key.strip():
+        raise ValueError("Supabase secret API key is required")
     payloads = load_payloads(database)
     inserted = duplicates = 0
     for payload in payloads:
-        result = post_candidate(base_url, service_role_key, build_request_body(payload))
+        result = post_candidate(base_url, secret_api_key, build_request_body(payload))
         inserted += int(result.get("inserted") is True)
         duplicates += int(result.get("duplicate") is True)
     return {
@@ -111,9 +110,9 @@ def main() -> int:
     parser.add_argument("--db", type=Path, required=True)
     args = parser.parse_args()
     base_url = os.environ.get("JARVIS_SUPABASE_URL", "")
-    key = os.environ.get("JARVIS_SUPABASE_SERVICE_ROLE_KEY", "")
+    key = os.environ.get("JARVIS_SUPABASE_SECRET_KEY") or os.environ.get("JARVIS_SUPABASE_SERVICE_ROLE_KEY", "")
     if not base_url or not key:
-        parser.error("JARVIS_SUPABASE_URL and JARVIS_SUPABASE_SERVICE_ROLE_KEY are required")
+        parser.error("JARVIS_SUPABASE_URL and JARVIS_SUPABASE_SECRET_KEY are required")
     print(json.dumps(ingest_database(args.db, base_url, key), sort_keys=True))
     return 0
 

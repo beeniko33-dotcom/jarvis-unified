@@ -2,6 +2,8 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import postgres from "npm:postgres@3.4.7";
 
 const DB_URL = Deno.env.get("SUPABASE_DB_URL");
+const SECRET_KEYS = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}");
+const SECRET_API_KEY = SECRET_KEYS.default ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -10,15 +12,13 @@ function json(body: unknown, status = 200) {
   });
 }
 
-function decodeClaims(token: string): Record<string, unknown> | null {
-  try {
-    const part = token.split(".")[1];
-    if (!part) return null;
-    const normalized = part.replace(/-/g, "+").replace(/_/g, "/");
-    return JSON.parse(atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=")));
-  } catch {
-    return null;
-  }
+function tokenMatches(supplied: string, expected: string): boolean {
+  const a = new TextEncoder().encode(supplied);
+  const b = new TextEncoder().encode(expected);
+  if (a.length !== b.length) return false;
+  let difference = 0;
+  for (let i = 0; i < a.length; i++) difference |= a[i] ^ b[i];
+  return difference === 0;
 }
 
 function stable(value: unknown): string {
@@ -68,12 +68,13 @@ const sql = DB_URL ? postgres(DB_URL, { max: 1, prepare: false, connect_timeout:
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
-  // Supabase gateway verifies the JWT signature before this handler runs.
-  // Restrict this ingestion endpoint to service-role tokens only.
-  const auth = req.headers.get("authorization") ?? "";
-  const token = auth.replace(/^Bearer\s+/i, "");
-  const claims = decodeClaims(token);
-  if (!claims || claims.role !== "service_role") return json({ error: "service_role_required" }, 403);
+  // Supabase secret API keys are opaque: callers send them in apikey only.
+  // The platform verify_jwt check remains enabled; this constant-time comparison
+  // additionally restricts this privileged ingestion endpoint to the default secret key.
+  const suppliedApiKey = req.headers.get("apikey") ?? "";
+  if (!SECRET_API_KEY || !tokenMatches(suppliedApiKey, SECRET_API_KEY)) {
+    return json({ error: "secret_api_key_required" }, 403);
+  }
   if (!sql) return json({ error: "database_connection_not_configured" }, 500);
 
   let body: Record<string, unknown>;
