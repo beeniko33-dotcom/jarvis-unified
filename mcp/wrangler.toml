@@ -2,6 +2,7 @@ name = "jarvis-unified-mcp"
 main = "worker.js"
 compatibility_date = "2026-11-17"
 workers_dev = true
+preview_urls = true
 
 [vars]
 JARVIS_HEALTH_URL = "https://jarvis-control-worker.beeniko33.workers.dev/health"
