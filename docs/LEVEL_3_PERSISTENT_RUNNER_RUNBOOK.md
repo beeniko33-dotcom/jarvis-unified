@@ -46,15 +46,17 @@ Type=simple
 User=jarvis-collector
 Group=jarvis-collector
 WorkingDirectory=/opt/jarvis-unified
+# Supervisor options must precede --command. Every token after --command
+# is forwarded unchanged to the collector process.
 ExecStart=/opt/jarvis-venv/bin/python -m research.collector_supervisor \
-  --command /opt/jarvis-venv/bin/python -m research.deriv_feed --duration-seconds 86400 --db /var/lib/jarvis/deriv_eurusd_forward.sqlite3 \
   --db /var/lib/jarvis/deriv_eurusd_forward.sqlite3 \
   --duration-seconds 86400 \
   --log-dir /var/lib/jarvis/sessions \
   --pause-between 15 \
   --max-consecutive-failures 5 \
   --backoff-base 15 \
-  --backoff-cap 300
+  --backoff-cap 300 \
+  --command /opt/jarvis-venv/bin/python -m research.deriv_feed --duration-seconds 3600 --db /var/lib/jarvis/deriv_eurusd_forward.sqlite3
 Restart=on-failure
 RestartSec=15
 KillMode=control-group
