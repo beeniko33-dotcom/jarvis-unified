@@ -58,7 +58,8 @@ class PaperReplay:
     STRATEGY_VERSION="1.0.0"
     def __init__(self,database:Path,*,starting_cash=Decimal("10000"),fast=10,slow=30,
                  risk_fraction=Decimal("0.01"),fee_bps=Decimal("10"),slippage_bps=Decimal("5"),
-                 max_daily_loss_fraction=Decimal("0.02")):
+                 max_daily_loss_fraction=Decimal("0.02"),allow_entries=True):
+        self.allow_entries=allow_entries  # False = kill switch engaged: signals are logged, no entry is filled
         if fast<2 or slow<=fast: raise ValueError("require 2 <= fast < slow")
         if starting_cash<=0 or not (0<risk_fraction<=Decimal("0.02")): raise ValueError("invalid starting cash or risk fraction")
         if fee_bps<0 or slippage_bps<0 or not (0<max_daily_loss_fraction<=Decimal("0.10")): raise ValueError("invalid costs or daily loss limit")
@@ -136,6 +137,8 @@ class PaperReplay:
                     self.db.execute("DELETE FROM positions WHERE symbol=?",(symbol,))
                     self._event(bar.timestamp,symbol,"exit_fill",{"strategy_id":self.STRATEGY_ID,"strategy_version":self.STRATEGY_VERSION,
                         "reason":"sma_cross_down","quantity":str(qty),"price":str(fill),"fee":str(fee),"realized_net_pnl":str(pnl)})
+                elif not pos and up and not self.allow_entries:
+                    self._event(bar.timestamp,symbol,"risk_reject",{"reason":"kill_switch_engaged"})
                 elif not pos and up and equity>0:
                     allowed=max(Decimal(0),day_start-equity)<day_start*self.max_daily_loss_fraction
                     fee_rate=self.fee_bps/Decimal(10000)
@@ -159,6 +162,14 @@ class PaperReplay:
                 self._save(cash,equity,realized,peak,day,day_start)
             self.db.commit()
         return self.report()
+    def warmup(self,bars:Iterable[Bar],source_sha256:str="warmup")->int:
+        """Store history so moving averages are primed. No signals, fills or audit events are produced."""
+        added=0
+        for bar in bars:
+            added+=self.db.execute("INSERT OR IGNORE INTO bars VALUES(?,?,?,?)",
+                (bar.symbol,bar.timestamp,str(bar.close),source_sha256)).rowcount
+        self.db.commit()
+        return added
     def verify_chain(self):
         previous="GENESIS"
         for ts,symbol,kind,payload,prev,event_hash in self.db.execute("SELECT ts,symbol,kind,payload,previous_hash,event_hash FROM events ORDER BY id"):

@@ -68,6 +68,22 @@ The dashboard is a paper-trading observatory: a seeded, deterministic simulation
 
 Start `python main.py --serve`, then open `http://127.0.0.1:8787/dashboard`. The status page is a read-only installable web app and works offline only for its static shell; live health and account status are never cached. The API remains bound to localhost. Install steps for Android, iOS and desktop are in `apps/mobile/README.md`.
 
+## Live signals to Telegram (paper trading)
+
+`research/live_signal_runner.py` follows real market prices and trades them on paper. Each cycle it reads the newest fully closed Binance candles (public market data, no API key, never an account or order endpoint), runs the SMA-crossover strategy, applies the paper engine's risk limits, fees and slippage, and sends a Telegram alert for each buy or sell signal, paper fill and blocked entry. State is kept in SQLite, so a restart never repeats a trade or an alert, and an alert that fails to send is retried in order.
+
+```bash
+export TELEGRAM_BOT_TOKEN='your-bot-token'
+export TELEGRAM_CHAT_ID='your-chat-id'
+# Alerts only: the kill switch stays engaged, signals are sent, no paper positions open
+python -m research.live_signal_runner --symbol BTCUSDT --interval 15m --telegram
+# Paper trading on: signals also open and close paper positions
+python -m research.live_signal_runner --symbol BTCUSDT --interval 15m --telegram --allow-entries
+# Or in Docker: docker compose --profile signals up --build
+```
+
+Alerts contain signal and paper-fill details only, never balances, credentials or broker data. The message layout lives in `format_alert()`. Public candles are unverified, so this never counts toward Level 3 or the 30-day live-trading gate, and live trading stays locked.
+
 ## Local Docker
 
 With Docker Compose, run `docker compose up --build` and open `http://127.0.0.1:8787/dashboard`. The API listens on the container interface but Compose publishes the port only on the host loopback address; do not change that mapping. Stop any existing Jarvis process using port 8787 first.

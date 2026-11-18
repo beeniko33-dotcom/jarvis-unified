@@ -33,3 +33,17 @@ services:
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       JARVIS_STATUS_URL: http://jarvis:8787/health
     restart: unless-stopped
+
+  signals:
+    build: .
+    command: ["python", "-m", "research.live_signal_runner", "--telegram", "--allow-entries", "--db", "/app/var/live/live_paper.sqlite3"]
+    profiles: ["signals"]
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    volumes:
+      - signals-data:/app/var/live
+    restart: unless-stopped
+
+volumes:
+  signals-data:
