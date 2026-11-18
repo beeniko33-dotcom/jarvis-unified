@@ -42,6 +42,7 @@
     <button data-page="activity"><span class="nav-icon">◷</span>Activity</button>
     <button data-page="portfolio"><span class="nav-icon">▤</span>Portfolio</button>
     <button type="button" id="career-giver-link"><span class="nav-icon">♙</span>Career Giver</button>
+    <button type="button" id="platform-admin-link"><span class="nav-icon">✓</span>Verification</button>
     <button data-page="analytics"><span class="nav-icon">▥</span>Analytics</button>
     <button data-page="autopilot"><span class="nav-icon">✧</span>AI Autopilot</button>
     <button data-page="system"><span class="nav-icon">⚙</span>System</button>
@@ -208,6 +209,7 @@ async function enterApp(){show($("signin"),false);show($("app"),true);show($("si
 function leaveApp(){clearInterval(pollTimer);clearInterval(demoTimer);show($("app"),false);show($("signout"),false);show($("signin"),true);set("connection-label","Signed out")}
 document.querySelectorAll("[data-page]").forEach(button=>button.addEventListener("click",()=>{document.querySelectorAll("[data-page]").forEach(b=>b.classList.toggle("active",b===button));document.querySelectorAll(".panel").forEach(p=>p.classList.toggle("active",p.id==="page-"+button.dataset.page));set("page-title",button.textContent.trim())}));
 $("career-giver-link").addEventListener("click",()=>{window.location.href="/career.html"});
+$("platform-admin-link").addEventListener("click",()=>{window.location.href="/platform-admin.html"});
 $("refresh").addEventListener("click",()=>{refresh();refreshDemo()});
 $("demo-symbol").addEventListener("change",()=>{const q=demoSnapshot?.quotes?.find(x=>x.symbol===$("demo-symbol").value);set("demo-selected-price",q?money(q.price)+(q.stale?" · stale":""):"No quote");setState("demo-feed-state",!q?"Unavailable":q.stale?"Stale quote":"Live quote",!q||q.stale?"bad":"");$("demo-submit").disabled=!q||q.stale});
 $("demo-order-form").addEventListener("submit",async e=>{e.preventDefault();const button=$("demo-submit"),message=$("demo-order-message");button.disabled=true;message.textContent="Fetching a fresh server-side quote and submitting simulated fill…";try{const quantity=Number($("demo-quantity").value);if(!Number.isFinite(quantity)||quantity<=0)throw Error("Enter a valid quantity.");const result=await api("demo-trading",{method:"POST",body:JSON.stringify({symbol:$("demo-symbol").value,side:$("demo-side").value,quantity,idempotency_key:crypto.randomUUID()})});const r=result.result;message.textContent=(r.duplicate?"Duplicate request safely ignored.":"Demo "+r.side.toUpperCase()+" filled.")+" "+precise(r.quantity)+" "+r.symbol+" @ "+money(r.execution_price)+" · fee "+money(r.fee)+". No live order was sent.";toast("Demo order "+(r.duplicate?"already recorded":"filled"));$("demo-quantity").value="";await refreshDemo()}catch(err){message.textContent="Order rejected: "+err.message;toast(err.message)}finally{button.disabled=false}});
