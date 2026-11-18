@@ -70,14 +70,23 @@ function sma(values: number[], period: number): number {
 }
 function rsi(values: number[], period = 14): number {
   if (values.length <= period) throw new Error("insufficient_rsi_history");
-  let gains = 0, losses = 0;
-  for (let i = values.length - period; i < values.length; i++) {
+  let avgGain = 0, avgLoss = 0;
+  for (let i = 1; i <= period; i++) {
     const delta = values[i] - values[i - 1];
-    if (delta > 0) gains += delta;
-    else losses -= delta;
+    if (delta > 0) avgGain += delta;
+    else avgLoss -= delta;
   }
-  if (losses === 0) return gains === 0 ? 50 : 100;
-  const rs = (gains / period) / (losses / period);
+  avgGain /= period;
+  avgLoss /= period;
+  for (let i = period + 1; i < values.length; i++) {
+    const delta = values[i] - values[i - 1];
+    const gain = Math.max(delta, 0);
+    const loss = Math.max(-delta, 0);
+    avgGain = ((avgGain * (period - 1)) + gain) / period;
+    avgLoss = ((avgLoss * (period - 1)) + loss) / period;
+  }
+  if (avgLoss === 0) return avgGain === 0 ? 50 : 100;
+  const rs = avgGain / avgLoss;
   return 100 - 100 / (1 + rs);
 }
 function parseCandle(row: unknown): { openTime: number; closeTime: number; open: number; high: number; low: number; close: number; volume: number; trades: number } {
@@ -154,7 +163,7 @@ Deno.serve(async (req: Request) => {
       rationale = "SMA20 is below SMA50, close is below SMA20, and RSI14 is in the non-extreme bearish band.";
     }
 
-    const rawPayload = { server_time: clock, klines: rawKlines };
+    const rawPayload = { klines: rawKlines };
     const digest = await sha256(canonical(rawPayload));
     const eventTime = new Date(latest.closeTime).toISOString();
     const receivedIso = new Date(receivedAt).toISOString();
