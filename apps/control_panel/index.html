@@ -183,7 +183,7 @@ function render(data){
 }
 let pollTimer=null,demoTimer=null,demoSnapshot=null;
 async function refresh(){try{const data=await api("status");render(data);set("connection-label","Connected");show($("status-error"),false)}catch(e){set("connection-label","Status unavailable");set("status-error","Live status unavailable: "+e.message);show($("status-error"),true);toast(e.message)}}
-const money=v=>Number(v).toLocaleString("en-US",{style:"currency",currency:"USD",maximumFractionDigits:2});
+const money=v=>Number(v).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})+" USDT";
 const precise=v=>Number(v).toLocaleString("en-US",{maximumFractionDigits:8});
 function addCell(row,value){const td=document.createElement("td");td.textContent=String(value??"—");row.appendChild(td);return td}
 function renderDemo(data){
