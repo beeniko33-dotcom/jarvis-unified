@@ -6,7 +6,7 @@
 </style></head>
 <body><div class="wrap">
 <header><div><h1>NikoCoin Rewards</h1><div class="muted">Jarvis internal rewards ledger</div></div><nav><a class="btn" href="/">Jarvis</a><a class="btn" href="/career.html">Career Giver</a><a class="btn" href="/marketplace.html">Marketplace</a><button id="signout">Sign out</button></nav></header>
-<div class="notice"><strong>Internal points only.</strong> NikoCoin currently has no cash value, cannot be transferred or withdrawn, and is not an on-chain token. Reward earning rules and automated credits are not active yet.</div>
+<div class="notice"><strong>Internal points only.</strong> NikoCoin currently has no cash value, cannot be transferred or withdrawn, and is not an on-chain token. Reward earning rules and automated credits are not active yet. The optional wallet link below verifies a public Solana Devnet address only; it never requests funds or signing authority for transactions.</div>
 <div id="loading" class="card">Checking your secure session…</div>
 <div id="signin" class="card hidden"><h2>Sign in required</h2><p class="muted">Use your existing Jarvis Unified account.</p><a class="btn" href="/">Open Jarvis sign-in</a></div>
 <main id="app" class="hidden">
@@ -14,14 +14,49 @@
 <section class="card"><div class="muted">Your internal balance</div><div class="balance" id="balance">— NIKO</div><span class="tag" id="status">Loading</span><p class="muted" id="balance-note">No cash value · no transfers · not on-chain</p></section>
 <section class="card"><h2>How rewards work</h2><p class="muted">The ledger is append-only and server-controlled. Future rewards can be issued only after a verified platform event and anti-fraud checks. Marketplace purchases, referrals, hiring milestones and other earning events are not yet connected.</p><p class="muted">No credits have been granted by this page.</p></section>
 </div>
+
+<section class="card"><h2>Solana Devnet wallet link</h2><p class="muted">Optional proof that you control a public wallet address. Jarvis stores only the verified public address and signature hash. It does not store private keys, request transfers, or mint tokens.</p><div id="wallet-status" class="statusline">Checking wallet link…</div><div id="wallet-address" class="muted"></div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn" id="connect-wallet">Connect / verify Phantom wallet</button><button class="btn" id="refresh-wallet">Refresh wallet status</button></div></section>
 <section class="card"><div class="item"><strong>Ledger history</strong><button id="refresh">Refresh</button></div><div id="history"><div class="muted">Loading your ledger…</div></div><div id="message" class="statusline" aria-live="polite"></div></section>
 </main></div>
 <script type="module">
-const URL="https://zythldptlplyutphgxpg.supabase.co",KEY="sb_publishable_5bXO0f6Xpc3PzWifm7AgoA_IuYaVTa-",FN=URL+"/functions/v1/nikocoin-account";
+const URL="https://zythldptlplyutphgxpg.supabase.co",KEY="sb_publishable_5bXO0f6Xpc3PzWifm7AgoA_IuYaVTa-",FN=URL+"/functions/v1/nikocoin-account",WALLET_FN=URL+"/functions/v1/solana-devnet-wallet";
 const {createClient}=await import("https://esm.sh/@supabase/supabase-js@2.45.4");
 const sb=createClient(URL,KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
 const $=id=>document.getElementById(id),esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function show(id,on){$(id).classList.toggle("hidden",!on)}
+
+async function walletApi(body){
+ const {data}=await sb.auth.getSession(),token=data.session?.access_token;if(!token)throw Error("Sign in required");
+ const res=await fetch(WALLET_FN,{method:"POST",headers:{apikey:KEY,authorization:"Bearer "+token,"content-type":"application/json"},body:JSON.stringify(body)});
+ const result=await res.json().catch(()=>({}));if(!res.ok)throw Error(result.error||"Wallet request failed");return result;
+}
+async function loadWallet(){
+ $("wallet-status").textContent="Checking Devnet wallet…";$("wallet-address").textContent="";
+ try{
+  const wallet=await walletApi({action:"get_wallet"});
+  if(wallet.linked){$("wallet-status").textContent="Verified Solana Devnet wallet";$("wallet-address").textContent=wallet.wallet_address+" · "+wallet.network+" · verified "+new Date(wallet.verified_at).toLocaleString()}
+  else{$("wallet-status").textContent="No wallet linked. This is optional.";$("wallet-address").textContent="Network: Solana Devnet only"}
+ }catch(e){$("wallet-status").textContent=e.message}
+}
+async function connectWallet(){
+ const button=$("connect-wallet");button.disabled=true;$("wallet-status").textContent="Preparing a one-time wallet challenge…";
+ try{
+  const provider=window.phantom?.solana||window.solana;
+  if(!provider||typeof provider.connect!=="function"||typeof provider.signMessage!=="function")throw Error("No compatible wallet found. Open this page in the Phantom app browser or a browser with Phantom installed.");
+  const connection=await provider.connect();
+  const publicKey=(connection.publicKey||provider.publicKey)?.toString();
+  if(!publicKey)throw Error("Wallet did not return a public address.");
+  const challenge=await walletApi({action:"create_challenge"});
+  const signed=await provider.signMessage(new TextEncoder().encode(challenge.message),"utf8");
+  const bytes=signed.signature instanceof Uint8Array? signed.signature:new Uint8Array(signed.signature);
+  const signature=btoa(Array.from(bytes,b=>String.fromCharCode(b)).join(""));
+  await walletApi({action:"verify_wallet",challenge_id:challenge.challenge_id,nonce:challenge.message.match(/Nonce: ([0-9a-f]{64})/)?.[1],wallet_address:publicKey,signature});
+  $("wallet-status").textContent="Wallet ownership verified. Devnet only; no funds moved.";
+  await loadWallet();
+ }catch(e){$("wallet-status").textContent=e.message}
+ finally{button.disabled=false}
+}
+
 async function load(){
  $("message").textContent="Refreshing account…";
  try{
@@ -36,8 +71,10 @@ async function load(){
   $("message").textContent="Account loaded. "+(result.note||"");
  }catch(e){$("message").textContent=e.message}
 }
-const {data}=await sb.auth.getSession();$("loading").classList.add("hidden");if(data.session){show("app",true);await load()}else show("signin",true);
+const {data}=await sb.auth.getSession();$("loading").classList.add("hidden");if(data.session){show("app",true);await load();await loadWallet()}else show("signin",true);
 $("refresh").addEventListener("click",load);
+$("connect-wallet").addEventListener("click",connectWallet);
+$("refresh-wallet").addEventListener("click",loadWallet);
 $("signout").addEventListener("click",async()=>{await sb.auth.signOut();location.href="/"});
 sb.auth.onAuthStateChange((event,session)=>{if(!session){show("app",false);show("signin",true)}});
 </script></body></html>
