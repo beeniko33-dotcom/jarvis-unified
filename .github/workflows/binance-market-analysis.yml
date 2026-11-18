@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/binance-market-analysis.yml"
+      - "supabase/functions/market-analysis/index.ts"
   schedule:
     - cron: "*/5 * * * *"
 
