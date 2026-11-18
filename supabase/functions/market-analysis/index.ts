@@ -1,0 +1,220 @@
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
+const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SERVICE_ROLE_KEY") ?? "";
+const BINANCE_BASE = "https://data-api.binance.vision";
+const SYMBOL = "BTCUSDT";
+const INTERVAL = "1m";
+const STRATEGY_ID = "btc-sma20-sma50-rsi14";
+const STRATEGY_VERSION = "1.0.0";
+const MAX_AGE_MS = 120_000;
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json", "cache-control": "no-store" },
+  });
+}
+function canonical(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return "[" + value.map(canonical).join(",") + "]";
+  const o = value as Record<string, unknown>;
+  return "{" + Object.keys(o).sort().map(k => JSON.stringify(k) + ":" + canonical(o[k])).join(",") + "}";
+}
+async function sha256(value: string): Promise<string> {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(bytes)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+async function getJson(url: string): Promise<any> {
+  const response = await fetch(url, {
+    headers: { "accept": "application/json", "cache-control": "no-cache" },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error("market_provider_http_" + response.status);
+  return await response.json();
+}
+function number(value: unknown, label: string): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) throw new Error("invalid_" + label);
+  return n;
+}
+function sma(values: number[], period: number): number {
+  if (values.length < period) throw new Error("insufficient_candle_history");
+  return values.slice(-period).reduce((a, b) => a + b, 0) / period;
+}
+function rsi(values: number[], period = 14): number {
+  if (values.length <= period) throw new Error("insufficient_rsi_history");
+  let gains = 0, losses = 0;
+  for (let i = values.length - period; i < values.length; i++) {
+    const delta = values[i] - values[i - 1];
+    if (delta > 0) gains += delta;
+    else losses -= delta;
+  }
+  if (losses === 0) return gains === 0 ? 50 : 100;
+  const rs = (gains / period) / (losses / period);
+  return 100 - 100 / (1 + rs);
+}
+function parseCandle(row: unknown): { openTime: number; closeTime: number; open: number; high: number; low: number; close: number; volume: number; trades: number } {
+  if (!Array.isArray(row) || row.length < 9) throw new Error("malformed_kline");
+  const c = {
+    openTime: number(row[0], "open_time"),
+    open: number(row[1], "open"),
+    high: number(row[2], "high"),
+    low: number(row[3], "low"),
+    close: number(row[4], "close"),
+    volume: number(row[5], "volume"),
+    closeTime: number(row[6], "close_time"),
+    trades: number(row[8], "trade_count"),
+  };
+  if (c.open <= 0 || c.high <= 0 || c.low <= 0 || c.close <= 0 || c.volume < 0 ||
+      c.high < Math.max(c.open, c.close, c.low) || c.low > Math.min(c.open, c.close, c.high)) {
+    throw new Error("ohlc_invariant_failed");
+  }
+  return c;
+}
+async function rpc(name: string, body: unknown): Promise<any> {
+  const response = await fetch(SUPABASE_URL.replace(/\/$/, "") + "/rest/v1/rpc/" + name, {
+    method: "POST",
+    headers: {
+      "apikey": SERVICE_ROLE_KEY,
+      "authorization": "Bearer " + SERVICE_ROLE_KEY,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(name + "_failed_" + response.status);
+  return await response.json();
+}
+
+Deno.serve(async (req: Request) => {
+  if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) return json({ error: "server_not_configured" }, 503);
+  try {
+    const [clock, rawKlines] = await Promise.all([
+      getJson(BINANCE_BASE + "/api/v3/time"),
+      getJson(BINANCE_BASE + "/api/v3/klines?symbol=" + SYMBOL + "&interval=" + INTERVAL + "&limit=100"),
+    ]);
+    const receivedAt = Date.now();
+    const serverTime = number(clock.serverTime, "server_time");
+    if (!Array.isArray(rawKlines) || rawKlines.length < 60) throw new Error("insufficient_provider_candles");
+    const parsed = rawKlines.map(parseCandle);
+    const completed = parsed.filter(c => c.closeTime < serverTime);
+    if (completed.length < 60) throw new Error("insufficient_completed_candles");
+    const latest = completed[completed.length - 1];
+    const ageMs = serverTime - latest.closeTime;
+    if (ageMs < -5_000 || ageMs > MAX_AGE_MS) throw new Error("latest_completed_candle_stale_or_future");
+    if (Math.abs(receivedAt - serverTime) > 30_000) throw new Error("local_clock_skew_exceeds_30s");
+
+    const closes = completed.map(c => c.close);
+    const sma20 = sma(closes, 20);
+    const sma50 = sma(closes, 50);
+    const rsi14 = rsi(closes, 14);
+    const previousClose = closes[closes.length - 2];
+    const return1mPct = (latest.close / previousClose - 1) * 100;
+    const trend = sma20 > sma50 ? "bullish" : sma20 < sma50 ? "bearish" : "flat";
+    let direction = "neutral";
+    let rationale = "Trend and momentum conditions are not aligned; no directional bias.";
+    if (trend === "bullish" && latest.close > sma20 && rsi14 >= 50 && rsi14 < 70) {
+      direction = "long";
+      rationale = "SMA20 is above SMA50, close is above SMA20, and RSI14 is in the non-extreme bullish band.";
+    } else if (trend === "bearish" && latest.close < sma20 && rsi14 > 30 && rsi14 <= 50) {
+      direction = "short";
+      rationale = "SMA20 is below SMA50, close is below SMA20, and RSI14 is in the non-extreme bearish band.";
+    }
+
+    const rawPayload = { server_time: clock, klines: rawKlines };
+    const digest = await sha256(canonical(rawPayload));
+    const eventTime = new Date(latest.closeTime).toISOString();
+    const receivedIso = new Date(receivedAt).toISOString();
+    const quoteAgeSeconds = Math.max(0, (serverTime - latest.closeTime) / 1000);
+    const observation = {
+      source_id: "binance-spot-public-rest:" + SYMBOL,
+      event_time: eventTime,
+      received_at: receivedIso,
+      symbol: SYMBOL,
+      timeframe: INTERVAL,
+      schema_version: 1,
+      content_hash: digest,
+      values_json: {
+        provider: "Binance",
+        provider_endpoint: BINANCE_BASE + "/api/v3/klines",
+        market_type: "spot",
+        candle: { ...latest, open_time: new Date(latest.openTime).toISOString(), close_time: eventTime },
+        indicators: { sma20, sma50, rsi14, return_1m_pct: return1mPct, trend },
+        quote_age_seconds: quoteAgeSeconds,
+        provider_server_time: new Date(serverTime).toISOString(),
+        collector_received_at: receivedIso,
+        raw_payload: rawPayload,
+        trust_classification: "candidate_unverified",
+        provenance_verified: false,
+        evidence_credit: false,
+        analysis_basis: "completed_1m_candles",
+      },
+      out_of_order: false,
+      stale: quoteAgeSeconds > 120,
+      clock_skew: Math.abs(receivedAt - serverTime) > 10_000,
+    };
+    const observationResult = await rpc("jarvis_ingest_market_observations", { p_observations: [observation] });
+    const signal = {
+      idempotency_key: "binance-btc-1m-sma20-50-rsi14:" + latest.closeTime,
+      instrument: SYMBOL,
+      asset_class: "crypto",
+      direction,
+      timeframe: INTERVAL,
+      strategy_id: STRATEGY_ID,
+      strategy_version: STRATEGY_VERSION,
+      provider: "Binance",
+      created_at: receivedIso,
+      quote: {
+        price_basis: "last_completed_candle_close",
+        mid: latest.close,
+        bid: null,
+        ask: null,
+        provider_timestamp: eventTime,
+        collector_received_at: receivedIso,
+        quote_age_seconds: quoteAgeSeconds,
+      },
+      analysis: {
+        trend,
+        sma20,
+        sma50,
+        rsi14,
+        return_1m_pct: return1mPct,
+        completed_candles_used: completed.length,
+        rationale,
+        source_endpoint: BINANCE_BASE + "/api/v3/klines",
+        market_data_trust: "unverified_market_data",
+        evidence_credit: false,
+      },
+      risk: {
+        gate: "blocked_research_only",
+        proposed_position_size: 0,
+        order_authorized: false,
+        reason: "Unverified public market data; no validated paper-session runtime or owner release.",
+      },
+      paper_execution: {
+        enabled: false,
+        orders_created: 0,
+        positions_opened: 0,
+        live_execution: false,
+      },
+    };
+    const signalResult = await rpc("jarvis_ingest_market_signal", { p_signal: signal });
+    return json({
+      ok: true,
+      provider: "Binance public spot REST",
+      instrument: SYMBOL,
+      timeframe: INTERVAL,
+      observation: observationResult,
+      signal: signalResult,
+      analysis: { direction, trend, close: latest.close, sma20, sma50, rsi14, candle_time: eventTime, quote_age_seconds: quoteAgeSeconds },
+      trust: "candidate_unverified",
+      evidence_credit: false,
+      paper_execution: "disabled",
+      live_orders: 0,
+    }, 200);
+  } catch (error) {
+    return json({ error: error instanceof Error ? error.message : "market_analysis_failed" }, 502);
+  }
+});
