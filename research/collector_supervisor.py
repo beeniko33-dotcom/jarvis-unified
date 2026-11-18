@@ -406,9 +406,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument(
         "--command",
-        nargs="+",
+        nargs=argparse.REMAINDER,
         required=False,
-        help="Collector command to run (e.g. python -m research.deriv_feed --duration-seconds 3600 ...)",
+        help="Collector command and all child arguments; place every supervisor option before --command.",
     )
     parser.add_argument("--db", type=Path, required=True, help="SQLite database path")
     parser.add_argument(
