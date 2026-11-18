@@ -98,3 +98,33 @@ def test_market_data_proxy_uses_python_worker_keyword_options(monkeypatch):
 
 async def _async_value(value):
     return value
+
+def test_runtime_heartbeat_uses_secret_key_only_in_apikey_header(monkeypatch):
+    calls = []
+
+    async def fake_fetch(resource, **options):
+        calls.append((resource, options))
+        return UpstreamResponse()
+
+    module = load_worker(monkeypatch, fake_fetch)
+    worker = module.Default()
+    worker.env = SimpleNamespace(
+        SUPABASE_URL="https://project.supabase.co",
+        SUPABASE_SECRET_KEY="test-secret",
+    )
+
+    result = __import__("asyncio").run(worker._runtime_ingest({
+        "kind": "heartbeat",
+        "worker_id": "cloudflare-control-worker",
+        "worker_type": "cloudflare-python-worker",
+        "software_version": "control-plane-only-v1",
+        "health": "blocked",
+        "details": {"kill_switch_engaged": True},
+    }))
+
+    assert result == [{"accepted": True}]
+    resource, options = calls[0]
+    assert resource == "https://project.supabase.co/functions/v1/jarvis-runtime-ingest"
+    assert options["method"] == "POST"
+    assert options["headers"]["apikey"] == "test-secret"
+    assert "authorization" not in {key.lower() for key in options["headers"]}
