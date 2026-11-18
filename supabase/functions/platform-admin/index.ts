@@ -36,7 +36,7 @@ async function authorize(req: Request) {
     global: { headers: { Authorization: auth } },
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  const { data, error } = await userClient.auth.getUser();
+  const { data, error } = await userClient.auth.getUser(auth.slice('Bearer '.length));
   if (error || !data.user) return reply(req, 401, { error: "invalid or expired session" });
 
   const admin = createClient(url, serviceKey, {
