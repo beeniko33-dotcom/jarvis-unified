@@ -97,7 +97,7 @@ class PostgresPaperLedgerIntegrationTests(unittest.TestCase):
                     for each row execute function jarvis_private.{function_name}();
                 """)
         try:
-            with self.assertRaises(Exception):
+            with self.assertRaises(psycopg.Error):
                 self.store.commit_cycle(**self.cycle())
         finally:
             with psycopg.connect(DATABASE_URL, autocommit=True) as db:
