@@ -142,15 +142,14 @@ Deno.serve(async (req: Request) => {
   const machineAuthorized =
     (!!INGEST_TOKEN && tokenMatches(req.headers.get("x-jarvis-ingest-token") ?? "", INGEST_TOKEN)) ||
     tokenMatches(req.headers.get("apikey") ?? "", SERVICE_ROLE_KEY);
-  let userId = "";
-  if (!machineAuthorized) {
-    userId = await verifiedUserId(req);
-    if (!userId) return json({ error: "authenticated_operator_required" }, 401);
-    if (!(await isAllowlistedOperator(userId))) {
-      return json({ error: "operator_not_allowlisted" }, 403);
-    }
-  }
   try {
+    if (!machineAuthorized) {
+      const userId = await verifiedUserId(req);
+      if (!userId) return json({ error: "authenticated_operator_required" }, 401);
+      if (!(await isAllowlistedOperator(userId))) {
+        return json({ error: "operator_not_allowlisted" }, 403);
+      }
+    }
     const [clock, rawKlines] = await Promise.all([
       getJson(GATE_BASE + "/spot/time"),
       getJson(GATE_BASE + "/spot/candlesticks?currency_pair=" + PAIR + "&interval=" + INTERVAL + "&limit=100"),
