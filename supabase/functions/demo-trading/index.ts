@@ -35,27 +35,39 @@ async function authorize(req: Request) {
   return { user: data.user, admin };
 }
 async function market() {
+  const pairBySymbol: Record<string, string> = {
+    BTCUSDT: "BTC_USDT",
+    ETHUSDT: "ETH_USDT",
+    SOLUSDT: "SOL_USDT",
+  };
   const results = await Promise.all(SYMBOLS.map(async (symbol) => {
     try {
-      const pair = symbol.endsWith("USDT") ? symbol.slice(0, -4) + "_USDT" : symbol;
-      const response = await fetch(GATE + "/spot/trades?currency_pair=" + encodeURIComponent(pair) + "&limit=1", {
-        signal: AbortSignal.timeout(7000), cache: "no-store",
-        headers: { "accept": "application/json" },
-      });
+      const pair = pairBySymbol[symbol];
+      const response = await fetch(
+        GATE + "/spot/trades?currency_pair=" + pair + "&limit=10",
+        { signal: AbortSignal.timeout(7000), cache: "no-store" },
+      );
       if (!response.ok) throw new Error("provider_http_" + response.status);
       const rows = await response.json();
       if (!Array.isArray(rows) || !rows.length) throw new Error("trade_missing");
-      const trade = rows[rows.length - 1];
-      const price = Number(trade.price);
-      const tradeTime = Number(trade.create_time_ms ?? (Number(trade.create_time) * 1000));
-      if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(tradeTime) || tradeTime <= 0)
-        throw new Error("invalid_provider_trade");
-      const receivedAt = Date.now(), age = receivedAt - tradeTime;
+      const trades = rows.map((item: Record<string, unknown>) => {
+        const timeMs = Number(item.create_time_ms ?? (Number(item.create_time) * 1000));
+        const price = Number(item.price);
+        return { item, timeMs, price };
+      }).filter((trade: { item: Record<string, unknown>; timeMs: number; price: number }) =>
+        Number.isFinite(trade.timeMs) && trade.timeMs > 0 &&
+        Number.isFinite(trade.price) && trade.price > 0
+      );
+      if (!trades.length) throw new Error("invalid_provider_trade");
+      const trade = trades.reduce((latest: typeof trades[number], candidate: typeof trades[number]) =>
+        candidate.timeMs > latest.timeMs ? candidate : latest
+      );
+      const receivedAt = Date.now(), age = receivedAt - trade.timeMs;
       return {
         quote: {
-          symbol, price, provider: "Gate.io Spot", price_basis: "last_trade",
-          trade_id: String(trade.id ?? trade.sequence_id ?? ""),
-          provider_timestamp: new Date(tradeTime).toISOString(),
+          symbol, price: trade.price, provider: "Gate.io Spot", price_basis: "last_trade",
+          trade_id: String(trade.item.id ?? ""),
+          provider_timestamp: new Date(trade.timeMs).toISOString(),
           received_at: new Date(receivedAt).toISOString(), quote_age_ms: age,
           stale: age < -5000 || age > 30000,
         },
