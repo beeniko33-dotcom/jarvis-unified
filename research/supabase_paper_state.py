@@ -202,12 +202,16 @@ class SupabasePaperStateStore:
                     )
                     prior = cur.fetchone()
                     if prior:
-                        if prior[0] != account_id or prior[1] != input_hash or prior[2] != state_hash or prior[3] != "completed":
+                        # The deterministic run ID is bound to account + input fingerprint.
+                        # A retry may load a newer account snapshot after later cycles have
+                        # committed, so its proposed state hash can differ. A matching
+                        # account/input is still an idempotent no-op; never rewrite state.
+                        if prior[0] != account_id or prior[1] != input_hash or prior[3] != "completed":
                             raise PaperStateConflict("run_id already exists with different cycle content")
                         return {
                             "account_id": account_id, "run_id": run_uuid,
                             "revision": current_revision, "run_revision": int(prior[4]),
-                            "state_sha256": state_hash,
+                            "state_sha256": prior[2],
                             "duplicate": True, "mode": "paper",
                         }
                     if current_revision != expected_revision:
