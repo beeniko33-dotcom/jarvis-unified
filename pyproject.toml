@@ -12,7 +12,7 @@ dependencies = []
 [project.optional-dependencies]
 test = ["pytest>=8.0", "cryptography>=42,<47"]
 market-data = ["websocket-client>=1.8,<2", "signalrcore>=1.0.4,<2"]
-postgres = ["psycopg[binary]>=3.2,<4"]
+postgres = ["psycopg[binary]>=3.2,<4", "cryptography>=42,<47"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
