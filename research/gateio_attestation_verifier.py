@@ -93,10 +93,11 @@ def fetch_and_attest(
     server, server_raw = _get_json("/spot/time", opener=opener)
     if not isinstance(server, dict) or isinstance(server.get("server_time"), bool):
         raise ValueError("Gate.io server-time response is malformed")
-    server_seconds = int(server["server_time"])
-    if server_seconds <= 0:
-        raise ValueError("Gate.io server time must be positive")
-    server_time = datetime.fromtimestamp(server_seconds, timezone.utc)
+    server_time_ms = int(server["server_time"])
+    if server_time_ms < 1_000_000_000_000:
+        raise ValueError("Gate.io server time must be Unix milliseconds")
+    server_time = datetime.fromtimestamp(server_time_ms / 1000, timezone.utc)
+    server_seconds = server_time_ms // 1000
     clock_skew_ms = int((local_received - server_time).total_seconds() * 1000)
 
     query = urlencode({"currency_pair": symbol, "interval": "5m", "limit": 100})
@@ -105,7 +106,7 @@ def fetch_and_attest(
         raise ValueError("Gate.io candle response is malformed")
     parsed = []
     for row in candles:
-        if not isinstance(row, list) or len(row) < 7:
+        if not isinstance(row, list) or len(row) < 6:
             raise ValueError("Gate.io candle row is malformed")
         start = int(row[0])
         close = _positive_decimal(row[2], "candle close")
@@ -134,8 +135,12 @@ def fetch_and_attest(
     book, book_raw = _get_json("/spot/order_book?" + book_query, opener=opener)
     if not isinstance(book, dict) or not book.get("bids") or not book.get("asks"):
         raise ValueError("Gate.io order book is missing bid or ask")
-    bid = _positive_decimal(book["bids"][0].get("p"), "best bid")
-    ask = _positive_decimal(book["asks"][0].get("p"), "best ask")
+    best_bid, best_ask = book["bids"][0], book["asks"][0]
+    if (not isinstance(best_bid, list) or len(best_bid) < 2
+            or not isinstance(best_ask, list) or len(best_ask) < 2):
+        raise ValueError("Gate.io order-book levels must be price/quantity arrays")
+    bid = _positive_decimal(best_bid[0], "best bid")
+    ask = _positive_decimal(best_ask[0], "best ask")
     if bid > ask:
         raise ValueError("Gate.io order book is crossed")
 
