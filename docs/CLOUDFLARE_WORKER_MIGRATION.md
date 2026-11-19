@@ -5,16 +5,20 @@
 `cloudflare/worker.py` is the Cloudflare Python Worker entrypoint. A one-minute UTC Cron Trigger polls the existing Supabase command queue, atomically claims allowlisted commands, persists operator state in the existing `operator_status` row, and reports a heartbeat.
 
 Supported in this stage:
+- Five-minute Gate.io BTC/USDT read-only market analysis, invoked by the one-minute Worker Cron Trigger using the shared `JARVIS_INGEST_TOKEN`.
 - `pause_entries`
 - `resume_entries` only when the kill switch is already disengaged
 - `engage_kill_switch`
 
 `run_paper_session` is deliberately rejected with an explicit migration-pending reason. No local script is launched and no synthetic fills are represented as real market evidence.
 
+The market-analysis Edge Function has gateway JWT verification disabled only because its handler now performs authentication itself: machine requests must present the shared collector token; interactive requests are verified against Supabase Auth's `/auth/v1/user` endpoint and then checked against the operator allowlist. The handler does not trust decoded JWT claims. The existing service-role API-key scheduler remains supported.
+
 ## Required Cloudflare secrets
 
 Set these in the Cloudflare dashboard under Workers & Pages → jarvis-control-worker → Settings → Variables and Secrets:
 - `SUPABASE_SERVICE_ROLE_KEY` — store as a Secret, never as a plaintext variable.
+- `JARVIS_INGEST_TOKEN` — the same high-entropy secret configured for the Supabase `market-data-ingest` and `market-analysis` functions; store as a Worker Secret too.
 
 `SUPABASE_URL` is a non-secret variable in `wrangler.jsonc`. Do not commit service-role or secret API keys.
 
