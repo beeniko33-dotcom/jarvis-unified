@@ -32,6 +32,7 @@ Status: engineering specification only. This document does not enable or deploy 
 2. **Trust and eligibility gate**
    - Require source identity, retrieval timestamp, event timestamp, content hash, schema version, and deterministic validation result.
    - Keep `candidate_unverified` / `provenance_verified=false` observations at zero evidence credit.
+   - A boolean field in an observation is never proof of provenance. The cycle planner requires an Ed25519 signature over the canonical normalized observation, verified against a public key supplied by trusted runtime configuration (never a key embedded in the observation). The private signing key belongs only to the independently operated verifier; do not place it in the runner or GitHub repository.
    - Do not turn a research signal into a paper order unless a separately reviewed policy explicitly enables paper simulation and all risk checks pass.
    - Missing bid/ask must remain missing; do not relabel a candle close as an executable quote.
 
@@ -76,6 +77,7 @@ Status: engineering specification only. This document does not enable or deploy 
 - [ ] Duplicate replay produces exactly zero additional ledger events.
 - [ ] Crash/restart recovery and hash-chain verification pass.
 - [ ] Gate.io observation provenance independently validated; unverified observations remain ineligible.
+- [ ] Independent verifier key custody, rotation, revocation, and attestation issuance are reviewed before a trusted public key is configured.
 - [ ] Worker preview tested with exact Wrangler version, working directory, and config path recorded.
 - [ ] Cost estimate fits free-first target and hard ceiling of NGN 5,000/month.
 - [ ] Daily evidence package and reconciliation report verified.
