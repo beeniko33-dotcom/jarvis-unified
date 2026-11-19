@@ -93,16 +93,17 @@ class PaperStateBridgeTests(unittest.TestCase):
         ])
         self.assertEqual(events[1]["payload"]["previous_filled_quantity"], "0.002")
 
-    def test_commit_rejects_stale_remote_revision_before_write(self):
+    def test_revision_guard_is_delegated_to_atomic_store_for_retry_safety(self):
         store = Mock()
         store.load_account.return_value = {"mode": "paper", "revision": 4, "state": {"orders": []}}
         broker = self._valid_broker({"balance": "100", "positions": [], "orders": []})
-        with self.assertRaisesRegex(RuntimeError, "revision changed"):
-            commit_paper_cycle(
-                store, broker, account_id="acct", run_id="00000000-0000-0000-0000-000000000001",
-                expected_revision=3, input_fingerprint={"feed": "fixture"},
-            )
-        store.commit_cycle.assert_not_called()
+        store.commit_cycle.return_value = {"revision": 4, "duplicate": True}
+        result = commit_paper_cycle(
+            store, broker, account_id="acct", run_id="00000000-0000-0000-0000-000000000001",
+            expected_revision=3, input_fingerprint={"feed": "fixture"},
+        )
+        self.assertTrue(result["duplicate"])
+        self.assertEqual(store.commit_cycle.call_args.kwargs["expected_revision"], 3)
 
     def test_commit_fails_closed_on_bad_local_ledger(self):
         store, broker = Mock(), Mock()
