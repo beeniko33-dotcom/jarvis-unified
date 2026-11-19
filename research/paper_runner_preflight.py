@@ -38,7 +38,9 @@ def assess_preflight(
         if control_row.get("health") != "healthy":
             reasons.append("operator_health_not_healthy")
 
-    if account is not None and account.get("mode") != "paper":
+    if account is None:
+        reasons.append("paper_account_missing")
+    elif account.get("mode") != "paper":
         reasons.append("account_mode_not_paper")
     if ledger is None or ledger.get("verified") is not True:
         reasons.append("paper_ledger_not_verified")
