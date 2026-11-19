@@ -68,4 +68,4 @@ jobs:
                   cur.execute(migration, prepare=False)
           PY
       - name: Test atomic commits, duplicate replay, rollback, and restart recovery
-        run: python -m unittest -v tests/test_supabase_paper_state_postgres.py
+        run: python tests/test_supabase_paper_state_postgres.py -v
