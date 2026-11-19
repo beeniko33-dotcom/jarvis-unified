@@ -7,7 +7,7 @@ services:
     branch: main
     schedule: "*/5 * * * *"
     buildCommand: python -m pip install --upgrade pip && python -m pip install ".[postgres]"
-    startCommand: python -m scripts.run_paper_cycle_once
+    startCommand: timeout --signal=TERM --kill-after=5s 85s python -m scripts.run_paper_cycle_once
     autoDeployTrigger: checksPass
     envVars:
       - key: JARVIS_DATABASE_URL
@@ -18,3 +18,5 @@ services:
         value: "Bh/WkbS+GREuTi6QXHmg1zexR56tX+wxb7t3p93w3V8="
       - key: JARVIS_ATTESTED_OBSERVATION_URL
         value: "https://jarvis-gateio-attestor.beeniko33.workers.dev/v1/attestation"
+      - key: PYTHONUNBUFFERED
+        value: "1"
