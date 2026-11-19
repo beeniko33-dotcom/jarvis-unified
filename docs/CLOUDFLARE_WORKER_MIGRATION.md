@@ -17,7 +17,7 @@ The market-analysis Edge Function has gateway JWT verification disabled only bec
 ## Required Cloudflare secrets
 
 Set these in the Cloudflare dashboard under Workers & Pages → jarvis-control-worker → Settings → Variables and Secrets:
-- `SUPABASE_SERVICE_ROLE_KEY` — store as a Secret, never as a plaintext variable.
+- `SUPABASE_SECRET_KEY` — the project secret API key used by the Worker; store as a Secret, never as a plaintext variable.
 - `JARVIS_INGEST_TOKEN` — the same high-entropy secret configured for the Supabase `market-data-ingest` and `market-analysis` functions; store as a Worker Secret too.
 
 `SUPABASE_URL` is a non-secret variable in `wrangler.jsonc`. Do not commit service-role or secret API keys.
