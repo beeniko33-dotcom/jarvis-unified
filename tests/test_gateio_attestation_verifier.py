@@ -48,7 +48,7 @@ class VerifierTests(unittest.TestCase):
         if "/spot/candlesticks" in url:
             # Newest first as returned by Gate.io; create 60 completed candles.
             rows = []
-            end_now = int(self.now.timestamp() * 1000) // 300 * 300
+            end_now = int(self.now.timestamp()) // 300 * 300
             for i in reversed(range(1, 61)):
                 start = end_now - i * 300
                 rows.append([str(start), "100", str(100 + i), str(110 + i),
