@@ -118,6 +118,22 @@ class SupabasePaperStateTests(unittest.TestCase):
         self.assertEqual(result["revision"], 3)
         self.assertEqual(result["run_revision"], 1)
 
+    def test_duplicate_input_after_later_revision_ignores_new_snapshot_hash(self):
+        values = self.cycle()
+        import hashlib, json
+        encoded = json.dumps(values["input_fingerprint"], sort_keys=True, separators=(",", ":"))
+        input_hash = hashlib.sha256(encoded.encode()).hexdigest()
+        self.state["prior_run"] = (
+            values["account_id"], input_hash, "c" * 64, "completed", 1
+        )
+        self.state["account_row"] = (4,)
+        values["state"] = {"balance": "changed-by-later-cycle"}
+        result = self.store.commit_cycle(**values)
+        self.assertTrue(result["duplicate"])
+        self.assertEqual(result["revision"], 4)
+        self.assertEqual(result["run_revision"], 1)
+        self.assertEqual(result["state_sha256"], "c" * 64)
+
     def test_event_type_must_be_a_string(self):
         with self.assertRaisesRegex(ValueError, "safe string event_type"):
             self.store.commit_cycle(**self.cycle(events=[
