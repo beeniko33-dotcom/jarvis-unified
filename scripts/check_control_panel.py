@@ -46,7 +46,8 @@ def main() -> int:
     required = {
         "signin", "auth-form", "auth-email", "auth-password", "toggle-password",
         "page-chart", "page-forecast", "candle-canvas", "rsi-canvas",
-        "chart-symbol", "forecast-symbol", "signal-direction",
+        "chart-symbol", "chart-provider", "markets-provider", "market-search", "market-pairs-body",
+        "market-pair-count", "forecast-symbol", "signal-direction",
     }
     missing = sorted(required - parser.ids)
     if missing:
@@ -57,6 +58,14 @@ def main() -> int:
         raise SystemExit("A page link targets an unknown route")
     if "prefers-color-scheme" not in source or "prefers-reduced-motion" not in source:
         raise SystemExit("Browser accessibility and display preferences are not respected")
+    for feature in ("loadPairUniverse", "/spot/currency_pairs", "/spot/tickers",
+                    "/v5/market/instruments-info?category=spot", "/v5/market/tickers?category=spot",
+                    "history.replaceState({page:", "fitWorkspaceLayout", "ResizeObserver",
+                    "market-open-chart"):
+        if feature not in source:
+            raise SystemExit("Missing adaptive/auth/market-universe feature: " + feature)
+    if "document.documentElement.style.zoom" in source or "document.body.style.zoom" in source:
+        raise SystemExit("Workspace must reflow without overriding browser zoom")
     module = "".join(parser.module_script)
     if not module.strip():
         raise SystemExit("No application module script was found")
