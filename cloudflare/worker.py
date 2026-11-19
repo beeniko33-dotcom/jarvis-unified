@@ -20,6 +20,11 @@ def utc_now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def should_collect_market_analysis(now=None):
+    current = now or datetime.now(timezone.utc)
+    return current.minute % 5 == 0
+
+
 class Default(WorkerEntrypoint):
     def _headers(self, prefer=None):
         headers = {
@@ -81,13 +86,53 @@ class Default(WorkerEntrypoint):
             raise RuntimeError("runtime_ingest_http_" + str(response.status))
         return json.loads(raw) if raw else None
 
+    async def _collect_market_analysis(self):
+        collector_token = getattr(self.env, "JARVIS_INGEST_TOKEN", None)
+        if (not getattr(self.env, "SUPABASE_URL", None)
+                or not getattr(self.env, "SUPABASE_SECRET_KEY", None)
+                or not collector_token):
+            return {"status": "skipped_not_configured"}
+
+        target = self.env.SUPABASE_URL.rstrip("/") + "/functions/v1/market-analysis"
+        response = await fetch(
+            target,
+            method="POST",
+            headers={
+                "apikey": self.env.SUPABASE_SECRET_KEY,
+                "content-type": "application/json",
+                "x-jarvis-ingest-token": collector_token,
+            },
+            body="{}",
+        )
+        raw = await response.text()
+        if not response.ok:
+            raise RuntimeError("market_analysis_http_" + str(response.status))
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError):
+            raise RuntimeError("market_analysis_invalid_response")
+        if not isinstance(payload, dict) or payload.get("ok") is not True:
+            raise RuntimeError("market_analysis_not_confirmed")
+        # Log only bounded, non-secret outcome metadata; never emit the raw body.
+        return {
+            "status": "collected",
+            "provider": payload.get("provider"),
+            "instrument": payload.get("instrument"),
+            "timeframe": payload.get("timeframe"),
+            "trust": payload.get("trust"),
+            "evidence_credit": payload.get("evidence_credit"),
+            "live_orders": payload.get("live_orders"),
+        }
+
     async def _save_heartbeat(self, state, processed):
         health = "blocked" if state["kill_switch_engaged"] else (
             "degraded" if state["entries_paused"] else "healthy"
         )
         details = {
             "worker_type": "cloudflare-python-worker",
-            "runtime_stage": "control-plane-only",
+            "runtime_stage": "control-and-market-data-ingress",
+            "market_analysis_schedule": "*/5 * * * *",
+            "market_analysis_mode": "read_only",
             "paper_session_execution": "disabled_pending_postgres_migration",
             "processed": processed,
             "control_state": state,
@@ -115,7 +160,7 @@ class Default(WorkerEntrypoint):
                 "kind": "heartbeat",
                 "worker_id": WORKER_ID,
                 "worker_type": "cloudflare-python-worker",
-                "software_version": "control-plane-only-v1",
+                "software_version": "control-market-research-v2",
                 "git_commit": getattr(self.env, "JARVIS_GIT_COMMIT", None),
                 "health": health,
                 "details": details,
@@ -255,3 +300,16 @@ class Default(WorkerEntrypoint):
             frames = traceback.extract_tb(exc.__traceback__)[-5:]
             safe_frames = [{"file": frame.filename.rsplit("/", 1)[-1], "line": frame.lineno, "function": frame.name} for frame in frames]
             print(json.dumps({"event": "cron_failed", "error_type": type(exc).__name__, "frames": safe_frames}, separators=(",", ":")))
+
+        # The one-minute Worker cron drives the Gate.io five-minute read-only
+        # collector. Keep collection failure independent of command/heartbeat
+        # processing, and never let it change the paper execution safety state.
+        if should_collect_market_analysis():
+            try:
+                result = await self._collect_market_analysis()
+                print(json.dumps({"event": "market_analysis_complete", **result}, separators=(",", ":")))
+            except Exception as exc:
+                print(json.dumps({
+                    "event": "market_analysis_failed",
+                    "error_type": type(exc).__name__,
+                }, separators=(",", ":")))

@@ -3,7 +3,10 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SECRET_KEYS = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}");
 const SERVICE_ROLE_KEY = SECRET_KEYS.default ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SERVICE_ROLE_KEY") ?? "";
-const BINANCE_BASE = "https://data-api.binance.vision";
+const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+const INGEST_TOKEN = Deno.env.get("JARVIS_INGEST_TOKEN") ?? "";
+const GATE_BASE = "https://api.gateio.ws/api/v4";
+const PAIR = "BTC_USDT";
 const SYMBOL = "BTCUSDT";
 const INTERVAL = "5m";
 const STRATEGY_ID = "btc-5m-sma20-sma50-rsi14-wilder";
@@ -42,20 +45,18 @@ function tokenMatches(supplied: string, expected: string): boolean {
   return difference === 0;
 }
 
-function jwtClaims(req: Request): { role: string; sub: string } {
-  const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
-  const parts = token.split(".");
-  if (parts.length !== 3) return { role: "", sub: "" };
-  try {
-    const normalized = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const payload = JSON.parse(atob(normalized));
-    return {
-      role: typeof payload.role === "string" ? payload.role : "",
-      sub: typeof payload.sub === "string" ? payload.sub : "",
-    };
-  } catch {
-    return { role: "", sub: "" };
-  }
+async function verifiedUserId(req: Request): Promise<string> {
+  const authorization = req.headers.get("authorization") ?? "";
+  if (!authorization.startsWith("Bearer ") || !SUPABASE_URL || !ANON_KEY) return "";
+  const baseUrl = SUPABASE_URL.endsWith("/") ? SUPABASE_URL.slice(0, -1) : SUPABASE_URL;
+  const response = await fetch(baseUrl + "/auth/v1/user", {
+    method: "GET",
+    headers: { "apikey": ANON_KEY, "authorization": authorization },
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!response.ok) return "";
+  const user = await response.json();
+  return user && typeof user.id === "string" ? user.id : "";
 }
 async function isAllowlistedOperator(userId: string): Promise<boolean> {
   const url = SUPABASE_URL.replace(/\/$/, "") +
@@ -98,17 +99,18 @@ function rsi(values: number[], period = 14): number {
   const rs = avgGain / avgLoss;
   return 100 - 100 / (1 + rs);
 }
-function parseCandle(row: unknown): { openTime: number; closeTime: number; open: number; high: number; low: number; close: number; volume: number; trades: number } {
-  if (!Array.isArray(row) || row.length < 9) throw new Error("malformed_kline");
+function parseCandle(row: unknown): { openTime: number; closeTime: number; open: number; high: number; low: number; close: number; volume: number; quoteVolume: number } {
+  if (!Array.isArray(row) || row.length < 7) throw new Error("malformed_gate_candle");
+  const openTime = number(row[0], "open_time") * 1000;
   const c = {
-    openTime: number(row[0], "open_time"),
-    open: number(row[1], "open"),
-    high: number(row[2], "high"),
-    low: number(row[3], "low"),
-    close: number(row[4], "close"),
-    volume: number(row[5], "volume"),
-    closeTime: number(row[6], "close_time"),
-    trades: number(row[8], "trade_count"),
+    openTime,
+    closeTime: openTime + 300_000,
+    quoteVolume: number(row[1], "quote_volume"),
+    close: number(row[2], "close"),
+    high: number(row[3], "high"),
+    low: number(row[4], "low"),
+    open: number(row[5], "open"),
+    volume: number(row[6], "volume"),
   };
   if (c.open <= 0 || c.high <= 0 || c.low <= 0 || c.close <= 0 || c.volume < 0 ||
       c.high < Math.max(c.open, c.close, c.low) || c.low > Math.min(c.open, c.close, c.high)) {
@@ -133,32 +135,34 @@ async function rpc(name: string, body: unknown): Promise<any> {
 
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-  const caller = jwtClaims(req);
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY) return json({ error: "server_not_configured" }, 503);
-  // Supabase's newer sb_secret API keys are opaque, not JWTs. GitHub Actions
-  // supplies the machine key in the apikey header; compare it to the server-only
-  // secret and keep ordinary authenticated callers on the operator allowlist.
-  const machineAuthorized = tokenMatches(req.headers.get("apikey") ?? "", SERVICE_ROLE_KEY);
-  if (caller.role !== "authenticated" && caller.role !== "service_role" && !machineAuthorized) {
-    return json({ error: "authenticated_operator_required" }, 403);
-  }
+  // Machine callers use a dedicated shared collector token; the service-role
+  // key fallback preserves the existing GitHub Actions scheduler. Both checks
+  // are performed inside the function because gateway JWT verification is off.
+  const machineAuthorized =
+    (!!INGEST_TOKEN && tokenMatches(req.headers.get("x-jarvis-ingest-token") ?? "", INGEST_TOKEN)) ||
+    tokenMatches(req.headers.get("apikey") ?? "", SERVICE_ROLE_KEY);
   try {
-    if (!machineAuthorized && caller.role !== "service_role" && (!caller.sub || !(await isAllowlistedOperator(caller.sub)))) {
-      return json({ error: "operator_not_allowlisted" }, 403);
+    if (!machineAuthorized) {
+      const userId = await verifiedUserId(req);
+      if (!userId) return json({ error: "authenticated_operator_required" }, 401);
+      if (!(await isAllowlistedOperator(userId))) {
+        return json({ error: "operator_not_allowlisted" }, 403);
+      }
     }
     const [clock, rawKlines] = await Promise.all([
-      getJson(BINANCE_BASE + "/api/v3/time"),
-      getJson(BINANCE_BASE + "/api/v3/klines?symbol=" + SYMBOL + "&interval=" + INTERVAL + "&limit=100"),
+      getJson(GATE_BASE + "/spot/time"),
+      getJson(GATE_BASE + "/spot/candlesticks?currency_pair=" + PAIR + "&interval=" + INTERVAL + "&limit=100"),
     ]);
     const receivedAt = Date.now();
-    const serverTime = number(clock.serverTime, "server_time");
+    const serverTime = number(clock.server_time, "server_time");
     if (!Array.isArray(rawKlines) || rawKlines.length < 60) throw new Error("insufficient_provider_candles");
-    const parsed = rawKlines.map(parseCandle);
-    const completed = parsed.filter(c => c.closeTime < serverTime);
+    const parsed = rawKlines.map(parseCandle).sort((a, b) => a.openTime - b.openTime);
+    const completed = parsed.filter(c => c.closeTime <= serverTime);
     if (completed.length < 60) throw new Error("insufficient_completed_candles");
     const latest = completed[completed.length - 1];
     const ageMs = serverTime - latest.closeTime;
-    if (ageMs < -5_000 || ageMs > MAX_AGE_MS) throw new Error("latest_completed_candle_stale_or_future");
+    if (ageMs < 0 || ageMs > MAX_AGE_MS) throw new Error("latest_completed_candle_stale_or_future");
     if (Math.abs(receivedAt - serverTime) > 30_000) throw new Error("local_clock_skew_exceeds_30s");
 
     const closes = completed.map(c => c.close);
@@ -178,23 +182,25 @@ Deno.serve(async (req: Request) => {
       rationale = "SMA20 is below SMA50, close is below SMA20, and RSI14 is in the non-extreme bearish band.";
     }
 
-    const rawPayload = { klines: rawKlines };
+    const rawPayload = { candles: rawKlines };
     const digest = await sha256(canonical(rawPayload));
     const eventTime = new Date(latest.closeTime).toISOString();
     const receivedIso = new Date(receivedAt).toISOString();
     const quoteAgeSeconds = Math.max(0, (serverTime - latest.closeTime) / 1000);
     const observation = {
-      source_id: "binance-spot-public-rest:" + SYMBOL,
+      source_id: "gateio-spot-public-rest:" + PAIR,
       event_time: eventTime,
       received_at: receivedIso,
-      symbol: SYMBOL,
+      symbol: "BTCUSDT",
       timeframe: INTERVAL,
       schema_version: 1,
       content_hash: digest,
       values_json: {
-        provider: "Binance",
-        provider_endpoint: BINANCE_BASE + "/api/v3/klines",
+        provider: "Gate.io",
+        provider_endpoint: GATE_BASE + "/spot/candlesticks",
+        provider_pair: PAIR,
         market_type: "spot",
+        klines: rawKlines,
         candle: { ...latest, open_time: new Date(latest.openTime).toISOString(), close_time: eventTime },
         indicators: { sma20, sma50, rsi14, return_5m_pct: return5mPct, trend },
         quote_age_seconds: quoteAgeSeconds,
@@ -212,14 +218,14 @@ Deno.serve(async (req: Request) => {
     };
     const observationResult = await rpc("jarvis_ingest_market_observations", { p_observations: [observation] });
     const signal = {
-      idempotency_key: "binance-btc-5m-sma20-50-rsi14:" + latest.closeTime,
+      idempotency_key: "gateio-btc-5m-sma20-50-rsi14:" + latest.closeTime,
       instrument: SYMBOL,
       asset_class: "crypto",
       direction,
       timeframe: INTERVAL,
       strategy_id: STRATEGY_ID,
       strategy_version: STRATEGY_VERSION,
-      provider: "Binance",
+      provider: "Gate.io",
       created_at: receivedIso,
       quote: {
         price_basis: "last_completed_candle_close",
@@ -238,7 +244,7 @@ Deno.serve(async (req: Request) => {
         return_5m_pct: return5mPct,
         completed_candles_used: completed.length,
         rationale,
-        source_endpoint: BINANCE_BASE + "/api/v3/klines",
+        source_endpoint: GATE_BASE + "/spot/candlesticks",
         market_data_trust: "unverified_market_data",
         evidence_credit: false,
       },
@@ -258,7 +264,7 @@ Deno.serve(async (req: Request) => {
     const signalResult = await rpc("jarvis_ingest_market_signal", { p_signal: signal });
     return json({
       ok: true,
-      provider: "Binance public spot REST",
+      provider: "Gate.io public spot REST",
       instrument: SYMBOL,
       timeframe: INTERVAL,
       observation: observationResult,
