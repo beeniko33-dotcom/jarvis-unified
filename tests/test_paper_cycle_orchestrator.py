@@ -56,7 +56,7 @@ class FakeStore:
     def commit_cycle(self, **values):
         prior = self.runs.get(values["run_id"])
         if prior:
-            if prior["state"] != values["state"] or prior["input_fingerprint"] != values["input_fingerprint"]:
+            if prior["input_fingerprint"] != values["input_fingerprint"]:
                 raise PaperStateConflict("conflicting deterministic replay")
             return {**prior["result"], "duplicate": True, "revision": self.account["revision"]}
         expected = self.account["revision"] if self.account else 0
@@ -103,6 +103,23 @@ def test_eligible_cycle_commits_research_event_only():
     assert result["order_authorized"] is False
     assert result["orders_submitted"] == 0
     assert result["execution_started"] is False
+
+
+def test_replay_after_a_later_cycle_does_not_duplicate_or_overwrite_state():
+    store = FakeStore()
+    kwargs = {"store": store, "account_id": "disposable-test",
+              "observation": observation(), "controls": controls(),
+              "trusted_verifier_public_key": PUBLIC_KEY, "now": NOW}
+    first = run_once(**kwargs)
+    store.account["revision"] = 2
+    store.account["state"] = {"schema_version": 1, "later_cycle": "preserved"}
+    replay = run_once(**kwargs)
+    assert replay["run_id"] == first["run_id"]
+    assert replay["duplicate"] is True
+    assert replay["revision"] == 2
+    assert store.commits == 1
+    assert store.account["state"] == {"schema_version": 1, "later_cycle": "preserved"}
+    assert len(store.events) == 1
 
 
 def test_same_observation_replay_uses_same_run_and_adds_no_event():
