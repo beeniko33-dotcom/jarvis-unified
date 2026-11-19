@@ -17,9 +17,14 @@ DATABASE_URL = os.environ.get("JARVIS_TEST_DATABASE_URL")
 
 @unittest.skipUnless(DATABASE_URL, "requires disposable PostgreSQL service")
 class PostgresPaperLedgerIntegrationTests(unittest.TestCase):
+    def connect(self):
+        # The adapter correctly requires TLS for hosted Supabase. This isolated
+        # localhost-only CI service has no TLS, so inject an explicit test factory.
+        return psycopg.connect(DATABASE_URL, sslmode="disable")
+
     def setUp(self):
         self.account_id = "it-" + uuid4().hex
-        self.store = SupabasePaperStateStore(dsn=DATABASE_URL)
+        self.store = SupabasePaperStateStore(connection_factory=self.connect)
 
     def cycle(self, *, run_id=None, revision=0, state=None, fingerprint=None):
         return {
@@ -36,7 +41,7 @@ class PostgresPaperLedgerIntegrationTests(unittest.TestCase):
         result = self.store.commit_cycle(**self.cycle())
         self.assertEqual(result["revision"], 1)
         self.assertFalse(result["duplicate"])
-        recovered = SupabasePaperStateStore(dsn=DATABASE_URL).load_account(self.account_id)
+        recovered = SupabasePaperStateStore(connection_factory=self.connect).load_account(self.account_id)
         self.assertEqual(recovered["revision"], 1)
         self.assertEqual(recovered["state"]["marker"], "initial")
         ledger = self.store.verify_ledger(self.account_id)
