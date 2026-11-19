@@ -42,13 +42,18 @@ def _get_json(path: str, *, opener: Callable = urlopen, timeout: float = 10):
         BASE_URL + path,
         headers={"Accept": "application/json", "User-Agent": "JarvisIndependentVerifier/1.0"},
     )
-    with opener(request, timeout=timeout) as response:
+    response = opener(request, timeout=timeout)
+    try:
         if getattr(response, "status", 200) != 200:
             raise RuntimeError(f"Gate.io public API returned HTTP {response.status}")
         # Refuse redirects away from the exact Gate.io API host.
         if response.geturl().split("/")[2].lower() != "api.gateio.ws":
             raise RuntimeError("Gate.io API redirected to an unexpected host")
         raw = response.read()
+    finally:
+        close = getattr(response, "close", None)
+        if callable(close):
+            close()
     return json.loads(raw), raw
 
 
