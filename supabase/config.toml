@@ -4,3 +4,8 @@ project_id = "zythldptlplyutphgxpg"
 # in its handler using a constant-time comparison.
 [functions.jarvis-runtime-ingest]
 verify_jwt = false
+
+# The handler performs its own machine-token check and validates user sessions
+# through the Supabase Auth user endpoint before checking the operator allowlist.
+[functions.market-analysis]
+verify_jwt = false
