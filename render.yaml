@@ -1,0 +1,20 @@
+services:
+  - type: cron
+    name: jarvis-unified-paper-cycle
+    runtime: python
+    region: frankfurt
+    plan: 0.5c-512mb
+    branch: main
+    schedule: "*/5 * * * *"
+    buildCommand: python -m pip install --upgrade pip && python -m pip install ".[postgres]"
+    startCommand: python -m scripts.run_paper_cycle_once
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: JARVIS_DATABASE_URL
+        sync: false
+      - key: JARVIS_PAPER_ACCOUNT_ID
+        sync: false
+      - key: JARVIS_GATEIO_VERIFIER_PUBLIC_KEY_B64
+        value: "Bh/WkbS+GREuTi6QXHmg1zexR56tX+wxb7t3p93w3V8="
+      - key: JARVIS_ATTESTED_OBSERVATION_URL
+        value: "https://jarvis-gateio-attestor.beeniko33.workers.dev/v1/attestation"
