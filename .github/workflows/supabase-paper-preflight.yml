@@ -98,6 +98,24 @@ jobs:
               raise SystemExit(1)
           PY
 
+      - name: Confirm one-shot runner reads controls without market fetch or writes
+        env:
+          JARVIS_RUNNER_PREFLIGHT_ONLY: "1"
+          JARVIS_PAPER_ACCOUNT_ID: "preflight-only-no-write"
+        run: |
+          python -m pip install "cryptography==46.0.7"
+          python -m scripts.run_paper_cycle_once > /tmp/jarvis-runner-preflight.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path("/tmp/jarvis-runner-preflight.json").read_text())
+          assert result["status"] == "preflight_only"
+          assert result["market_fetch_performed"] is False
+          assert result["paper_state_write_performed"] is False
+          assert result["orders_submitted"] == 0
+          print(json.dumps(result, sort_keys=True))
+          PY
+
       - name: Confirm paper-only code path is present
         run: |
           python -c "from research.supabase_paper_state import SupabasePaperStateStore; print('Paper-state store import: OK')"
