@@ -167,8 +167,10 @@ class SupabasePaperStateStore:
         now = now.astimezone(timezone.utc)
         prepared = []
         for event in events:
-            if not isinstance(event, dict) or not _EVENT_TYPE.fullmatch(str(event.get("event_type", ""))):
-                raise ValueError("each ledger event needs a safe event_type")
+            if (not isinstance(event, dict)
+                    or not isinstance(event.get("event_type"), str)
+                    or not _EVENT_TYPE.fullmatch(event["event_type"])):
+                raise ValueError("each ledger event needs a safe string event_type")
             payload = event.get("payload", {})
             payload_json, _ = _validate_json(payload, max_bytes=16384)
             occurred_at = event.get("occurred_at", now)
@@ -194,7 +196,7 @@ class SupabasePaperStateStore:
                     row = cur.fetchone()
                     current_revision = int(row[0]) if row else 0
                     cur.execute(
-                        """select account_id, input_sha256, state_sha256, status
+                        """select account_id, input_sha256, state_sha256, status, revision_after
                            from jarvis_private.paper_runs where run_id = %s""",
                         (run_uuid,),
                     )
@@ -204,7 +206,8 @@ class SupabasePaperStateStore:
                             raise PaperStateConflict("run_id already exists with different cycle content")
                         return {
                             "account_id": account_id, "run_id": run_uuid,
-                            "revision": current_revision, "state_sha256": state_hash,
+                            "revision": current_revision, "run_revision": int(prior[4]),
+                            "state_sha256": state_hash,
                             "duplicate": True, "mode": "paper",
                         }
                     if current_revision != expected_revision:
@@ -265,8 +268,8 @@ class SupabasePaperStateStore:
                         )
         return {
             "account_id": account_id, "run_id": run_uuid,
-            "revision": expected_revision + 1, "state_sha256": state_hash,
-            "duplicate": False, "mode": "paper",
+            "revision": expected_revision + 1, "run_revision": expected_revision + 1,
+            "state_sha256": state_hash, "duplicate": False, "mode": "paper",
         }
     
     def verify_ledger(self, account_id: str) -> dict:
