@@ -200,10 +200,13 @@ def test_market_analysis_collector_skips_when_machine_token_is_missing(monkeypat
     assert calls == []
 
 
-def test_market_analysis_schedule_runs_every_five_minutes():
+def test_market_analysis_schedule_runs_every_five_minutes(monkeypatch):
     from datetime import datetime, timezone
 
-    module = load_worker(__import__("pytest").MonkeyPatch(), lambda *a, **k: None)
+    async def fake_fetch(resource, **options):
+        return UpstreamResponse()
+
+    module = load_worker(monkeypatch, fake_fetch)
     assert module.should_collect_market_analysis(datetime(2026, 11, 19, 6, 10, tzinfo=timezone.utc))
     assert module.should_collect_market_analysis(datetime(2026, 11, 19, 6, 15, tzinfo=timezone.utc))
     assert not module.should_collect_market_analysis(datetime(2026, 11, 19, 6, 11, tzinfo=timezone.utc))
