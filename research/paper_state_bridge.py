@@ -102,9 +102,6 @@ def commit_paper_cycle(
     if previous is not None and previous.get("mode") != "paper":
         raise RuntimeError("refusing to append to a non-paper account")
     previous_state = previous["state"] if previous else None
-    if previous is not None and int(previous["revision"]) != expected_revision:
-        raise RuntimeError("remote paper account revision changed; restore and reconcile before commit")
-
     state = broker.export_state()
     events = _order_events(previous_state, state)
     events.append({
