@@ -78,6 +78,7 @@ Status: engineering specification only. This document does not enable or deploy 
 - [ ] Crash/restart recovery and hash-chain verification pass.
 - [ ] Gate.io observation provenance independently validated; unverified observations remain ineligible.
 - [ ] Independent verifier key custody, rotation, revocation, and attestation issuance are reviewed before a trusted public key is configured.
+- [ ] Verifier integration tests prove 50 contiguous candles, signed best bid/ask, TLS host validation, and tamper rejection; no private key is present in runner or CI.
 - [ ] Worker preview tested with exact Wrangler version, working directory, and config path recorded.
 - [ ] Cost estimate fits free-first target and hard ceiling of NGN 5,000/month.
 - [ ] Daily evidence package and reconciliation report verified.

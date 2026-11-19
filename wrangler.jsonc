@@ -1,0 +1,26 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
+  "name": "jarvis-control-worker",
+  "main": "cloudflare/worker.py",
+  "compatibility_date": "2026-11-17",
+  "compatibility_flags": [
+    "python_workers",
+    "disable_python_external_sdk"
+  ],
+  "observability": {
+    "enabled": true,
+    "traces": {
+      "enabled": true
+    }
+  },
+  "vars": {
+    "SUPABASE_URL": "https://zythldptlplyutphgxpg.supabase.co"
+  },
+  "triggers": {
+    "crons": [
+      "*/1 * * * *"
+    ]
+  },
+  "previews": {},
+  "preview_urls": true
+}

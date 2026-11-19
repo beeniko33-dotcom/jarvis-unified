@@ -31,6 +31,12 @@ jobs:
           python -m pip install -r requirements-lock.txt
           python -m pip check
 
+      - name: Validate root Wrangler preview configuration
+        run: python scripts/check_wrangler_preview_config.py
+
+      - name: Smoke-test isolated Cloudflare Worker Preview
+        run: python scripts/verify_worker_preview.py
+
       - name: Run unit test suite
         run: python -m unittest discover -s tests -v
 
