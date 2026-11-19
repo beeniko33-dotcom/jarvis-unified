@@ -116,6 +116,15 @@ def test_malformed_market_data_blocks(change, reason):
     assert result["orders_submitted"] == 0
 
 
+def test_recent_completed_five_minute_candle_remains_eligible():
+    event = NOW - timedelta(seconds=240)
+    result = plan_cycle(
+        observation(event_time=event.isoformat()), controls(),
+        trusted_verifier_public_key=PUBLIC_KEY, now=NOW,
+    )
+    assert result["status"] == "eligible_for_research_decision"
+
+
 def test_stale_observation_blocks():
     old = NOW - timedelta(minutes=10)
     result = plan_cycle(
