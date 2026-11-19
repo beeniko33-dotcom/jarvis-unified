@@ -54,7 +54,6 @@ def _order_events(previous_state: dict | None, current_state: dict) -> list[dict
             if filled not in {"0", "0.0", "0.00"}:
                 events.append({
                     "event_type": "order.filled" if common["status"] == "filled" else "order.partially_filled",
-                    "occurred_at": order.get("created_at"),
                     "payload": common,
                 })
             continue
@@ -64,13 +63,11 @@ def _order_events(previous_state: dict | None, current_state: dict) -> list[dict
         if prior.get("status") != common["status"]:
             events.append({
                 "event_type": "order.status_changed",
-                "occurred_at": order.get("created_at"),
                 "payload": {**common, "previous_status": prior.get("status")},
             })
         if old_filled != new_filled:
             events.append({
                 "event_type": "order.fill_updated",
-                "occurred_at": order.get("created_at"),
                 "payload": {
                     **common,
                     "previous_filled_quantity": old_filled,
