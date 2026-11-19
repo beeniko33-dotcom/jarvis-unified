@@ -120,3 +120,35 @@ Do not assume Cloudflare Worker is the correct host for the Python/Postgres runn
 - The eventual Cron build must install the Postgres extra (for example `pip install '.[postgres]'`) and pin its Python/runtime dependencies. It must use Supabase Postgres for durable state; Render Cron has no persistent disk.
 - Required environment variables must be allowlisted and validated at startup. The runner may receive only the pinned verifier public key and a TLS Postgres connection string; never the verifier private key or Gate.io private trading credentials.
 - Deployment remains blocked pending the runner entrypoint, external verifier key custody/rotation/revocation, real read-only Gate.io endpoint validation, and a confirmed Render workspace/billing limit. No Render service or production schedule was created.
+
+
+## Independent Gate.io attestor and one-shot runner (2026-11-19)
+
+### Signing-key custody
+
+- A dedicated Cloudflare Worker named `jarvis-gateio-attestor` now holds the Ed25519 signing private key as a Cloudflare `secret_key` binding named `JARVIS_GATEIO_SIGNING_KEY`. The key is imported as a non-exportable runtime `CryptoKey`; its value is not returned by the secret-binding API and is not stored in GitHub, Supabase, the runner, or the repository.
+- The corresponding raw Ed25519 public key is pinned in `config/gateio-verifier-public-key.b64`. SHA-256 fingerprint: `42936b2d597262781bed1e7ebbe895cdbc53e578916cf83ba66218a907a30cd5`.
+- Public endpoint: `https://jarvis-gateio-attestor.beeniko33.workers.dev/v1/attestation`. It accepts GET only, fetches fixed BTC_USDT public spot endpoints, and returns a signed snapshot. It has no private exchange API, order, wallet, database-write, or operator-control functionality.
+- The endpoint is public because the payload contains only public market data. Do not send it secrets or account information. Add an authenticated access gate/rate limit before increasing usage or relying on it as a shared production service.
+- Rotation/revocation is not automated. For an emergency revoke, disable the Worker subdomain and remove/replace the secret binding; then replace the pinned public key in a reviewed change and update runner configuration. Keep evidence credit false until key identity, rotation, revocation, and independent review are formally accepted.
+
+### Live verification
+
+- `scripts/verify_gateio_attestor_live.py` fetches the Worker endpoint, checks its host, verifies the Ed25519 signature using the repository-pinned public key, and passes the observation through the research planner with synthetic healthy controls. It does not connect to Supabase or write paper state.
+- Live GitHub Actions run #4, `44584259445`, succeeded on 2026-11-19. It received BTC_USDT 5m public data, verified the signature, and returned a non-executable `EXIT_CANDIDATE`. `orders_submitted=0`, `provenance_verified=false`, and `evidence_credit=false`.
+- This is a successful live feed/signature check, not permission to trade and not a 30-day forward-validation sample.
+
+### One-shot Postgres runner
+
+- Entrypoint: `python -m scripts.run_paper_cycle_once`.
+- Required environment: `JARVIS_DATABASE_URL` (TLS required), `JARVIS_PAPER_ACCOUNT_ID`, and optionally `JARVIS_GATEIO_VERIFIER_PUBLIC_KEY_B64` (otherwise the pinned repository key is used).
+- The default signed-snapshot URL is the pinned Cloudflare attestor endpoint. An alternate file input is supported for isolated tests only.
+- Before fetching market data or loading a paper account, the runner reads the latest `public.operator_status` row for `cloudflare-control-worker`. Missing, stale (>180 seconds), unhealthy, non-paper, kill-switch-engaged, or entry-paused controls exit blocked with no account/ledger write.
+- When controls permit, the runner fetches one signed observation, validates the attestation in the planner, verifies account/ledger integrity, commits one research-only event atomically, prints a sanitized report, and exits.
+- It never submits orders or changes operator controls. The production controls were last observed as `health=blocked`, `mode=paper`, `kill_switch_engaged=true`, `entries_paused=true`; therefore a production invocation currently exits blocked before any market fetch or commit.
+
+### Release and hosting
+
+- Disposable Postgres integration run #14 and the live attestor run #4 are separate checks. The full CI run for the latest runner commit is pending at time of this documentation update.
+- Render Cron is not provisioned. The repository has a dedicated one-shot entrypoint now, but actual Render workspace plan, payment method, spending controls, and account-level monthly cap cannot be verified until the Render connection is authorized.
+- Budget estimate remains a planning estimate: 8,640 monthly runs at 1 minute each = 8,640 active minutes, about USD 1.38/month at the published compute rate, before taxes/FX/payment fees. The service must enforce a monthly spend stop and average runtime below approximately 2.68 minutes per five-minute run to stay within NGN 5,000 at the indicative FX rate.
