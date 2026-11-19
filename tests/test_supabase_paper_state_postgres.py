@@ -4,7 +4,10 @@ import os
 import unittest
 from uuid import uuid4
 
-import psycopg
+try:
+    import psycopg
+except ImportError:  # Optional dependency; installed only by the disposable-Postgres workflow.
+    psycopg = None
 
 from research.supabase_paper_state import (
     PaperStateConflict,
@@ -15,7 +18,7 @@ from research.supabase_paper_state import (
 DATABASE_URL = os.environ.get("JARVIS_TEST_DATABASE_URL")
 
 
-@unittest.skipUnless(DATABASE_URL, "requires disposable PostgreSQL service")
+@unittest.skipUnless(DATABASE_URL and psycopg, "requires disposable PostgreSQL service and psycopg")
 class PostgresPaperLedgerIntegrationTests(unittest.TestCase):
     def connect(self):
         # The adapter correctly requires TLS for hosted Supabase. This isolated
