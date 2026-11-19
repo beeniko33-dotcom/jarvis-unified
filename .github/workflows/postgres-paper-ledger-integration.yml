@@ -1,0 +1,71 @@
+name: Disposable Postgres paper-ledger integration
+
+on:
+  pull_request:
+    paths:
+      - "research/supabase_paper_state.py"
+      - "research/paper_cycle_orchestrator.py"
+      - "supabase/migrations/20261116190000_durable_paper_state.sql"
+      - "tests/test_supabase_paper_state_postgres.py"
+      - ".github/workflows/postgres-paper-ledger-integration.yml"
+  push:
+    branches: [main]
+    paths:
+      - "research/supabase_paper_state.py"
+      - "research/paper_cycle_orchestrator.py"
+      - "supabase/migrations/20261116190000_durable_paper_state.sql"
+      - "tests/test_supabase_paper_state_postgres.py"
+      - ".github/workflows/postgres-paper-ledger-integration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-ledger:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: jarvis_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d jarvis_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      JARVIS_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/jarvis_test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install pinned project test and Postgres dependencies
+        run: python -m pip install -e ".[test,postgres]"
+      - name: Bootstrap isolated PostgreSQL roles and schema
+        run: |
+          python - <<'PY'
+          import os
+          import psycopg
+          from pathlib import Path
+
+          with psycopg.connect(os.environ["JARVIS_TEST_DATABASE_URL"], autocommit=True) as db:
+              with db.cursor() as cur:
+                  for role in ("anon", "authenticated", "service_role"):
+                      cur.execute(
+                          f"DO $$ BEGIN CREATE ROLE {role}; "
+                          f"EXCEPTION WHEN duplicate_object THEN NULL; END $$;"
+                      )
+                  cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+                  cur.execute("CREATE SCHEMA IF NOT EXISTS jarvis_private")
+                  migration = Path("supabase/migrations/20261116190000_durable_paper_state.sql").read_text()
+                  cur.execute(migration, prepare=False)
+          PY
+      - name: Test atomic commits, duplicate replay, rollback, and restart recovery
+        run: python -m unittest -v tests/test_supabase_paper_state_postgres.py
