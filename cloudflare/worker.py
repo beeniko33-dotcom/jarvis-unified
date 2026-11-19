@@ -130,7 +130,9 @@ class Default(WorkerEntrypoint):
         )
         details = {
             "worker_type": "cloudflare-python-worker",
-            "runtime_stage": "control-plane-only",
+            "runtime_stage": "control-and-market-data-ingress",
+            "market_analysis_schedule": "*/5 * * * *",
+            "market_analysis_mode": "read_only",
             "paper_session_execution": "disabled_pending_postgres_migration",
             "processed": processed,
             "control_state": state,
@@ -158,7 +160,7 @@ class Default(WorkerEntrypoint):
                 "kind": "heartbeat",
                 "worker_id": WORKER_ID,
                 "worker_type": "cloudflare-python-worker",
-                "software_version": "control-plane-only-v1",
+                "software_version": "control-market-research-v2",
                 "git_commit": getattr(self.env, "JARVIS_GIT_COMMIT", None),
                 "health": health,
                 "details": details,
