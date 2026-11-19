@@ -59,6 +59,10 @@ class ExposureReservationStore:
         with closing(self._connect()) as db:
             self._enable_wal(db)
             db.execute("PRAGMA synchronous=FULL")
+            # Serialize schema creation and additive migrations across processes.
+            # Without this lock, concurrent first-open callers can both observe a
+            # missing column and race the same ALTER TABLE statement.
+            db.execute("BEGIN IMMEDIATE")
             db.execute(
                 """CREATE TABLE IF NOT EXISTS exposure_reservations (
                     reservation_id TEXT PRIMARY KEY,

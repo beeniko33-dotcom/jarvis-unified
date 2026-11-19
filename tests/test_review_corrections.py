@@ -17,6 +17,12 @@ from core.models import OrderRequest, Side
 from core.risk import ExposureReservationStore, ReservationError, RiskEngine, RiskLimits
 
 
+def _mp_initialize(db_path: str) -> str:
+    """Open the same fresh reservation database from a separate process."""
+    ExposureReservationStore(db_path)
+    return "initialized"
+
+
 def _mp_submit(args):
     db_path, index = args
     store = ExposureReservationStore(db_path)
@@ -130,6 +136,13 @@ class AtomicReservationTests(unittest.TestCase):
                 max_symbol_notional=Decimal("10"),
                 existing_symbol_exposure=Decimal("0"),
             )
+
+    def test_multiprocess_schema_initialization_is_serialized(self):
+        with mp.get_context("spawn").Pool(processes=6) as pool:
+            results = pool.map(_mp_initialize, [str(self.db)] * 6)
+        self.assertEqual(results, ["initialized"] * 6)
+        store = ExposureReservationStore(self.db)
+        self.assertEqual(store.count(), 0)
 
     def test_multiprocess_symbol_cap(self):
         with mp.get_context("spawn").Pool(processes=4) as pool:
