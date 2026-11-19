@@ -2,9 +2,13 @@
 
 This module computes research candidates only. It has no broker, order, wallet,
 network, database, or exchange dependencies and cannot execute a trade.
+Market trust is accepted only through an Ed25519 attestation verified against
+a public key supplied by trusted runtime configuration, never from the payload.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import re
@@ -54,15 +58,56 @@ def _rsi(values: list[Decimal], length: int = 14) -> Decimal:
     return Decimal("100") - (Decimal("100") / (Decimal("1") + gains / losses))
 
 
+def _canonical_observation(observation: dict[str, Any]) -> bytes:
+    # Legacy booleans are deliberately excluded: they are claims, not proof.
+    signed_fields = {
+        key: value for key, value in observation.items()
+        if key not in {"trust_attestation", "provenance_verified", "evidence_credit"}
+    }
+    return json.dumps(
+        signed_fields, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+
+
 def _fingerprint(value: dict[str, Any]) -> str:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _verify_attestation(
+    observation: dict[str, Any], trusted_public_key_b64: str | None
+) -> bool:
+    if not isinstance(trusted_public_key_b64, str) or not trusted_public_key_b64:
+        return False
+    attestation = observation.get("trust_attestation")
+    if not isinstance(attestation, dict) or not isinstance(attestation.get("verifier_id"), str):
+        return False
+    if not attestation["verifier_id"].strip():
+        return False
+    signature_text = attestation.get("signature")
+    if not isinstance(signature_text, str):
+        return False
+    try:
+        public_key = base64.b64decode(trusted_public_key_b64, validate=True)
+        signature = base64.b64decode(signature_text, validate=True)
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        Ed25519PublicKey.from_public_bytes(public_key).verify(
+            signature, _canonical_observation(observation)
+        )
+        return True
+    except (ValueError, TypeError, binascii.Error, ImportError):
+        return False
+    except Exception as exc:  # InvalidSignature is deliberately treated as a failed gate.
+        if type(exc).__name__ == "InvalidSignature":
+            return False
+        raise
 
 
 def plan_cycle(
     observation: dict[str, Any],
     controls: dict[str, Any] | None,
     *,
+    trusted_verifier_public_key: str | None = None,
     now: datetime | None = None,
     max_age_seconds: int = 180,
     max_clock_skew_ms: int = 5000,
@@ -100,10 +145,8 @@ def plan_cycle(
             reasons.append("unsupported_timeframe")
         if observation.get("complete") is not True:
             reasons.append("candle_not_confirmed_complete")
-        if observation.get("provenance_verified") is not True:
-            reasons.append("market_provenance_unverified")
-        if observation.get("evidence_credit") is not True:
-            reasons.append("market_evidence_not_eligible")
+        if not _verify_attestation(observation, trusted_verifier_public_key):
+            reasons.append("independent_provenance_attestation_invalid_or_missing")
 
         event_time = _time(observation.get("event_time"), "event_time")
         received_at = _time(observation.get("received_at"), "received_at")
@@ -167,6 +210,9 @@ def plan_cycle(
         "candidate": candidate,
         "indicators": indicators,
         "input_fingerprint": _fingerprint(fingerprint_payload),
+        "trust_attestation_verified": _verify_attestation(
+            observation, trusted_verifier_public_key
+        ),
         "mode": "paper",
         "order_authorized": False,
         "orders_submitted": 0,
