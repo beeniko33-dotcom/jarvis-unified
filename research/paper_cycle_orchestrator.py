@@ -60,7 +60,7 @@ def run_once(
         "input_fingerprint": decision["input_fingerprint"],
         "strategy_id": decision["strategy_id"],
         "strategy_version": decision["strategy_version"],
-        "decided_at": current.astimezone(timezone.utc).isoformat(),
+        "decided_at": observation["received_at"],
     }
 
     fingerprint = {
