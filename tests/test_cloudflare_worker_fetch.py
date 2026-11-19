@@ -128,3 +128,82 @@ def test_runtime_heartbeat_uses_secret_key_only_in_apikey_header(monkeypatch):
     assert options["method"] == "POST"
     assert options["headers"]["apikey"] == "test-secret"
     assert "authorization" not in {key.lower() for key in options["headers"]}
+
+
+def test_market_analysis_collector_uses_machine_token_and_validates_result(monkeypatch):
+    calls = []
+
+    class MarketResponse:
+        ok = True
+        status = 200
+
+        async def text(self):
+            return json.dumps({
+                "ok": True,
+                "provider": "Gate.io public spot REST",
+                "instrument": "BTCUSDT",
+                "timeframe": "5m",
+                "trust": "candidate_unverified",
+                "evidence_credit": False,
+                "live_orders": 0,
+            })
+
+    async def fake_fetch(resource, **options):
+        calls.append((resource, options))
+        return MarketResponse()
+
+    module = load_worker(monkeypatch, fake_fetch)
+    worker = module.Default()
+    worker.env = SimpleNamespace(
+        SUPABASE_URL="https://project.supabase.co",
+        SUPABASE_SECRET_KEY="project-secret",
+        JARVIS_INGEST_TOKEN="collector-token",
+    )
+
+    result = __import__("asyncio").run(worker._collect_market_analysis())
+
+    assert result == {
+        "status": "collected",
+        "provider": "Gate.io public spot REST",
+        "instrument": "BTCUSDT",
+        "timeframe": "5m",
+        "trust": "candidate_unverified",
+        "evidence_credit": False,
+        "live_orders": 0,
+    }
+    assert len(calls) == 1
+    resource, options = calls[0]
+    assert resource == "https://project.supabase.co/functions/v1/market-analysis"
+    assert options["method"] == "POST"
+    assert options["headers"]["apikey"] == "project-secret"
+    assert options["headers"]["x-jarvis-ingest-token"] == "collector-token"
+    assert options["body"] == "{}"
+
+
+def test_market_analysis_collector_skips_when_machine_token_is_missing(monkeypatch):
+    calls = []
+
+    async def fake_fetch(resource, **options):
+        calls.append((resource, options))
+        return UpstreamResponse()
+
+    module = load_worker(monkeypatch, fake_fetch)
+    worker = module.Default()
+    worker.env = SimpleNamespace(
+        SUPABASE_URL="https://project.supabase.co",
+        SUPABASE_SECRET_KEY="project-secret",
+    )
+
+    result = __import__("asyncio").run(worker._collect_market_analysis())
+
+    assert result == {"status": "skipped_not_configured"}
+    assert calls == []
+
+
+def test_market_analysis_schedule_runs_every_five_minutes():
+    from datetime import datetime, timezone
+
+    module = load_worker(__import__("pytest").MonkeyPatch(), lambda *a, **k: None)
+    assert module.should_collect_market_analysis(datetime(2026, 11, 19, 6, 10, tzinfo=timezone.utc))
+    assert module.should_collect_market_analysis(datetime(2026, 11, 19, 6, 15, tzinfo=timezone.utc))
+    assert not module.should_collect_market_analysis(datetime(2026, 11, 19, 6, 11, tzinfo=timezone.utc))
