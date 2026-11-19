@@ -12,6 +12,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from research.gateio_attestation_verifier import VERIFIER_ID
 from research.paper_cycle_orchestrator import run_once
@@ -84,12 +86,43 @@ def load_operator_controls(
     }
 
 
+def fetch_attested_observation(url: str) -> dict:
+    parsed = urlparse(url)
+    if (parsed.scheme != "https"
+            or parsed.hostname != "jarvis-gateio-attestor.beeniko33.workers.dev"
+            or parsed.path != "/v1/attestation"
+            or parsed.username or parsed.password or parsed.fragment):
+        raise ValueError("attested observation URL is not the pinned HTTPS verifier")
+    request = Request(url, headers={"Accept": "application/json", "User-Agent": "JarvisPaperRunner/1.0"})
+    with urlopen(request, timeout=15) as response:
+        if response.status != 200 or urlparse(response.geturl()).hostname != parsed.hostname:
+            raise ValueError("independent verifier did not return a valid response")
+        raw = response.read(MAX_OBSERVATION_BYTES + 1)
+    if len(raw) > MAX_OBSERVATION_BYTES:
+        raise ValueError("attested observation exceeds size limit")
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise ValueError("attested observation must be a JSON object")
+    attestation = value.get("trust_attestation")
+    if not isinstance(attestation, dict) or attestation.get("verifier_id") != VERIFIER_ID:
+        raise ValueError("observation was not signed by the configured independent verifier")
+    if value.get("provenance_verified") is not False or value.get("evidence_credit") is not False:
+        raise ValueError("verifier output must not self-award provenance or evidence credit")
+    return value
+
+
 def main() -> int:
     try:
         dsn = os.environ["JARVIS_DATABASE_URL"]
         account_id = os.environ["JARVIS_PAPER_ACCOUNT_ID"]
-        public_key = os.environ["JARVIS_GATEIO_VERIFIER_PUBLIC_KEY_B64"]
-        observation_path = os.environ["JARVIS_ATTESTED_OBSERVATION_PATH"]
+        public_key = os.environ.get("JARVIS_GATEIO_VERIFIER_PUBLIC_KEY_B64") or Path(
+            "config/gateio-verifier-public-key.b64"
+        ).read_text(encoding="utf-8").strip()
+        observation_path = os.environ.get("JARVIS_ATTESTED_OBSERVATION_PATH")
+        observation_url = os.environ.get(
+            "JARVIS_ATTESTED_OBSERVATION_URL",
+            "https://jarvis-gateio-attestor.beeniko33.workers.dev/v1/attestation",
+        )
         import psycopg
 
         def connect():
@@ -101,8 +134,27 @@ def main() -> int:
                 application_name="jarvis-paper-cycle-runner",
             )
 
-        observation = load_attested_observation(observation_path)
         controls = load_operator_controls(connect)
+        # Production controls are read-only. A missing, stale, blocked, or paused
+        # heartbeat exits before fetching market data or touching paper state.
+        if (not isinstance(controls, dict)
+                or controls.get("health") != "healthy"
+                or controls.get("mode") != "paper"
+                or controls.get("kill_switch_engaged") is not False
+                or controls.get("entries_paused") is not False):
+            print(json.dumps({
+                "status": "blocked",
+                "reason": "operator_controls_missing_stale_or_blocked",
+                "mode": "paper",
+                "order_authorized": False,
+                "orders_submitted": 0,
+                "execution_started": False,
+            }, sort_keys=True))
+            return 0
+        observation = (
+            load_attested_observation(observation_path)
+            if observation_path else fetch_attested_observation(observation_url)
+        )
         store = SupabasePaperStateStore(dsn=dsn)
         result = run_once(
             store=store,
