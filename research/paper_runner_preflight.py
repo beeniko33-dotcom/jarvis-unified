@@ -71,7 +71,7 @@ def read_operator_control(store: SupabasePaperStateStore, worker_id: str) -> dic
             with db.cursor() as cur:
                 cur.execute(
                     """select worker_id, health, mode, kill_switch_engaged, entries_paused
-                       from public.operator_status where worker_id = %s limit 2""",
+                       from public.operator_status where worker_id = %s order by reported_at desc limit 2""",
                     (worker_id,),
                 )
                 rows = cur.fetchall()
