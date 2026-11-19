@@ -60,7 +60,7 @@ def main() -> int:
         raise SystemExit("Browser accessibility and display preferences are not respected")
     for feature in ("loadPairUniverse", "/spot/currency_pairs", "/spot/tickers",
                     "/v5/market/instruments-info?category=spot", "/v5/market/tickers?category=spot",
-                    "history.replaceState({page:", "fitWorkspaceLayout", "ResizeObserver",
+                    "history.replaceState({page:", "fitWorkspaceLayout", "ResizeObserver", "window.visualViewport?.width",
                     "market-open-chart"):
         if feature not in source:
             raise SystemExit("Missing adaptive/auth/market-universe feature: " + feature)
