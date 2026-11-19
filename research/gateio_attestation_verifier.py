@@ -85,10 +85,10 @@ def fetch_and_attest(
     except Exception as exc:
         raise RuntimeError("verifier signing key is invalid") from exc
 
-    local_received = now()
-    if local_received.tzinfo is None or local_received.utcoffset() is None:
+    local_started_at = now()
+    if local_started_at.tzinfo is None or local_started_at.utcoffset() is None:
         raise ValueError("verifier clock must be timezone-aware")
-    local_received = local_received.astimezone(timezone.utc)
+    local_started_at = local_started_at.astimezone(timezone.utc)
 
     server, server_raw = _get_json("/spot/time", opener=opener)
     if not isinstance(server, dict) or isinstance(server.get("server_time"), bool):
@@ -98,7 +98,7 @@ def fetch_and_attest(
         raise ValueError("Gate.io server time must be Unix milliseconds")
     server_time = datetime.fromtimestamp(server_time_ms / 1000, timezone.utc)
     server_seconds = server_time_ms // 1000
-    clock_skew_ms = int((local_received - server_time).total_seconds() * 1000)
+    clock_skew_ms = int((local_started_at - server_time).total_seconds() * 1000)
 
     query = urlencode({"currency_pair": symbol, "interval": "5m", "limit": 100})
     candles, candles_raw = _get_json("/spot/candlesticks?" + query, opener=opener)
@@ -143,6 +143,11 @@ def fetch_and_attest(
     ask = _positive_decimal(best_ask[0], "best ask")
     if bid > ask:
         raise ValueError("Gate.io order book is crossed")
+
+    local_received = now()
+    if local_received.tzinfo is None or local_received.utcoffset() is None:
+        raise ValueError("verifier clock must be timezone-aware")
+    local_received = local_received.astimezone(timezone.utc)
 
     observation = {
         "provider": "Gate.io",
