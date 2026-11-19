@@ -44,19 +44,19 @@ class VerifierTests(unittest.TestCase):
     def opener(self, request, timeout=10):
         url = request.full_url
         if "/spot/time" in url:
-            return Response({"server_time": int(self.now.timestamp())})
+            return Response({"server_time": int(self.now.timestamp() * 1000)})
         if "/spot/candlesticks" in url:
             # Newest first as returned by Gate.io; create 60 completed candles.
             rows = []
-            end_now = int(self.now.timestamp()) // 300 * 300
+            end_now = int(self.now.timestamp() * 1000) // 300 * 300
             for i in reversed(range(1, 61)):
                 start = end_now - i * 300
                 rows.append([str(start), "100", str(100 + i), str(110 + i),
-                             str(90 + i), str(95 + i), "1"])
+                             str(90 + i), str(95 + i)])
             return Response(rows)
         if "/spot/order_book" in url:
-            return Response({"id": 123, "bids": [{"p": "100.0", "s": "1"}],
-                             "asks": [{"p": "100.1", "s": "1"}]})
+            return Response({"id": 123, "bids": [["100.0", "1"]],
+                             "asks": [["100.1", "1"]]})
         raise AssertionError(url)
 
     def test_fetches_and_signs_public_market_snapshot(self):
@@ -93,7 +93,7 @@ class VerifierTests(unittest.TestCase):
         def gapped(request, timeout=10):
             if "/spot/candlesticks" in request.full_url:
                 return Response([[str(1795090000 - i * 600), "100", "100",
-                                  "101", "99", "100", "1"] for i in range(60)])
+                                  "101", "99", "100"] for i in range(60)])
             return self.opener(request, timeout)
         with self.assertRaises(ValueError):
             fetch_and_attest("BTC_USDT", private_key_b64=self.private_b64,
