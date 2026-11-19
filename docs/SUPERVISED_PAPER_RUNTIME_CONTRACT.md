@@ -152,3 +152,14 @@ Do not assume Cloudflare Worker is the correct host for the Python/Postgres runn
 - Disposable Postgres integration run #14 and the live attestor run #4 are separate checks. The full CI run for the latest runner commit is pending at time of this documentation update.
 - Render Cron is not provisioned. The repository has a dedicated one-shot entrypoint now, but actual Render workspace plan, payment method, spending controls, and account-level monthly cap cannot be verified until the Render connection is authorized.
 - Budget estimate remains a planning estimate: 8,640 monthly runs at 1 minute each = 8,640 active minutes, about USD 1.38/month at the published compute rate, before taxes/FX/payment fees. The service must enforce a monthly spend stop and average runtime below approximately 2.68 minutes per five-minute run to stay within NGN 5,000 at the indicative FX rate.
+
+
+### Render Blueprint and bounded compute estimate
+
+- `render.yaml` defines a Frankfurt Cron Job on `0.5c-512mb`, every five minutes, building the `.[postgres]` extra and running `python -m scripts.run_paper_cycle_once`.
+- The start command uses GNU `timeout` with an 85-second TERM deadline and a 5-second KILL grace period. This bounds scheduled active compute to at most 90 seconds per run; a killed database transaction rolls back on connection close. The command is intentionally one-shot.
+- Supabase is in `eu-west-1`; Frankfurt is the nearest Render region available in the documented Render region list.
+- 30-day maximum scheduled compute at the 90-second cap: 8,640 runs × 1.5 minutes = 12,960 active minutes × USD 0.00016 = USD 2.0736. A 31-day month is USD 2.14272. At an indicative USD/NGN rate around 1,352.5, that is approximately NGN 2,803 (30 days) or NGN 2,897 (31 days), before bank/card FX spread and taxes. At one minute average, 30-day compute is USD 1.3824 (about NGN 1,870). Render also applies a USD 1/month minimum per Cron service.
+- Render Cron Jobs are paid compute even on the free Hobby workspace; the workspace plan itself may be free, but this does not make the Cron service free. The 90-second timeout caps normal scheduled run cost but does not constitute a workspace-wide compute spend cap.
+- Render documents a spend limit for build-pipeline minutes, not a general monthly compute cap for Cron services. The actual workspace plan, payment method, billing usage, and any spend controls cannot be verified until the Render app is connected and its Billing/Workspace settings are inspected.
+- The Blueprint is configuration only. It has not been applied, no Render service was created, and no paid resource was provisioned.
