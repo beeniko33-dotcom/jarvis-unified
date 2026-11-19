@@ -3,6 +3,8 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SECRET_KEYS = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}");
 const SERVICE_ROLE_KEY = SECRET_KEYS.default ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SERVICE_ROLE_KEY") ?? "";
+const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+const INGEST_TOKEN = Deno.env.get("JARVIS_INGEST_TOKEN") ?? "";
 const GATE_BASE = "https://api.gateio.ws/api/v4";
 const PAIR = "BTC_USDT";
 const SYMBOL = "BTCUSDT";
@@ -43,20 +45,17 @@ function tokenMatches(supplied: string, expected: string): boolean {
   return difference === 0;
 }
 
-function jwtClaims(req: Request): { role: string; sub: string } {
-  const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
-  const parts = token.split(".");
-  if (parts.length !== 3) return { role: "", sub: "" };
-  try {
-    const normalized = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const payload = JSON.parse(atob(normalized));
-    return {
-      role: typeof payload.role === "string" ? payload.role : "",
-      sub: typeof payload.sub === "string" ? payload.sub : "",
-    };
-  } catch {
-    return { role: "", sub: "" };
-  }
+async function verifiedUserId(req: Request): Promise<string> {
+  const authorization = req.headers.get("authorization") ?? "";
+  if (!authorization.startsWith("Bearer ") || !SUPABASE_URL || !ANON_KEY) return "";
+  const response = await fetch(SUPABASE_URL.replace(/\\/$/, "") + "/auth/v1/user", {
+    method: "GET",
+    headers: { "apikey": ANON_KEY, "authorization": authorization },
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!response.ok) return "";
+  const user = await response.json();
+  return user && typeof user.id === "string" ? user.id : "";
 }
 async function isAllowlistedOperator(userId: string): Promise<boolean> {
   const url = SUPABASE_URL.replace(/\/$/, "") +
@@ -135,19 +134,22 @@ async function rpc(name: string, body: unknown): Promise<any> {
 
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-  const caller = jwtClaims(req);
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY) return json({ error: "server_not_configured" }, 503);
-  // Supabase's newer sb_secret API keys are opaque, not JWTs. GitHub Actions
-  // supplies the machine key in the apikey header; compare it to the server-only
-  // secret and keep ordinary authenticated callers on the operator allowlist.
-  const machineAuthorized = tokenMatches(req.headers.get("apikey") ?? "", SERVICE_ROLE_KEY);
-  if (caller.role !== "authenticated" && caller.role !== "service_role" && !machineAuthorized) {
-    return json({ error: "authenticated_operator_required" }, 403);
-  }
-  try {
-    if (!machineAuthorized && caller.role !== "service_role" && (!caller.sub || !(await isAllowlistedOperator(caller.sub)))) {
+  // Machine callers use a dedicated shared collector token; the service-role
+  // key fallback preserves the existing GitHub Actions scheduler. Both checks
+  // are performed inside the function because gateway JWT verification is off.
+  const machineAuthorized =
+    (!!INGEST_TOKEN && tokenMatches(req.headers.get("x-jarvis-ingest-token") ?? "", INGEST_TOKEN)) ||
+    tokenMatches(req.headers.get("apikey") ?? "", SERVICE_ROLE_KEY);
+  let userId = "";
+  if (!machineAuthorized) {
+    userId = await verifiedUserId(req);
+    if (!userId) return json({ error: "authenticated_operator_required" }, 401);
+    if (!(await isAllowlistedOperator(userId))) {
       return json({ error: "operator_not_allowlisted" }, 403);
     }
+  }
+  try {
     const [clock, rawKlines] = await Promise.all([
       getJson(GATE_BASE + "/spot/time"),
       getJson(GATE_BASE + "/spot/candlesticks?currency_pair=" + PAIR + "&interval=" + INTERVAL + "&limit=100"),
