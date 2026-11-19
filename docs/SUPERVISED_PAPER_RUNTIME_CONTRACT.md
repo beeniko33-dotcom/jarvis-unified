@@ -110,3 +110,13 @@ Do not assume Cloudflare Worker is the correct host for the Python/Postgres runn
 - The verifier must timestamp `received_at` after completing the three public fetches, not before network I/O.
 - Reference: https://www.gate.com/docs/developers/apiv4/en/spot/ and https://www.gate.com/docs/apiv4/index.html
 - Live endpoint reachability has not been confirmed from the current engineering environment; the verifier remains mock-tested only until an isolated read-only run is completed.
+
+
+## Render deployment readiness check (2026-11-19)
+
+- The repository currently has no `render.yaml`, no `Procfile`, and no `scripts/run_paper_cycle.py` entrypoint.
+- The existing `Dockerfile` starts the long-running web process with `python main.py --serve`; it does not install the optional Postgres extra. It is not a valid Cron Job command as-is.
+- Do not point Render Cron at the current Dockerfile command. Before provisioning, add a dedicated one-shot runner that reads operator controls and the signed verifier output, verifies the account/ledger, calls the orchestrator once, writes a reconciliation manifest, and exits.
+- The eventual Cron build must install the Postgres extra (for example `pip install '.[postgres]'`) and pin its Python/runtime dependencies. It must use Supabase Postgres for durable state; Render Cron has no persistent disk.
+- Required environment variables must be allowlisted and validated at startup. The runner may receive only the pinned verifier public key and a TLS Postgres connection string; never the verifier private key or Gate.io private trading credentials.
+- Deployment remains blocked pending the runner entrypoint, external verifier key custody/rotation/revocation, real read-only Gate.io endpoint validation, and a confirmed Render workspace/billing limit. No Render service or production schedule was created.
