@@ -151,6 +151,19 @@ def main() -> int:
                 "execution_started": False,
             }, sort_keys=True))
             return 0
+        if os.environ.get("JARVIS_RUNNER_PREFLIGHT_ONLY") == "1":
+            print(json.dumps({
+                "status": "preflight_only",
+                "controls_present": isinstance(controls, dict),
+                "health": controls.get("health") if isinstance(controls, dict) else None,
+                "mode": controls.get("mode") if isinstance(controls, dict) else None,
+                "kill_switch_engaged": controls.get("kill_switch_engaged") if isinstance(controls, dict) else None,
+                "entries_paused": controls.get("entries_paused") if isinstance(controls, dict) else None,
+                "market_fetch_performed": False,
+                "paper_state_write_performed": False,
+                "orders_submitted": 0,
+            }, sort_keys=True))
+            return 0
         observation = (
             load_attested_observation(observation_path)
             if observation_path else fetch_attested_observation(observation_url)
