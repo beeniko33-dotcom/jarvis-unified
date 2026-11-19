@@ -109,7 +109,8 @@ def plan_cycle(
     *,
     trusted_verifier_public_key: str | None = None,
     now: datetime | None = None,
-    max_age_seconds: int = 180,
+    max_age_seconds: int = 360,
+    max_receive_age_seconds: int = 180,
     max_clock_skew_ms: int = 5000,
 ) -> dict[str, Any]:
     """Validate one normalized Gate.io snapshot and calculate a non-executable candidate."""
@@ -120,7 +121,7 @@ def plan_cycle(
     if current.tzinfo is None or current.utcoffset() is None:
         raise ValueError("planner clock must be timezone-aware")
     current = current.astimezone(timezone.utc)
-    if max_age_seconds < 1 or max_clock_skew_ms < 0:
+    if max_age_seconds < 1 or max_receive_age_seconds < 1 or max_clock_skew_ms < 0:
         raise ValueError("age and clock-skew limits are invalid")
 
     if not isinstance(controls, dict):
@@ -154,7 +155,7 @@ def plan_cycle(
         receive_age = (current - received_at).total_seconds()
         if event_time > received_at or received_at > current:
             reasons.append("market_timestamps_out_of_order")
-        if age < 0 or age > max_age_seconds or receive_age < 0 or receive_age > max_age_seconds:
+        if age < 0 or age > max_age_seconds or receive_age < 0 or receive_age > max_receive_age_seconds:
             reasons.append("market_observation_stale")
         skew = observation.get("clock_skew_ms")
         if isinstance(skew, bool) or not isinstance(skew, int) or abs(skew) > max_clock_skew_ms:
