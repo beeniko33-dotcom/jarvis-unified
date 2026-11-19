@@ -131,3 +131,14 @@ def test_ambiguous_operator_control_rows_fail_closed():
         ("cloudflare-control-worker", "blocked", "paper", True, True),
     ]
     assert read_operator_control(ControlStore(rows), "cloudflare-control-worker") is None
+
+
+def test_missing_paper_account_blocks_preflight():
+    report = assess_preflight(
+        controls(),
+        None,
+        verified_ledger(),
+        cycle_engine_available=True,
+    )
+    assert report["status"] == "blocked"
+    assert "paper_account_missing" in report["reasons"]
