@@ -48,7 +48,8 @@ function tokenMatches(supplied: string, expected: string): boolean {
 async function verifiedUserId(req: Request): Promise<string> {
   const authorization = req.headers.get("authorization") ?? "";
   if (!authorization.startsWith("Bearer ") || !SUPABASE_URL || !ANON_KEY) return "";
-  const response = await fetch(SUPABASE_URL.replace(/\\/$/, "") + "/auth/v1/user", {
+  const baseUrl = SUPABASE_URL.endsWith("/") ? SUPABASE_URL.slice(0, -1) : SUPABASE_URL;
+  const response = await fetch(baseUrl + "/auth/v1/user", {
     method: "GET",
     headers: { "apikey": ANON_KEY, "authorization": authorization },
     signal: AbortSignal.timeout(5_000),
