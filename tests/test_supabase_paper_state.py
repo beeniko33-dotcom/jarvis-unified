@@ -110,14 +110,23 @@ class SupabasePaperStateTests(unittest.TestCase):
         encoded_state = json.dumps(values["state"], sort_keys=True, separators=(",", ":"))
         state_hash = hashlib.sha256(encoded_state.encode()).hexdigest()
         self.state["prior_run"] = (
-            values["account_id"], input_hash, state_hash, "completed"
+            values["account_id"], input_hash, state_hash, "completed", 1
         )
+        self.state["account_row"] = (3,)
         result = self.store.commit_cycle(**values)
         self.assertTrue(result["duplicate"])
+        self.assertEqual(result["revision"], 3)
+        self.assertEqual(result["run_revision"], 1)
+
+    def test_event_type_must_be_a_string(self):
+        with self.assertRaisesRegex(ValueError, "safe string event_type"):
+            self.store.commit_cycle(**self.cycle(events=[
+                {"event_type": 123, "payload": {}},
+            ]))
 
     def test_reused_run_id_with_different_content_is_rejected(self):
         values = self.cycle()
-        self.state["prior_run"] = ("other-account", "a" * 64, "b" * 64, "completed")
+        self.state["prior_run"] = ("other-account", "a" * 64, "b" * 64, "completed", 1)
         with self.assertRaises(PaperStateConflict):
             self.store.commit_cycle(**values)
 
