@@ -90,7 +90,7 @@ Status: engineering specification only. This document does not enable or deploy 
 Use a **bounded Render Cron Job** as the preferred candidate for the eventual Python/Postgres cycle worker, subject to account setup and a measured cost check. Do not use a permanently running background worker at this budget.
 
 - Render Cron Jobs can run a repository command on a cron schedule, receive environment variables/secrets, and are guaranteed to have at most one active run per job. If a run overlaps its next scheduled time, the next run is delayed until the active one finishes. A run is forcibly stopped after 12 hours; it cannot mount a persistent disk, so all durable state must remain in Supabase Postgres.
-- The smallest published cron compute tier is 0.5 CPU / 512 MB at USD 0.00016 per active minute, with a USD 1/month minimum per cron service. A five-minute schedule with a measured one-minute runtime per run would be about USD 1.38/month in compute (8,640 active minutes x USD 0.00016), before tax, foreign-exchange and payment fees. This is a planning estimate, not an account quote.
+- The smallest published cron compute tier is 0.5 CPU / 512 MB at USD 0.00016 per active minute, with a USD 1/month minimum per cron service. A five-minute schedule over a 30-day month produces 8,640 runs. At a measured one-minute runtime per run, compute is USD 1.3824/month (minimum charge does not increase this); at the 2026-11-19 indicative rate of about NGN 1,351/USD, that is about NGN 1,868 before card/FX fees and tax. To remain under NGN 5,000 at that rate, average active runtime must stay below about 2.68 minutes per run, before fees/tax. Enforce a monthly spend guard and stop scheduling before the budget is breached. This is a planning estimate, not an account quote; measure real run durations and use the actual billing rate.
 - Enforce a hard per-run timeout and a monthly spend guard; if observed runtime or billing forecast threatens NGN 5,000/month, pause scheduling and require review. No automatic upgrade to a larger tier.
 - GitHub Actions remains the CI and manual diagnostic path. It is free for standard hosted runners in public repositories, but scheduled workflows have a five-minute minimum, may be delayed or dropped under load, and public-repository schedules are disabled after 60 days without repository activity. It is therefore not the primary evidence scheduler.
 - The Render job must use a short-lived run: read controls, validate the feed, verify account/ledger, execute at most one deterministic paper cycle when all independent gates pass, commit atomically, emit a reconciliation manifest, and exit. It must not depend on local files or process memory for recovery.
@@ -100,3 +100,13 @@ The host is **not deployed or connected** by this decision. Before provisioning,
 ## Deployment note
 
 Do not assume Cloudflare Worker is the correct host for the Python/Postgres runner. First compare available hosting options against persistent process support, outbound TLS Postgres access, secret management, sleep/idle behavior, observability, and the NGN 5,000/month ceiling. If no suitable free-tier host meets all requirements, keep the runner un-deployed and provide a local/manual supervised test path rather than weakening integrity or safety requirements.
+
+
+## Gate.io public API response contract (reviewed 2026-11-19)
+
+- Gate.io API v4 `GET /spot/time` returns `server_time` in Unix milliseconds; normalize by dividing by 1,000 before deriving candle timestamps and compare the full millisecond value for clock skew.
+- `GET /spot/candlesticks` returns arrays of string fields. The documented response example has six fields; candle close is index 2 and the open timestamp is index 0. Do not require a seventh field.
+- `GET /spot/order_book` returns bid/ask levels as [price, quantity] arrays, not objects with a `p` property.
+- The verifier must timestamp `received_at` after completing the three public fetches, not before network I/O.
+- Reference: https://www.gate.com/docs/developers/apiv4/en/spot/ and https://www.gate.com/docs/apiv4/index.html
+- Live endpoint reachability has not been confirmed from the current engineering environment; the verifier remains mock-tested only until an isolated read-only run is completed.
