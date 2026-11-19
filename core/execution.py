@@ -1,14 +1,17 @@
 """The only supported path from strategy orders to a broker adapter."""
 from __future__ import annotations
 
+import hashlib
 import logging
+import re
 import threading
+from pathlib import Path
 from decimal import Decimal
 from threading import RLock
 from uuid import uuid4
 
 from brokers.base import Broker
-from core.models import OrderRequest, OrderResult
+from core.models import OrderRequest, OrderResult, Side
 from core.risk import ExposureReservationStore, ReservationError, RiskEngine
 from research.execution_observations import ExecutionObservationJournal
 
@@ -21,6 +24,17 @@ _LINEAGE_FIELDS = frozenset({
 })
 _HASH_FIELDS = frozenset({"strategy_config_hash", "signal_context_hash", "data_hash"})
 _SECRET_MARKERS = ("secret", "password", "token", "private_key", "api_key", "authorization", "bearer")
+_CREDENTIAL_PATTERNS = tuple(re.compile(p, re.IGNORECASE) for p in (
+    r"gh[pousr]_[A-Za-z0-9_]{20,}", r"github_pat_[A-Za-z0-9_]{20,}",
+    r"AKIA[0-9A-Z]{16}", r"xox[baprs]-[A-Za-z0-9-]{10,}",
+    r"(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{12,}", r"sk-[A-Za-z0-9_-]{24,}",
+    r"Bearer\s+\S+", r"eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+))
+
+
+def _looks_like_credential(value: str) -> bool:
+    return any(pattern.search(value) for pattern in _CREDENTIAL_PATTERNS)
 
 
 def _safe_order_metadata(metadata: object) -> tuple[dict, dict]:
@@ -35,7 +49,7 @@ def _safe_order_metadata(metadata: object) -> tuple[dict, dict]:
             continue
         value = raw.strip()
         lowered = value.lower()
-        if not value or len(value) > 128 or any(marker in lowered for marker in _SECRET_MARKERS):
+        if not value or len(value) > 128 or any(marker in lowered for marker in _SECRET_MARKERS) or _looks_like_credential(value):
             continue
         if key in _HASH_FIELDS:
             if not (len(value) == 64 and all(ch in "0123456789abcdefABCDEF" for ch in value)):
@@ -131,8 +145,17 @@ class ExecutionService:
         # process can then tell a live submission from a dead one instead of
         # guessing from age.
         self._owner_id = f"exec-owner-{uuid4()}"
+        identity_path = getattr(broker, "database_path", None) or getattr(broker, "_ledger_path", None)
+        if identity_path is not None:
+            scope_material = str(Path(identity_path).expanduser().resolve())
+            self._position_scope = hashlib.sha256(scope_material.encode("utf-8")).hexdigest()[:24]
+        else:
+            self._position_scope = f"memory-{id(broker):x}"
         if self.reservations is not None:
             self.reservations.register_owner(self._owner_id)
+
+    def _position_id(self, symbol: str) -> str:
+        return f"{self._position_scope}:{symbol.strip().upper()}"
 
     @property
     def release_failures(self) -> list[dict]:
@@ -171,6 +194,7 @@ class ExecutionService:
             unrealized_pnl = account.equity - account.balance
             positions = self.broker.get_positions()
             symbol = order.symbol.strip().upper()
+            position_id = self._position_id(symbol)
             notional = order.quantity * order.price
             symbol_exposure = sum(
                 (
@@ -345,6 +369,7 @@ class ExecutionService:
                         notional=notional,
                         corr_group=group,
                         error="pending conversion",
+                        position_id=position_id,
                     )
                 except Exception as record_exc:
                     self._release_failures.append(
@@ -381,7 +406,7 @@ class ExecutionService:
                         notional=notional,
                         corr_group=group,
                         reservation_id=reservation_id,
-                        position_id=symbol,
+                        position_id=position_id,
                     )
                 except Exception as exc:
                     self._release_failures.append(
@@ -477,7 +502,7 @@ class ExecutionService:
                         # Omitting it writes a legacy symbol-wide row that can
                         # never be released by position, so a crash-recovered
                         # entry would permanently consume capacity.
-                        position_id=item.get("position_id") or item["symbol"],
+                        position_id=item.get("position_id") or self._position_id(item["symbol"]),
                     )
                     reconciled.append(dict(item))
                     logger.info(
@@ -510,7 +535,7 @@ class ExecutionService:
                 )
         return reconciled
 
-    def close_position(self, symbol: str, price: Decimal) -> OrderResult:
+    def close_position(self, symbol: str, price: Decimal, quantity: Decimal | None = None) -> OrderResult:
         """Close a paper position and release the exposure it committed.
 
         Raises ``PositionClosedReleaseFailedError`` when the broker close
@@ -526,7 +551,27 @@ class ExecutionService:
             position = positions.get(normalized)
             if position is None:
                 raise ValueError(f"no open position for {normalized}")
-            result = self.broker.close_position(normalized, price)
+            open_quantity = abs(position.quantity)
+            close_quantity = open_quantity if quantity is None else Decimal(str(quantity))
+            if not close_quantity.is_finite() or close_quantity <= 0 or close_quantity > open_quantity:
+                raise ValueError("close quantity must be finite, positive, and no greater than the open position")
+            close_side = Side.SELL if position.quantity > 0 else Side.BUY
+            if close_quantity == open_quantity:
+                result = self.broker.close_position(normalized, price)
+            else:
+                result = self.broker.place_order(
+                    OrderRequest(normalized, close_side, close_quantity, price, f"close-{uuid4()}")
+                )
+            position_id = self._position_id(normalized)
+            release_notional = None
+            if self.reservations is not None and close_quantity < open_quantity:
+                committed = self.reservations.committed_for_position(normalized, position_id)
+                if committed <= 0:
+                    raise PositionClosedReleaseFailedError(
+                        "partial paper close succeeded but matching committed exposure was not found",
+                        order_result=result, symbol=normalized, position_id=position_id,
+                    )
+                release_notional = committed * close_quantity / open_quantity
             try:
                 self._record_observation(
                     f"position-close:{result.order_id}",
@@ -558,7 +603,8 @@ class ExecutionService:
                     self.reservations.reduce_committed_for_position(
                         release_id=result.order_id,
                         symbol=normalized,
-                        position_id=normalized,
+                        position_id=position_id,
+                        notional=release_notional,
                     )
                 except Exception as exc:
                     # Record what is actually committed for this position, not a
@@ -566,18 +612,16 @@ class ExecutionService:
                     # average can sit either side of the committed notional, so a
                     # recomputed bound would under- or over-release on retry.
                     try:
-                        outstanding = self.reservations.committed_for_symbol(normalized)
+                        outstanding = self.reservations.committed_for_position(normalized, position_id)
                     except Exception:
                         outstanding = Decimal("0")
                     try:
                         self.reservations.record_pending_release(
                             result.order_id,
                             normalized,
-                            outstanding
-                            if outstanding > 0
-                            else abs(position.quantity) * position.average_price,
+                            release_notional or (outstanding if outstanding > 0 else close_quantity * position.average_price),
                             str(exc),
-                            position_id=normalized,
+                            position_id=position_id,
                         )
                     except Exception as record_exc:
                         self._release_failures.append({
@@ -591,6 +635,6 @@ class ExecutionService:
                         "needs reconciliation",
                         order_result=result,
                         symbol=normalized,
-                        position_id=normalized,
+                        position_id=position_id,
                     ) from exc
             return result

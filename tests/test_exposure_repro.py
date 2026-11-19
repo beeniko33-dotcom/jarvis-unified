@@ -86,6 +86,29 @@ class ExposureAccountingReproTests(unittest.TestCase):
         # Broker closed the whole position; committed should be releasable in full.
         self.assertEqual(self.store.committed_for_symbol("EURUSD"), Decimal("20"))
 
+    def test_service_partial_close_releases_only_proportional_exposure(self):
+        broker = PaperBroker(Decimal("100000"))
+        service = _service(broker, self.risk, self.store)
+        service.submit(OrderRequest("EURUSD", Side.BUY, Decimal("2"), Decimal("10"), "partial-entry"))
+        service.close_position("EURUSD", Decimal("10"), quantity=Decimal("1"))
+        self.assertEqual(abs(broker.get_positions()[0].quantity), Decimal("1"))
+        self.assertEqual(self.store.committed_for_symbol("EURUSD"), Decimal("10"))
+        service.close_position("EURUSD", Decimal("10"), quantity=Decimal("1"))
+        self.assertEqual(self.store.committed_for_symbol("EURUSD"), Decimal("0"))
+
+    def test_two_broker_scopes_do_not_release_each_others_exposure(self):
+        broker_a = PaperBroker(Decimal("100000"))
+        broker_b = PaperBroker(Decimal("100000"))
+        service_a = _service(broker_a, self.risk, self.store)
+        service_b = _service(broker_b, self.risk, self.store)
+        service_a.submit(OrderRequest("EURUSD", Side.BUY, Decimal("1"), Decimal("10"), "account-a"))
+        service_b.submit(OrderRequest("EURUSD", Side.BUY, Decimal("1"), Decimal("10"), "account-b"))
+        self.assertEqual(self.store.committed_for_symbol("EURUSD"), Decimal("20"))
+        service_a.close_position("EURUSD", Decimal("10"))
+        self.assertEqual(self.store.committed_for_symbol("EURUSD"), Decimal("10"))
+        service_b.close_position("EURUSD", Decimal("10"))
+        self.assertEqual(self.store.committed_for_symbol("EURUSD"), Decimal("0"))
+
     def test_close_failure_is_distinguishable_from_close_success(self):
         """A release failure must not look like a failed close."""
         broker = PaperBroker(Decimal("100000"))

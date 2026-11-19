@@ -5,7 +5,8 @@ from pathlib import Path
 import unittest
 
 from brokers.paper import PaperBroker
-from core.execution import ExecutionService
+from core.execution import ExecutionService, _safe_order_metadata
+from brokers.paper.broker import _paper_metadata
 from core.models import OrderRequest, Side
 from core.risk import RiskEngine, RiskLimits
 from research.execution_observations import ExecutionObservationJournal
@@ -87,6 +88,19 @@ class ExecutionServiceTests(unittest.TestCase):
             decision = journal.list_events()[0]
             self.assertIsNone(decision["data"]["strategy_id"])
             self.assertIsNone(decision["data"]["experiment_id"])
+    def test_credential_shaped_values_are_rejected_from_execution_and_broker_lineage(self):
+        secret = "ghp_" + "A" * 36
+        metadata = {"research_lineage": {"strategy_id": secret, "experiment_id": "exp-42"}}
+        safe, lineage = _safe_order_metadata(metadata)
+        persisted = _paper_metadata(metadata)
+        self.assertNotIn("strategy_id", lineage)
+        self.assertEqual(lineage.get("experiment_id"), "exp-42")
+        self.assertNotIn("strategy_id", persisted.get("research_lineage", {}))
+
+    def test_broker_accepts_legacy_top_level_lineage_only_after_sanitizing(self):
+        safe = _paper_metadata({"strategy_id": "strategy-7", "extra": "discard-me"})
+        self.assertEqual(safe, {"research_lineage": {"strategy_id": "strategy-7"}})
+
     def test_unrealized_loss_blocks_new_entry(self):
         self.risk = RiskEngine(RiskLimits(Decimal("5"), Decimal("0.5"), 2, True))
         self.service = ExecutionService(self.broker, self.risk)
