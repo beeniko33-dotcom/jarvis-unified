@@ -44,7 +44,13 @@ class JaeoPolicyTests(unittest.TestCase):
     def test_code_changes_are_confined_to_reviewable_branches(self):
         result = evaluate_action(agent="engineering", action=Action.CHANGE_CODE.value,
                                  resource_id="branch:feat/example")
-        self.assertEqual(result.decision, Decision.ALLOW)
+        self.assertEqual(result.decision, Decision.APPROVAL_REQUIRED)
+        approved = {"status": "approved", "action": Action.CHANGE_CODE.value,
+                    "resource_id": "branch:feat/example", "decided_by": "operator-1",
+                    "decided_at": "2026-11-20T06:00:00Z"}
+        authorized = evaluate_action(agent="engineering", action=Action.CHANGE_CODE.value,
+                                     resource_id="branch:feat/example", approval_record=approved)
+        self.assertEqual(authorized.decision, Decision.ALLOW)
         protected = evaluate_action(agent="engineering", action=Action.CHANGE_CODE.value,
                                     resource_id="main")
         self.assertEqual(protected.decision, Decision.APPROVAL_REQUIRED)
