@@ -110,8 +110,6 @@ def evaluate_action(
     is_production = resource in PRODUCTION_RESOURCE_IDS or env in PRODUCTION_RESOURCE_IDS
     if is_production and action != Action.INSPECT.value:
         return PolicyResult(Decision.DENY, "production resources are read-only to JAEO", False)
-    if action == Action.CHANGE_CODE.value and resource.startswith("branch:") and not is_production:
-        return PolicyResult(Decision.ALLOW, "code changes are confined to a reviewable branch", False)
     if action in ALWAYS_APPROVAL_ACTIONS:
         # The caller must supply the approval row read from the private service-role
         # database, never a client-provided boolean or request payload.
