@@ -73,8 +73,11 @@ class JaeoPolicyTests(unittest.TestCase):
             "zythldptlplyutphgxpg", "db.zythldptlplyutphgxpg.supabase.co",
             "jarvis-control-worker", "production",
         ):
-            result = evaluate_action(agent="infrastructure", action=Action.INSPECT.value,
-                                     resource_id=resource)
+            result = evaluate_action(agent="infrastructure", action=Action.CHANGE_SCHEMA.value,
+                                     resource_id=resource,
+                                     approval_record={"status": "approved", "action": "change_schema",
+                                                      "resource_id": resource, "decided_by": "owner",
+                                                      "decided_at": "2026-11-20T00:00:00Z"})
             self.assertEqual(result.decision, Decision.DENY)
 
     def test_unknown_agent_and_action_fail_closed(self):
