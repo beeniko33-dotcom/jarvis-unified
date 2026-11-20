@@ -131,7 +131,7 @@ def validate_database_target(
         # assigned by Supabase and must be copied from Connect, not synthesized.
         import re
         pooler_host_valid = re.fullmatch(
-            r"aws-[0-9]+-[a-z0-9-]+\\.pooler\\.supabase\\.com", host
+            r"aws-[0-9]+-[a-z0-9-]+\.pooler\.supabase\.com", host
         )
         pooler_match = bool(
             pooler_host_valid
