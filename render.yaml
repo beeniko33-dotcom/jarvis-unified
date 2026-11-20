@@ -12,6 +12,8 @@ services:
     envVars:
       - key: JARVIS_DATABASE_URL
         sync: false
+      - key: JARVIS_EXPECTED_DATABASE_HOST
+        value: "db.uinibcemffkafdfuewyp.supabase.co"
       - key: JARVIS_PAPER_ACCOUNT_ID
         sync: false
       - key: JARVIS_GATEIO_VERIFIER_PUBLIC_KEY_B64

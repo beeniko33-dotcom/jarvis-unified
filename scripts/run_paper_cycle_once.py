@@ -111,9 +111,21 @@ def fetch_attested_observation(url: str) -> dict:
     return value
 
 
+def validate_database_target(dsn: str, expected_host: str) -> None:
+    """Pin the runner to the explicitly approved isolated Supabase database host."""
+    parsed = urlparse(dsn)
+    if parsed.scheme not in {"postgres", "postgresql"} or not parsed.hostname:
+        raise ValueError("database URL must be a PostgreSQL URL")
+    if not expected_host or parsed.hostname.lower() != expected_host.lower():
+        raise ValueError("database host does not match the explicitly approved isolated target")
+    if parsed.hostname.lower() == "db.zythldptlplyutphgxpg.supabase.co":
+        raise ValueError("production Supabase database is forbidden for this prototype runner")
+
+
 def main() -> int:
     try:
         dsn = os.environ["JARVIS_DATABASE_URL"]
+        validate_database_target(dsn, os.environ["JARVIS_EXPECTED_DATABASE_HOST"])
         account_id = os.environ["JARVIS_PAPER_ACCOUNT_ID"]
         public_key = os.environ.get("JARVIS_GATEIO_VERIFIER_PUBLIC_KEY_B64") or Path(
             "config/gateio-verifier-public-key.b64"
