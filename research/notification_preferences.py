@@ -31,8 +31,10 @@ def validate_preferences(payload: dict[str, object]) -> NotificationPreferences:
     raw_categories = payload.get("categories", [])
     if not isinstance(raw_categories, (list, tuple, set, frozenset)):
         raise ValueError("categories must be a list")
+    if any(not isinstance(item, str) for item in raw_categories):
+        raise ValueError("categories must contain only strings")
     categories = frozenset(raw_categories)
-    if any(not isinstance(item, str) for item in categories) or not categories <= CATEGORIES:
+    if not categories <= CATEGORIES:
         raise ValueError("unknown notification category")
     quiet_start = payload.get("quiet_start")
     quiet_end = payload.get("quiet_end")
