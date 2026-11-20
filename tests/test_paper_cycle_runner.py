@@ -68,6 +68,29 @@ class RunnerInputTests(unittest.TestCase):
                 "db.uinibcemffkafdfuewyp.supabase.co",
             )
 
+    def test_database_target_accepts_isolated_ipv4_session_pooler(self):
+        validate_database_target(
+            "postgresql://postgres.uinibcemffkafdfuewyp:password@aws-1-eu-central-1.pooler.supabase.com:5432/postgres",
+            "db.uinibcemffkafdfuewyp.supabase.co",
+            "uinibcemffkafdfuewyp",
+        )
+
+    def test_database_target_rejects_wrong_pooler_project_username(self):
+        with self.assertRaises(ValueError):
+            validate_database_target(
+                "postgresql://postgres.zythldptlplyutphgxpg:password@aws-1-eu-central-1.pooler.supabase.com:5432/postgres",
+                "db.uinibcemffkafdfuewyp.supabase.co",
+                "uinibcemffkafdfuewyp",
+            )
+
+    def test_database_target_rejects_pooler_transaction_mode(self):
+        with self.assertRaises(ValueError):
+            validate_database_target(
+                "postgresql://postgres.uinibcemffkafdfuewyp:password@aws-1-eu-central-1.pooler.supabase.com:6543/postgres",
+                "db.uinibcemffkafdfuewyp.supabase.co",
+                "uinibcemffkafdfuewyp",
+            )
+
     def test_controls_are_fail_closed_when_missing(self):
         controls = load_operator_controls(
             lambda: Connection(None),
