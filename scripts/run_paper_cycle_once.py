@@ -111,21 +111,46 @@ def fetch_attested_observation(url: str) -> dict:
     return value
 
 
-def validate_database_target(dsn: str, expected_host: str) -> None:
-    """Pin the runner to the explicitly approved isolated Supabase database host."""
+def validate_database_target(
+    dsn: str,
+    expected_host: str,
+    expected_project_ref: str | None = None,
+) -> None:
+    """Pin direct or IPv4 session-pooler DSNs to the isolated Supabase project."""
     parsed = urlparse(dsn)
     if parsed.scheme not in {"postgres", "postgresql"} or not parsed.hostname:
         raise ValueError("database URL must be a PostgreSQL URL")
-    if not expected_host or parsed.hostname.lower() != expected_host.lower():
-        raise ValueError("database host does not match the explicitly approved isolated target")
-    if parsed.hostname.lower() == "db.zythldptlplyutphgxpg.supabase.co":
+    host = parsed.hostname.lower()
+    if host == "db.zythldptlplyutphgxpg.supabase.co":
         raise ValueError("production Supabase database is forbidden for this prototype runner")
+
+    direct_match = bool(expected_host) and host == expected_host.lower()
+    pooler_match = False
+    if expected_project_ref and host.endswith(".pooler.supabase.com"):
+        # Supavisor's shared session pooler is IPv4-compatible. Its hostname is
+        # assigned by Supabase and must be copied from Connect, not synthesized.
+        import re
+        pooler_host_valid = re.fullmatch(
+            r"aws-[0-9]+-[a-z0-9-]+\\.pooler\\.supabase\\.com", host
+        )
+        pooler_match = bool(
+            pooler_host_valid
+            and parsed.port == 5432
+            and parsed.username == f"postgres.{expected_project_ref}"
+            and parsed.path == "/postgres"
+        )
+    if not (direct_match or pooler_match):
+        raise ValueError("database URL does not match the isolated project direct or session-pooler target")
 
 
 def main() -> int:
     try:
         dsn = os.environ["JARVIS_DATABASE_URL"]
-        validate_database_target(dsn, os.environ["JARVIS_EXPECTED_DATABASE_HOST"])
+        validate_database_target(
+            dsn,
+            os.environ.get("JARVIS_EXPECTED_DATABASE_HOST", ""),
+            os.environ.get("JARVIS_EXPECTED_DATABASE_PROJECT_REF"),
+        )
         account_id = os.environ["JARVIS_PAPER_ACCOUNT_ID"]
         public_key = os.environ.get("JARVIS_GATEIO_VERIFIER_PUBLIC_KEY_B64") or Path(
             "config/gateio-verifier-public-key.b64"
