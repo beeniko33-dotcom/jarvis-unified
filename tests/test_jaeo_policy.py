@@ -17,7 +17,7 @@ class JaeoPolicyTests(unittest.TestCase):
 
     def test_mutations_require_human_approval(self):
         for action in (
-            Action.CHANGE_CODE.value, Action.CHANGE_SCHEMA.value,
+            Action.CHANGE_SCHEMA.value,
             Action.PROVISION_RESOURCE.value, Action.CREATE_CRON.value,
             Action.DEPLOY_PREVIEW.value, Action.MERGE_PULL_REQUEST.value,
         ):
@@ -26,16 +26,46 @@ class JaeoPolicyTests(unittest.TestCase):
             self.assertTrue(result.requires_human_approval)
 
     def test_explicit_approval_only_authorizes_approvable_action(self):
+        approval = {"status": "approved", "action": Action.CHANGE_SCHEMA.value,
+                    "resource_id": "isolated-prototype", "decided_by": "operator-1",
+                    "decided_at": "2026-11-20T06:00:00Z"}
         result = evaluate_action(agent="database", action=Action.CHANGE_SCHEMA.value,
-                                 resource_id="isolated-prototype", approval_granted=True)
+                                 resource_id="isolated-prototype", approval_record=approval)
         self.assertEqual(result.decision, Decision.ALLOW)
+
+    def test_approval_must_match_exact_action_and_resource(self):
+        approval = {"status": "approved", "action": Action.CHANGE_SCHEMA.value,
+                    "resource_id": "another-resource", "decided_by": "operator-1",
+                    "decided_at": "2026-11-20T06:00:00Z"}
+        result = evaluate_action(agent="database", action=Action.CHANGE_SCHEMA.value,
+                                 resource_id="isolated-prototype", approval_record=approval)
+        self.assertEqual(result.decision, Decision.APPROVAL_REQUIRED)
+
+    def test_code_changes_are_confined_to_reviewable_branches(self):
+        result = evaluate_action(agent="engineering", action=Action.CHANGE_CODE.value,
+                                 resource_id="branch:feat/example")
+        self.assertEqual(result.decision, Decision.ALLOW)
+        protected = evaluate_action(agent="engineering", action=Action.CHANGE_CODE.value,
+                                    resource_id="main")
+        self.assertEqual(protected.decision, Decision.APPROVAL_REQUIRED)
+
+    def test_production_workspace_is_read_only_not_invisible(self):
+        inspected = evaluate_action(agent="audit", action=Action.INSPECT.value,
+                                    resource_id="zythldptlplyutphgxpg")
+        self.assertEqual(inspected.decision, Decision.ALLOW)
+        changed = evaluate_action(agent="database", action=Action.CHANGE_SCHEMA.value,
+                                  resource_id="zythldptlplyutphgxpg",
+                                  approval_record={"status": "approved", "action": "change_schema",
+                                                   "resource_id": "zythldptlplyutphgxpg",
+                                                   "decided_by": "owner", "decided_at": "now"})
+        self.assertEqual(changed.decision, Decision.DENY)
 
     def test_critical_actions_are_never_authorized(self):
         for action in (
             Action.LIVE_TRADE.value, Action.DEPLOY_PRODUCTION.value,
             Action.CHANGE_OPERATOR_CONTROLS.value,
         ):
-            result = evaluate_action(agent="release", action=action, approval_granted=True)
+            result = evaluate_action(agent="release", action=action, approval_record={"status": "approved", "action": action, "resource_id": "", "decided_by": "owner", "decided_at": "now"})
             self.assertEqual(result.decision, Decision.DENY)
 
     def test_production_resources_are_denied(self):
