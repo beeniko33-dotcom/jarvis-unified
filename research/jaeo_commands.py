@@ -46,7 +46,7 @@ class CommandIntent:
 # Any sensitive verb anywhere in a compound request takes precedence over
 # otherwise-safe leading words such as "research" or "inspect".
 _SENSITIVE_ANYWHERE = re.compile(
-    r"\\b(trade|trading order|place order|buy|sell|deploy|merge|"
+    r"\b(trade|trading order|place order|buy|sell|deploy|merge|"
     r"disable kill switch|pause entries|resume entries|change operator controls|"
     r"submit application|apply for job|withdraw|deposit|transfer|pay|"
     r"api key|token|password|secret)\\b",
