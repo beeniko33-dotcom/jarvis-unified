@@ -6,6 +6,7 @@ external services, deploy infrastructure, or execute trading actions.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
 
@@ -46,7 +47,6 @@ class Action(StrEnum):
     PAPER_RESEARCH = "paper_research"
 
 
-# Resource names are exact identifiers, not user-supplied fuzzy matches.
 PRODUCTION_RESOURCE_IDS = frozenset({
     "zythldptlplyutphgxpg",
     "db.zythldptlplyutphgxpg.supabase.co",
@@ -54,24 +54,16 @@ PRODUCTION_RESOURCE_IDS = frozenset({
     "production",
     "prod",
 })
-
 ALLOWED_AGENTS = frozenset(role.value for role in AgentRole)
 SAFE_AUTONOMOUS_ACTIONS = frozenset({
-    Action.INSPECT.value,
-    Action.TEST.value,
-    Action.CREATE_BRANCH.value,
-    Action.OPEN_PULL_REQUEST.value,
-    Action.PAPER_RESEARCH.value,
+    Action.INSPECT.value, Action.TEST.value, Action.CREATE_BRANCH.value,
+    Action.OPEN_PULL_REQUEST.value, Action.PAPER_RESEARCH.value,
 })
 ALWAYS_APPROVAL_ACTIONS = frozenset({
-    Action.CHANGE_CODE.value,
-    Action.CHANGE_SCHEMA.value,
-    Action.CHANGE_SECRET.value,
-    Action.PROVISION_RESOURCE.value,
-    Action.CREATE_CRON.value,
-    Action.DEPLOY_PREVIEW.value,
-    Action.DEPLOY_PRODUCTION.value,
-    Action.MERGE_PULL_REQUEST.value,
+    Action.CHANGE_CODE.value, Action.CHANGE_SCHEMA.value,
+    Action.CHANGE_SECRET.value, Action.PROVISION_RESOURCE.value,
+    Action.CREATE_CRON.value, Action.DEPLOY_PREVIEW.value,
+    Action.DEPLOY_PRODUCTION.value, Action.MERGE_PULL_REQUEST.value,
     Action.CHANGE_OPERATOR_CONTROLS.value,
 })
 
@@ -85,6 +77,33 @@ class PolicyResult:
     live_trading_enabled: bool = False
 
 
+def _approval_is_valid(
+    approval: Any, *, action: str, resource_id: str, task_id: str | None,
+    now: datetime | None,
+) -> bool:
+    """Validate a service-role-fetched approval bound to this task and request."""
+    if not isinstance(approval, dict) or not task_id:
+        return False
+    required = ("id", "task_id", "status", "action", "resource_id", "decided_by", "decided_at", "expires_at")
+    if any(not approval.get(key) for key in required):
+        return False
+    if approval["status"] != "approved" or approval["action"] != action:
+        return False
+    if approval["resource_id"] != resource_id or str(approval["task_id"]) != str(task_id):
+        return False
+    try:
+        decided_at = datetime.fromisoformat(str(approval["decided_at"]).replace("Z", "+00:00"))
+        expires_at = datetime.fromisoformat(str(approval["expires_at"]).replace("Z", "+00:00"))
+        current = now or datetime.now(timezone.utc)
+        if decided_at.tzinfo is None or expires_at.tzinfo is None:
+            return False
+        if current.tzinfo is None or current.utcoffset() is None:
+            return False
+        return decided_at <= current < expires_at
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def evaluate_action(
     *,
     agent: str,
@@ -92,6 +111,8 @@ def evaluate_action(
     resource_id: str | None = None,
     environment: str | None = None,
     approval_record: dict[str, Any] | None = None,
+    task_id: str | None = None,
+    now: datetime | None = None,
 ) -> PolicyResult:
     """Evaluate a requested operation. Unknown roles/actions fail closed."""
     if agent not in ALLOWED_AGENTS:
@@ -111,21 +132,14 @@ def evaluate_action(
     if is_production and action != Action.INSPECT.value:
         return PolicyResult(Decision.DENY, "production resources are read-only to JAEO", False)
     if action in ALWAYS_APPROVAL_ACTIONS:
-        # The caller must supply the approval row read from the private service-role
-        # database, never a client-provided boolean or request payload.
-        approved = (
-            isinstance(approval_record, dict)
-            and approval_record.get("status") == "approved"
-            and approval_record.get("action") == action
-            and approval_record.get("resource_id") == (resource_id or "")
-            and bool(approval_record.get("decided_by"))
-            and bool(approval_record.get("decided_at"))
-        )
-        if approved:
-            return PolicyResult(Decision.ALLOW, "matching persisted human approval verified", False)
+        if _approval_is_valid(
+            approval_record, action=action, resource_id=resource_id or "",
+            task_id=task_id, now=now,
+        ):
+            return PolicyResult(Decision.ALLOW, "task-bound, unexpired persisted approval verified", False)
         return PolicyResult(
             Decision.APPROVAL_REQUIRED,
-            "supervised mode requires a matching persisted human approval for this change",
+            "a task-bound, unexpired persisted human approval is required",
             True,
         )
     if action in SAFE_AUTONOMOUS_ACTIONS:
@@ -186,16 +200,10 @@ def feedback_event(
     if any(not isinstance(url, str) or not url.startswith("https://") for url in urls):
         raise ValueError("evidence URLs must use https")
     return {
-        "task_id": task_id,
-        "agent": agent,
-        "status": status,
-        "inspected": (inspected or [])[:50],
-        "changed": (changed or [])[:50],
-        "tests": (tests or [])[:50],
-        "deployment": deployment,
-        "errors": (errors or [])[:20],
-        "evidence_urls": urls[:50],
+        "task_id": task_id, "agent": agent, "status": status,
+        "inspected": (inspected or [])[:50], "changed": (changed or [])[:50],
+        "tests": (tests or [])[:50], "deployment": deployment,
+        "errors": (errors or [])[:20], "evidence_urls": urls[:50],
         "recommendations": (recommendations or [])[:20],
-        "mode": "paper",
-        "live_trading_enabled": False,
+        "mode": "paper", "live_trading_enabled": False,
     }
