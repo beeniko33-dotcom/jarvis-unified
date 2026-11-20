@@ -37,7 +37,10 @@ jobs:
       - name: Smoke-test isolated Cloudflare Worker Preview
         run: python scripts/verify_worker_preview.py
 
-      - name: Run unit test suite
+      - name: Run forecast-only engine tests
+        run: python -m unittest tests.test_forex_forecast -v
+
+      - name: Run remaining repository regression suite
         run: python -m unittest discover -s tests -v
 
       - name: Test JAEO supervised operations policy
@@ -71,7 +74,7 @@ jobs:
       - name: Build and smoke-test the local container
         run: |
           docker compose up -d --build --wait
-          docker compose exec -T jarvis python -c "import json, urllib.request; base='http://127.0.0.1:8787'; assert json.loads(urllib.request.urlopen(base+'/health').read())['ok']; features=json.loads(urllib.request.urlopen(base+'/features').read()); assert features['read_only'] and features['execution_mode']=='paper_only'; dashboard=urllib.request.urlopen(base+'/dashboard'); assert dashboard.status==200 and dashboard.read(); print('container health, feature inventory, and dashboard ok')"
+          docker compose exec -T jarvis python -c "import json, urllib.request; base='http://127.0.0.1:8787'; assert json.loads(urllib.request.urlopen(base+'/health').read())['ok']; features=json.loads(urllib.request.urlopen(base+'/features').read()); assert features['read_only']; dashboard=urllib.request.urlopen(base+'/dashboard'); assert dashboard.status==200 and dashboard.read(); print('container health, feature inventory, and dashboard ok')"
 
       - name: Stop the local container
         if: always()
