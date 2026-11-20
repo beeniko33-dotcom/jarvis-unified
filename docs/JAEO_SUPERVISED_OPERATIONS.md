@@ -25,7 +25,9 @@ Tasks use a durable UUID, unique idempotency key, explicit agent role, workspace
 
 ## Integration truth
 
-The GitHub repository and isolated Supabase prototype are currently accessible through their connected tools. Render is not verified as connected; therefore workspace inspection, Cron creation, deployment and billing checks cannot be reported as completed. Cloudflare account access and deploy permissions must be verified for each requested action. A configured role is not a connected integration.
+Read-only access is verified for the GitHub repository, the production and isolated Supabase projects, and the Cloudflare account. The Cloudflare inventory currently includes `jarvis-control-worker`, `jarvis-gateio-attestor`, `jarvis-unified-mcp`, and the `jarvis-control-panel` Pages project. The control Worker already has a one-minute schedule; the Gate.io attestor and MCP Worker have no Cron schedules. These existing schedules and production Worker settings were inspected only and were not changed.
+
+Render is not verified as connected; therefore Render workspace inspection, Cron creation, deployment and billing checks cannot be reported as completed. No JAEO Worker or JAEO Cron has been provisioned. A configured role is not a connected integration, and each write/deploy operation remains approval-gated.
 
 ## Rollout sequence
 
