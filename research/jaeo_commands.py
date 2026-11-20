@@ -49,7 +49,7 @@ _SENSITIVE_ANYWHERE = re.compile(
     r"\b(trade|trading order|place order|buy|sell|deploy|merge|"
     r"disable kill switch|pause entries|resume entries|change operator controls|"
     r"submit application|apply for job|withdraw|deposit|transfer|pay|"
-    r"api key|token|password|secret)\\b",
+    r"api key|token|password|secret)\b",
     re.I,
 )
 
