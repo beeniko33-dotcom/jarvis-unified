@@ -9,6 +9,7 @@ from pathlib import Path
 from scripts.run_paper_cycle_once import (
     load_attested_observation,
     load_operator_controls,
+    validate_database_target,
 )
 from research.gateio_attestation_verifier import VERIFIER_ID
 
@@ -47,6 +48,26 @@ class Connection:
 
 
 class RunnerInputTests(unittest.TestCase):
+    def test_database_target_requires_exact_isolated_host(self):
+        validate_database_target(
+            "postgresql://user:password@db.uinibcemffkafdfuewyp.supabase.co:5432/postgres",
+            "db.uinibcemffkafdfuewyp.supabase.co",
+        )
+
+    def test_database_target_rejects_production_even_if_expected(self):
+        with self.assertRaises(ValueError):
+            validate_database_target(
+                "postgresql://user:password@db.zythldptlplyutphgxpg.supabase.co:5432/postgres",
+                "db.zythldptlplyutphgxpg.supabase.co",
+            )
+
+    def test_database_target_rejects_mismatch(self):
+        with self.assertRaises(ValueError):
+            validate_database_target(
+                "postgresql://user:password@db.zythldptlplyutphgxpg.supabase.co:5432/postgres",
+                "db.uinibcemffkafdfuewyp.supabase.co",
+            )
+
     def test_controls_are_fail_closed_when_missing(self):
         controls = load_operator_controls(
             lambda: Connection(None),
