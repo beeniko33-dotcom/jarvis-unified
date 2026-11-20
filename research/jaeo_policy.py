@@ -91,7 +91,7 @@ def evaluate_action(
     action: str,
     resource_id: str | None = None,
     environment: str | None = None,
-    approval_granted: bool = False,
+    approval_record: dict[str, Any] | None = None,
 ) -> PolicyResult:
     """Evaluate a requested operation. Unknown roles/actions fail closed."""
     if agent not in ALLOWED_AGENTS:
@@ -107,14 +107,27 @@ def evaluate_action(
         return PolicyResult(Decision.DENY, "operator controls are immutable to JAEO", False)
     if action == Action.DEPLOY_PRODUCTION.value:
         return PolicyResult(Decision.DENY, "production deployment is outside JAEO authority", False)
-    if resource in PRODUCTION_RESOURCE_IDS or env in PRODUCTION_RESOURCE_IDS:
-        return PolicyResult(Decision.DENY, "production resource is protected", False)
+    is_production = resource in PRODUCTION_RESOURCE_IDS or env in PRODUCTION_RESOURCE_IDS
+    if is_production and action != Action.INSPECT.value:
+        return PolicyResult(Decision.DENY, "production resources are read-only to JAEO", False)
+    if action == Action.CHANGE_CODE.value and resource.startswith("branch:") and not is_production:
+        return PolicyResult(Decision.ALLOW, "code changes are confined to a reviewable branch", False)
     if action in ALWAYS_APPROVAL_ACTIONS:
-        if approval_granted:
-            return PolicyResult(Decision.ALLOW, "explicit human approval verified", False)
+        # The caller must supply the approval row read from the private service-role
+        # database, never a client-provided boolean or request payload.
+        approved = (
+            isinstance(approval_record, dict)
+            and approval_record.get("status") == "approved"
+            and approval_record.get("action") == action
+            and approval_record.get("resource_id") == (resource_id or "")
+            and bool(approval_record.get("decided_by"))
+            and bool(approval_record.get("decided_at"))
+        )
+        if approved:
+            return PolicyResult(Decision.ALLOW, "matching persisted human approval verified", False)
         return PolicyResult(
             Decision.APPROVAL_REQUIRED,
-            "supervised mode requires explicit approval for this change",
+            "supervised mode requires a matching persisted human approval for this change",
             True,
         )
     if action in SAFE_AUTONOMOUS_ACTIONS:
