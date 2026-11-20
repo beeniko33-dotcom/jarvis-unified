@@ -6,7 +6,7 @@ create orders, or change the existing paper/live execution controls.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN
 
 
 @dataclass(frozen=True, slots=True)
