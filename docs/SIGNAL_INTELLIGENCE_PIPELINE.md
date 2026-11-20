@@ -1,77 +1,34 @@
-# Jarvis signal intelligence and market-data pipeline
+# Forex signal intelligence and forecast pipeline
 
-**Status:** database foundation deployed; source ingestion and strategy-to-paper wiring remain gated.
+**Product mode:** signal and forecast analytics only. No paper trading, demo trading, broker execution, positions, account balances, order sizing or trade lifecycle.
 
-## Provider routing
-
-| Source | Intended use | Trust ceiling |
+## Data sources and trust
+| Source | Intended use | Trust treatment |
 |---|---|---|
-| Biquote | EUR/USD candidate bid/ask stream via the existing SignalR collector | `candidate_unverified`; zero evidence credit |
-| Deriv | Secondary comparison only for exact symbols returned by `active_symbols` | Candidate until provider-origin assurance passes |
-| Twelve Data | Independent FX reference / reconciliation where the plan permits the needed cadence | Reference only; do not assume free streaming or tick entitlement |
-| Gate.io | Crypto spot market data only | Not a substitute for conventional OTC EUR/USD FX |
+| Deriv public feed | Candidate FX quote observations for supported instruments | Verify actual catalog and provenance; label unverified until independently established |
+| Biquote | Secondary candidate quote stream | Candidate/unverified until source lineage is validated |
+| Twelve Data | Independent reference/reconciliation where access permits | Respect plan cadence and entitlement |
+| Gate.io | Excluded from Forex forecasts; crypto is a different asset class | Never substitute crypto spot for OTC FX |
 
-Never infer a Deriv EUR/USD symbol from a different instrument. The last documented smoke test found no canonical `FRXEURUSD` symbol; repeat a read-only catalog check before enabling any subscription.
+Never infer an instrument code. Store provider timestamp, collector receive time, source identifier, bid/ask where available, quote age, spread and validation result. Reject malformed, stale, future-dated, out-of-order or wrong-symbol observations.
 
-## Canonical signal record
+## Forecast output
+Each forecast contains instrument, timeframe, horizon, generation timestamp, bullish/bearish/neutral direction, explainable strength score (not a probability), data-quality status, rationale and strategy version. The current reference engine uses short/long EMA relationship and recent momentum, requires at least 20 chronological fresh candles, and makes no calibrated probability claim.
 
-The private table `jarvis_private.market_signals` stores:
+The engine does not produce entry levels, stop-loss, take-profit, lot size, leverage, position size, orders, fills or execution assumptions.
 
-- Identity: `signal_id`, idempotency key, instrument, asset class, direction, timeframe, strategy/version.
-- Lineage: provider, linked observation, signal creation/expiry timestamps, and trust classification.
-- Quote: bid, ask, mid, spread, provider timestamp, receive timestamp, quote age and freshness flags in `quote`.
-- Analysis: indicator values, multi-timeframe alignment, trend/structure, support/resistance, evidence and conflicting evidence in `analysis`.
-- Plan: entry zone, invalidation, stop, targets, reward/risk and execution assumptions in `trade_plan`.
-- Risk: proposed size, account risk fraction, exposure and risk-rule outcomes in `risk`.
-- Lifecycle: research/paper eligibility, paper execution details and eventual outcome.
+## Operational requirements
+1. Obtain market data from an explicitly approved source and preserve source attribution.
+2. Normalize FX symbols, timezone-aware timestamps and OHLC/quote values.
+3. Reject invalid or stale data rather than carrying forward old prices.
+4. Generate reproducible forecasts with strategy/version metadata.
+5. Persist immutable forecast snapshots and later observed outcomes.
+6. Evaluate directional accuracy, calibration, coverage and false-signal rate by instrument/timeframe. Do not publish a confidence probability until calibrated out-of-sample.
+7. Alert users to new, changed, expired or invalidated forecasts; require opt-in and support quiet hours/unsubscribe.
+8. Display a clear research-only disclaimer and distinguish verified observations from unverified candidate data.
 
-JSON payloads are versioned by the producer. Persist provider timestamps separately from collector receive time. Use bid/ask—not mid alone—for simulated fills. Include spread, modeled slippage, fees and latency assumptions in the paper execution record.
+## Security and reliability
+Authentication, authorization, input validation, rate limits, audit logs, secret isolation, tenant isolation and source integrity checks remain enabled. Removing trading features does not mean removing application security or data-quality checks.
 
-## Non-negotiable invariants
-
-1. `evidence_credit` is constrained to false in this phase. A live quote is not an authenticated quote.
-2. Candidate/unverified signals remain research-only until feed quality, provenance and risk gates are separately reviewed.
-3. A signal is not an order. Only the paper engine may consume paper-eligible signals, and only with the paper kill switch explicitly released for a controlled session.
-4. Idempotency keys prevent duplicate signal ingestion. Observation IDs provide traceability.
-5. Expired, stale, future-dated, malformed, out-of-order or wrong-symbol observations are rejected or quarantined.
-6. No API credentials are required for public market-data collection. Never store broker secrets in observations or signal JSON.
-7. No live execution, wallet signing, broker order endpoint, or account-authenticated action is part of this pipeline.
-
-## Deployment state and remaining gates
-
-- Supabase migration creates the private signal ledger and lookup indexes. RLS is enabled; browser roles are denied; service-role access is granted for trusted server-side ingestion.
-- Existing private tables already include market observations, paper accounts, paper ledger events, paper runs, runtime audit events and worker heartbeats.
-- Cloudflare remains a control/HTTP-ingestion boundary, not a long-running WebSocket collector. The Worker source now includes a `/market-data` proxy route to the JWT-protected Supabase ingestion function; this route is committed but not deployed pending Worker Python runtime validation and out-of-band secret configuration. Keep a persistent collector or provider push source outside request-lifetime Workers.
-- Do not enable the Cloudflare Cron worker until the service-role secret is configured out-of-band and Python Worker runtime + heartbeat are verified.
-- Do not enable paper-session execution in Cloudflare until Postgres transactional account updates, idempotency, event-chain verification and crash recovery are implemented and tested.
-- The collector still writes to local SQLite as its local journal and can additionally forward batches to Cloudflare when configured. The endpoint tokens are intentionally not embedded in source. They must be generated and configured out-of-band in Supabase Edge Function secrets and Cloudflare Worker secrets before a real end-to-end read-only smoke test.
-- Provider provenance remains blocked. No Level 3 clock starts and no performance claim is warranted.
-
-## Read-only operational checks
-
-After ingestion is deployed, monitor per-source last event time, quote age, spread, reject count, duplicate count, gaps, reconnects, queue drops, clock skew and divergence between independent sources. Alert on stale/no data and fail closed rather than carrying forward old prices.
-
-## Rollout sequence
-
-1. Schema (deployed).
-2. Contract and validation tests.
-3. Configure `JARVIS_INGEST_TOKEN` in Supabase Edge Function secrets and `JARVIS_COLLECTOR_TOKEN` plus `JARVIS_INGEST_TOKEN` in Cloudflare Worker secrets; keep `SUPABASE_SERVICE_ROLE_KEY` secret-only.
-4. Validate Cloudflare Python runtime and deploy the Worker proxy; run a bounded EUR/USD collector session and verify observations in Supabase.
-5. Add signal generation and audit persistence only after normalized candle history and feed freshness have been validated.
-5. Paper execution integration with bid/ask, slippage, fees, risk limits and transactional state.
-6. Independent feed provenance review and sustained forward validation.
-
-No paid plan or service was provisioned by this change.
-
-
-## Collector configuration (operator action required)
-
-The source adapter is committed but deliberately inert until configured. Set:
-
-- Collector process: `JARVIS_MARKET_DATA_URL=https://<your-worker-host>/market-data` and `JARVIS_COLLECTOR_TOKEN=<high-entropy-token>`.
-- Supabase Edge Function secret: `JARVIS_INGEST_TOKEN=<different-high-entropy-token>`.
-- Cloudflare Worker secrets: `JARVIS_COLLECTOR_TOKEN`, `JARVIS_INGEST_TOKEN`, and the existing `SUPABASE_SERVICE_ROLE_KEY`.
-
-Use distinct random tokens for collector-to-Cloudflare and Cloudflare-to-Supabase. Do not put them in Git, dashboard client code, or chat. Do not start the collector until the Cloudflare Worker has passed its runtime/health check and the secrets are present. The ingestion function intentionally returns 503 when its secret is absent and 401 for an invalid token.
-
-The database RPC smoke test used a transaction that was explicitly rolled back. It verified first-write and duplicate behavior without leaving a production observation. This is not an end-to-end provider-feed test.
+## Migration status
+The new forecast engine and tests are introduced on the signal-only feature branch. Existing paper/trading code, database objects and historical workflows have not yet been physically removed from the repository or production. Complete conversion requires removing legacy trading imports, command-line actions, API routes, UI components, migrations, scheduled workflows, secrets and dashboard labels, then running repository-wide checks and full CI. No production database or deployment is changed by this branch.

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat/gateio-readonly-market-provider, deriv-eurusd-readonly-feed, level3-provenance-ops-readiness, feat/deriv-tls-claim-fail-closed, fix/forward-evidence-verifier-injection-closed]
+    branches: [main, feat/jarvis-forex-signal-only, feat/gateio-readonly-market-provider, deriv-eurusd-readonly-feed, level3-provenance-ops-readiness, feat/deriv-tls-claim-fail-closed, fix/forward-evidence-verifier-injection-closed]
   pull_request:
     branches: [main, deriv-eurusd-readonly-feed, level3-provenance-ops-readiness, feat/deriv-tls-claim-fail-closed, feat/public-rss-metadata-ingestion, feat/research-source-health-gaps]
   workflow_dispatch:
@@ -37,7 +37,10 @@ jobs:
       - name: Smoke-test isolated Cloudflare Worker Preview
         run: python scripts/verify_worker_preview.py
 
-      - name: Run unit test suite
+      - name: Run forecast-only engine tests
+        run: python -m unittest tests.test_forex_forecast -v
+
+      - name: Run remaining repository regression suite
         run: python -m unittest discover -s tests -v
 
       - name: Test JAEO supervised operations policy
@@ -46,32 +49,13 @@ jobs:
       - name: Test Deriv read-only market-data collector
         run: python -m unittest discover -s tests -p 'test_deriv_feed.py' -v
 
-      - name: Test durable paper research replay
-        run: python -m unittest discover -s tests -p 'test_paper_replay.py' -v
-
-      - name: Validate paper-mode startup
-        run: python main.py --check
-
-      - name: Check runtime report payload
-        run: |
-          python main.py --report > /tmp/jarvis-report.json
-          python -c "import json; from pathlib import Path; p=json.loads(Path('/tmp/jarvis-report.json').read_text()); assert p['ok'] is True; assert p['mode']=='paper'; assert p['broker']=='paper'; print('report ok')"
-
-      - name: Exercise deterministic paper session and ledger report
-        run: |
-          python scripts/paper_session.py --allow-entries --ledger /tmp/jarvis-paper-ledger.jsonl
-          python scripts/paper_report.py /tmp/jarvis-paper-ledger.jsonl --min-days 1
-
-      - name: Run 1,000-cycle paper durability stress test
-        run: python scripts/paper_stress.py --cycles 1000
-
       - name: Run foundation diagnostic
         run: python scripts/diagnose.py
 
       - name: Build and smoke-test the local container
         run: |
           docker compose up -d --build --wait
-          docker compose exec -T jarvis python -c "import json, urllib.request; base='http://127.0.0.1:8787'; assert json.loads(urllib.request.urlopen(base+'/health').read())['ok']; features=json.loads(urllib.request.urlopen(base+'/features').read()); assert features['read_only'] and features['execution_mode']=='paper_only'; dashboard=urllib.request.urlopen(base+'/dashboard'); assert dashboard.status==200 and dashboard.read(); print('container health, feature inventory, and dashboard ok')"
+          docker compose exec -T jarvis python -c "import json, urllib.request; base='http://127.0.0.1:8787'; assert json.loads(urllib.request.urlopen(base+'/health').read())['ok']; features=json.loads(urllib.request.urlopen(base+'/features').read()); assert features['read_only']; dashboard=urllib.request.urlopen(base+'/dashboard'); assert dashboard.status==200 and dashboard.read(); print('container health, feature inventory, and dashboard ok')"
 
       - name: Stop the local container
         if: always()
