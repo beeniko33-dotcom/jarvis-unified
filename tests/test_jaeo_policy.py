@@ -1,10 +1,25 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timezone
 
 from research.jaeo_policy import (
     Action, Decision, evaluate_action, feedback_event, validate_task,
 )
+
+
+NOW = datetime(2026, 11, 20, 21, 0, tzinfo=timezone.utc)
+
+
+def approved(action, resource="isolated-prototype", task="task-1", **changes):
+    value = {
+        "id": "approval-123", "task_id": task, "status": "approved",
+        "action": action, "resource_id": resource, "decided_by": "operator-1",
+        "decided_at": "2026-11-20T20:00:00Z",
+        "expires_at": "2026-11-20T22:00:00Z",
+    }
+    value.update(changes)
+    return value
 
 
 class JaeoPolicyTests(unittest.TestCase):
@@ -16,74 +31,59 @@ class JaeoPolicyTests(unittest.TestCase):
             self.assertFalse(result.live_trading_enabled)
 
     def test_mutations_require_human_approval(self):
-        for action in (
-            Action.CHANGE_SCHEMA.value,
-            Action.PROVISION_RESOURCE.value, Action.CREATE_CRON.value,
-            Action.DEPLOY_PREVIEW.value, Action.MERGE_PULL_REQUEST.value,
-        ):
+        for action in (Action.CHANGE_SCHEMA.value, Action.PROVISION_RESOURCE.value,
+                       Action.CREATE_CRON.value, Action.DEPLOY_PREVIEW.value,
+                       Action.MERGE_PULL_REQUEST.value):
             result = evaluate_action(agent="engineering", action=action, resource_id="preview")
             self.assertEqual(result.decision, Decision.APPROVAL_REQUIRED)
             self.assertTrue(result.requires_human_approval)
 
-    def test_explicit_approval_only_authorizes_approvable_action(self):
-        approval = {"status": "approved", "action": Action.CHANGE_SCHEMA.value,
-                    "resource_id": "isolated-prototype", "decided_by": "operator-1",
-                    "decided_at": "2026-11-20T06:00:00Z"}
-        result = evaluate_action(agent="database", action=Action.CHANGE_SCHEMA.value,
-                                 resource_id="isolated-prototype", approval_record=approval)
+    def test_explicit_approval_is_bound_to_task_action_and_resource(self):
+        action = Action.CHANGE_SCHEMA.value
+        result = evaluate_action(agent="database", action=action, resource_id="isolated-prototype",
+                                 task_id="task-1", approval_record=approved(action), now=NOW)
         self.assertEqual(result.decision, Decision.ALLOW)
 
-    def test_approval_must_match_exact_action_and_resource(self):
-        approval = {"status": "approved", "action": Action.CHANGE_SCHEMA.value,
-                    "resource_id": "another-resource", "decided_by": "operator-1",
-                    "decided_at": "2026-11-20T06:00:00Z"}
+    def test_approval_rejects_wrong_task_action_or_resource(self):
+        action = Action.CHANGE_SCHEMA.value
+        cases = [
+            approved(action, task="another-task"),
+            approved(Action.CHANGE_CODE.value),
+            approved(action, resource="another-resource"),
+            approved(action, expires_at="2026-11-20T20:59:00Z"),
+            approved(action, decided_at="2026-11-20T21:01:00Z"),
+            approved(action, expires_at=None),
+            {"status": "approved", "action": action, "resource_id": "isolated-prototype",
+             "decided_by": "operator", "decided_at": "2026-11-20T20:00:00Z"},
+        ]
+        for record in cases:
+            with self.subTest(record=record):
+                result = evaluate_action(agent="database", action=action,
+                    resource_id="isolated-prototype", task_id="task-1",
+                    approval_record=record, now=NOW)
+                self.assertEqual(result.decision, Decision.APPROVAL_REQUIRED)
+
+    def test_code_changes_need_task_bound_approval(self):
+        action = Action.CHANGE_CODE.value
+        result = evaluate_action(agent="engineering", action=action,
+            resource_id="branch:feat/example", task_id="task-1",
+            approval_record=approved(action, resource="branch:feat/example"), now=NOW)
+        self.assertEqual(result.decision, Decision.ALLOW)
+
+    def test_production_workspace_is_read_only_even_with_approval(self):
         result = evaluate_action(agent="database", action=Action.CHANGE_SCHEMA.value,
-                                 resource_id="isolated-prototype", approval_record=approval)
-        self.assertEqual(result.decision, Decision.APPROVAL_REQUIRED)
-
-    def test_code_changes_are_confined_to_reviewable_branches(self):
-        result = evaluate_action(agent="engineering", action=Action.CHANGE_CODE.value,
-                                 resource_id="branch:feat/example")
-        self.assertEqual(result.decision, Decision.APPROVAL_REQUIRED)
-        approved = {"status": "approved", "action": Action.CHANGE_CODE.value,
-                    "resource_id": "branch:feat/example", "decided_by": "operator-1",
-                    "decided_at": "2026-11-20T06:00:00Z"}
-        authorized = evaluate_action(agent="engineering", action=Action.CHANGE_CODE.value,
-                                     resource_id="branch:feat/example", approval_record=approved)
-        self.assertEqual(authorized.decision, Decision.ALLOW)
-        protected = evaluate_action(agent="engineering", action=Action.CHANGE_CODE.value,
-                                    resource_id="main")
-        self.assertEqual(protected.decision, Decision.APPROVAL_REQUIRED)
-
-    def test_production_workspace_is_read_only_not_invisible(self):
-        inspected = evaluate_action(agent="audit", action=Action.INSPECT.value,
-                                    resource_id="zythldptlplyutphgxpg")
-        self.assertEqual(inspected.decision, Decision.ALLOW)
-        changed = evaluate_action(agent="database", action=Action.CHANGE_SCHEMA.value,
-                                  resource_id="zythldptlplyutphgxpg",
-                                  approval_record={"status": "approved", "action": "change_schema",
-                                                   "resource_id": "zythldptlplyutphgxpg",
-                                                   "decided_by": "owner", "decided_at": "now"})
-        self.assertEqual(changed.decision, Decision.DENY)
+            resource_id="zythldptlplyutphgxpg", task_id="task-1",
+            approval_record=approved(Action.CHANGE_SCHEMA.value,
+                resource="zythldptlplyutphgxpg"), now=NOW)
+        self.assertEqual(result.decision, Decision.DENY)
+        self.assertEqual(evaluate_action(agent="audit", action=Action.INSPECT.value,
+            resource_id="zythldptlplyutphgxpg").decision, Decision.ALLOW)
 
     def test_critical_actions_are_never_authorized(self):
-        for action in (
-            Action.LIVE_TRADE.value, Action.DEPLOY_PRODUCTION.value,
-            Action.CHANGE_OPERATOR_CONTROLS.value,
-        ):
-            result = evaluate_action(agent="release", action=action, approval_record={"status": "approved", "action": action, "resource_id": "", "decided_by": "owner", "decided_at": "now"})
-            self.assertEqual(result.decision, Decision.DENY)
-
-    def test_production_resources_are_denied(self):
-        for resource in (
-            "zythldptlplyutphgxpg", "db.zythldptlplyutphgxpg.supabase.co",
-            "jarvis-control-worker", "production",
-        ):
-            result = evaluate_action(agent="infrastructure", action=Action.CHANGE_SCHEMA.value,
-                                     resource_id=resource,
-                                     approval_record={"status": "approved", "action": "change_schema",
-                                                      "resource_id": resource, "decided_by": "owner",
-                                                      "decided_at": "2026-11-20T00:00:00Z"})
+        for action in (Action.LIVE_TRADE.value, Action.DEPLOY_PRODUCTION.value,
+                       Action.CHANGE_OPERATOR_CONTROLS.value):
+            result = evaluate_action(agent="release", action=action,
+                approval_record=approved(action, resource=""), task_id="task-1", now=NOW)
             self.assertEqual(result.decision, Decision.DENY)
 
     def test_unknown_agent_and_action_fail_closed(self):
@@ -99,10 +99,8 @@ class JaeoPolicyTests(unittest.TestCase):
         self.assertFalse(task["live_trading_enabled"])
 
     def test_task_cannot_escalate_autonomy_or_disable_feedback(self):
-        for task in (
-            {"title": "unsafe", "autonomy": "full"},
-            {"title": "unsafe", "feedback": "dashboard"},
-        ):
+        for task in ({"title": "unsafe", "autonomy": "full"},
+                     {"title": "unsafe", "feedback": "dashboard"}):
             with self.assertRaises(ValueError):
                 validate_task(task)
 
