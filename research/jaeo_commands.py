@@ -43,6 +43,16 @@ class CommandIntent:
     reason: str
 
 
+# Any sensitive verb anywhere in a compound request takes precedence over
+# otherwise-safe leading words such as "research" or "inspect".
+_SENSITIVE_ANYWHERE = re.compile(
+    r"\\b(trade|trading order|place order|buy|sell|deploy|merge|"
+    r"disable kill switch|pause entries|resume entries|change operator controls|"
+    r"submit application|apply for job|withdraw|deposit|transfer|pay|"
+    r"api key|token|password|secret)\\b",
+    re.I,
+)
+
 # Explicit phrases only. Do not infer a sensitive action from ambiguous text.
 _COMMANDS: tuple[tuple[re.Pattern[str], CommandAction, CommandRisk, str], ...] = (
     (re.compile(r"^(inspect|check status|audit status)$", re.I),
@@ -75,6 +85,16 @@ def classify_command(command: str) -> CommandIntent:
     if not isinstance(command, str) or not command.strip() or len(command) > 500:
         raise ValueError("command must contain 1-500 characters")
     normalized = " ".join(command.strip().split())
+    sensitive = _SENSITIVE_ANYWHERE.search(normalized)
+    if sensitive:
+        return CommandIntent(
+            action=CommandAction.UNKNOWN,
+            risk=CommandRisk.BLOCKED,
+            task_title=normalized[:200],
+            requires_human_approval=True,
+            executable_by_jaeo=False,
+            reason="compound or embedded sensitive instruction requires separate review",
+        )
     for pattern, action, risk, reason in _COMMANDS:
         if pattern.search(normalized):
             return CommandIntent(
