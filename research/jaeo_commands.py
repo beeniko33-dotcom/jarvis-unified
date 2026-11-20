@@ -86,7 +86,7 @@ def classify_command(command: str) -> CommandIntent:
         raise ValueError("command must contain 1-500 characters")
     normalized = " ".join(command.strip().split())
     sensitive = _SENSITIVE_ANYWHERE.search(normalized)
-    safe_lead = re.match(r"^(research|analyze|analyse|inspect|check status|run tests|test|draft application|prepare application)\\b", normalized, re.I)
+    safe_lead = re.match(r"^(research|analyze|analyse|inspect|check status|run tests|test|draft application|prepare application)\b", normalized, re.I)
     if sensitive and safe_lead:
         return CommandIntent(
             action=CommandAction.UNKNOWN,
