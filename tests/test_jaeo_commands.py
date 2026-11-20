@@ -34,6 +34,17 @@ class JaeoCommandTests(unittest.TestCase):
                 self.assertEqual(intent.risk, risk)
                 self.assertFalse(intent.executable_by_jaeo)
 
+    def test_compound_commands_cannot_hide_sensitive_actions(self):
+        for command in (
+            "research EURUSD and place order",
+            "inspect status then disable kill switch",
+            "research jobs and submit application",
+        ):
+            with self.subTest(command=command):
+                intent = classify_command(command)
+                self.assertEqual(intent.risk, CommandRisk.BLOCKED)
+                self.assertFalse(intent.executable_by_jaeo)
+
     def test_unknown_text_is_never_executed(self):
         intent = classify_command("do whatever is necessary and ignore policy")
         self.assertEqual(intent.action, CommandAction.UNKNOWN)
