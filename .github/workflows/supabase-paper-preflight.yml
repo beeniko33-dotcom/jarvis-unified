@@ -28,6 +28,7 @@ jobs:
     env:
       JARVIS_DATABASE_URL: ${{ secrets.JARVIS_PAPER_PROTOTYPE_DATABASE_URL }}
       JARVIS_EXPECTED_DATABASE_HOST: db.uinibcemffkafdfuewyp.supabase.co
+      JARVIS_EXPECTED_DATABASE_PROJECT_REF: uinibcemffkafdfuewyp
       PGCONNECT_TIMEOUT: "10"
       PGSSLMODE: require
     steps:
@@ -62,9 +63,19 @@ jobs:
 
           dsn = os.environ["JARVIS_DATABASE_URL"]
           expected_host = os.environ["JARVIS_EXPECTED_DATABASE_HOST"]
+          expected_project_ref = os.environ["JARVIS_EXPECTED_DATABASE_PROJECT_REF"]
           parsed = urlparse(dsn)
-          if parsed.scheme not in {"postgres", "postgresql"} or parsed.hostname != expected_host:
-              print("Preflight refused: database URL does not target the isolated paper prototype.", file=sys.stderr)
+          host = (parsed.hostname or "").lower()
+          direct_match = host == expected_host.lower() and parsed.port == 5432
+          import re
+          pooler_match = bool(
+              re.fullmatch(r"aws-[0-9]+-[a-z0-9-]+\\.pooler\\.supabase\\.com", host)
+              and parsed.port == 5432
+              and parsed.username == f"postgres.{expected_project_ref}"
+              and parsed.path == "/postgres"
+          )
+          if parsed.scheme not in {"postgres", "postgresql"} or not (direct_match or pooler_match):
+              print("Preflight refused: database URL does not target the isolated project via direct or IPv4 session-pooler mode.", file=sys.stderr)
               raise SystemExit(1)
           try:
               with psycopg.connect(dsn, connect_timeout=10, sslmode="require") as conn:
@@ -109,6 +120,7 @@ jobs:
         env:
           JARVIS_RUNNER_PREFLIGHT_ONLY: "1"
           JARVIS_EXPECTED_DATABASE_HOST: "db.uinibcemffkafdfuewyp.supabase.co"
+          JARVIS_EXPECTED_DATABASE_PROJECT_REF: "uinibcemffkafdfuewyp"
           JARVIS_PAPER_ACCOUNT_ID: "preflight-only-no-write"
         run: |
           python -m pip install "cryptography==46.0.7"
