@@ -40,6 +40,9 @@ jobs:
       - name: Run unit test suite
         run: python -m unittest discover -s tests -v
 
+      - name: Test JAEO supervised operations policy
+        run: python -m unittest discover -s tests -p 'test_jaeo_policy.py' -v
+
       - name: Test Deriv read-only market-data collector
         run: python -m unittest discover -s tests -p 'test_deriv_feed.py' -v
 
