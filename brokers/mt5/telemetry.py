@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 import re
 
 
@@ -56,10 +56,7 @@ class MT5Quote:
             raise ValueError("ask must be greater than or equal to bid")
         observed = _aware(self.observed_at, "observed_at")
         received = _aware(self.received_at, "received_at")
-        if received < observed:
-            age = (received - observed).total_seconds()
-        else:
-            age = (received - observed).total_seconds()
+        age = (received - observed).total_seconds()
         if age > max_age_seconds:
             raise ValueError("quote is stale")
         if age < -max_future_skew_seconds:
@@ -103,6 +100,9 @@ class MT5Heartbeat:
             raise ValueError("unexpected MT5 account binding")
         if self.terminal_connected is not True:
             raise ValueError("MT5 terminal is not connected")
-        if not self.expert_advisor_version.strip():
+        if (
+            not isinstance(self.expert_advisor_version, str)
+            or not self.expert_advisor_version.strip()
+        ):
             raise ValueError("missing Expert Advisor version")
         return self
