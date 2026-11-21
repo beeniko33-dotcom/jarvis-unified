@@ -20,7 +20,7 @@
 
 <section id="auth" class="card">
 <h2>Sign in or create a QA account</h2>
-<p class="muted">Use an email address you control. If email confirmation is enabled, confirm the message before signing in.</p>
+<p class="muted">Use an email address you control. Email confirmation returns to this console. The isolated QA project's Auth Redirect URL allowlist must include the Jarvis Unified Pages preview pattern; see the setup note in the project README.</p>
 <div class="grid" style="margin:0">
 <div><label for="email">Email</label><input id="email" type="email" autocomplete="email" required></div>
 <div><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" minlength="8" required></div>
@@ -94,7 +94,7 @@ function showSession(s){
 }
 async function refreshSession(){const {data}=await supabase.auth.getSession();showSession(data.session);}
 $("signin").onclick=async()=>{setStatus("authStatus","Signing in…");const {error}=await supabase.auth.signInWithPassword({email:$("email").value.trim(),password:$("password").value});setStatus("authStatus",error?.message??"Signed in.","success");if(!error)await refreshSession();};
-$("signup").onclick=async()=>{setStatus("authStatus","Creating account…");const {data,error}=await supabase.auth.signUp({email:$("email").value.trim(),password:$("password").value});setStatus("authStatus",error?.message??(data.session?"Account created.":"Account created. Check your email to confirm, then sign in."),error?"error":"success");if(data.session)showSession(data.session);};
+$("signup").onclick=async()=>{setStatus("authStatus","Creating account…");const {data,error}=await supabase.auth.signUp({email:$("email").value.trim(),password:$("password").value,options:{emailRedirectTo:window.location.origin+"/jaeo.html"}});setStatus("authStatus",error?.message??(data.session?"Account created.":"Account created. Check your email to confirm, then sign in."),error?"error":"success");if(data.session)showSession(data.session);};
 $("signout").onclick=async()=>{await supabase.auth.signOut();showSession(null);};
 async function loadTasks(){
   $("tasks").textContent="Loading…";
