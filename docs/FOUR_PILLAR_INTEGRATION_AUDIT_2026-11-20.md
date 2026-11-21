@@ -162,3 +162,14 @@ The older Career foundation migration (`20261118190000_career_giver_foundation.s
 ### CI
 - The earlier architecture head `760e960` passed all 12 CI steps.
 - CI was triggered again after JAEO API and frontend-isolation changes; the latest run must complete before this newer head is considered verified.
+
+
+## JAEO QA console rollout — 2026-11-21
+
+- Added the `jaeo-operator` Edge Function and deployed version 3 to isolated QA with gateway JWT verification enabled.
+- Added `20261121120000_jaeo_approval_queue.sql`; it extends the service-role-only dispatcher with requester-scoped and operator-wide approval queue reads.
+- Added `apps/portal/jaeo.html` and public QA-only `apps/portal/jaeo-config.js`. The browser contains only the publishable key. The console provides sign-up/sign-in, task create/list, approval request/list and operator-only decision UI.
+- Portal CORS accepts the Jarvis Unified Pages project hostname/preview aliases and any explicitly configured exact origins. No general wildcard origin is allowed.
+- Cloudflare Pages preview deployment succeeded for the feature branch. No new production deployment was initiated for these follow-up changes.
+- No operator claim was provisioned, no human account was created, and no live browser E2E test was possible without a human session. The next verification is a human QA sign-up/sign-in followed by task creation and approval request; operator decision testing requires separately provisioning a named trusted operator through the Supabase Auth admin process.
+- CI run for the API/RPC commit passed all 12 steps. The latest console contract test run remains pending at the time of this note.
