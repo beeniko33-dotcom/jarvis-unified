@@ -126,3 +126,11 @@ The older Career foundation migration (`20261118190000_career_giver_foundation.s
 - Updated the JAEO operations document to state the current product boundary: research and engineering operations only; no paper, demo or live trading, and no order execution.
 - Added and applied `20261121080000_jaeo_supervised_research_mode.sql` to the isolated QA project. Its JAEO task constraint now accepts only `mode='supervised'`; a transactional SQL test confirmed legacy `paper` mode is rejected, `supervised` mode is accepted, and append-only feedback still blocks UPDATE and DELETE after the trigger helper's API grants were revoked.
 - JAEO policy, command-routing and learning tests were updated to assert the supervised mode. CI for the resulting head is pending.
+
+
+### JAEO approval binding hardening — 2026-11-21
+
+- JAEO policy now requires an authenticated requester ID, a different authenticated approver ID, and the exact lowercase SHA-256 request hash before a persisted approval can authorize an action. Missing or mismatched values fail closed.
+- Added `20261121090000_jaeo_task_request_binding.sql` and applied it to isolated QA. New task inserts require a requester; approval triggers bind each approval to the task requester, require a different human approver for approve/reject decisions, validate the hash format, and prevent changing task/action/resource/request-hash bindings or revising a final decision.
+- A transactional database test verified self-approval is rejected, a distinct approver succeeds, approved bindings cannot be edited, and mismatched requesters/malformed hashes are rejected. The test transaction was rolled back.
+- The API/dashboard must still compute the canonical payload hash server-side and submit the requester/approver identities from authenticated sessions. No JAEO API or dashboard is deployed yet.
