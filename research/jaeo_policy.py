@@ -79,17 +79,28 @@ class PolicyResult:
 
 def _approval_is_valid(
     approval: Any, *, action: str, resource_id: str, task_id: str | None,
-    now: datetime | None,
+    requester_id: str | None, request_hash: str | None, now: datetime | None,
 ) -> bool:
     """Validate a service-role-fetched approval bound to this task and request."""
     if not isinstance(approval, dict) or not task_id:
         return False
-    required = ("id", "task_id", "status", "action", "resource_id", "decided_by", "decided_at", "expires_at")
+    required = (
+        "id", "task_id", "status", "action", "resource_id", "requested_by",
+        "decided_by_user_id", "request_hash", "decided_at", "expires_at",
+    )
     if any(not approval.get(key) for key in required):
+        return False
+    if not requester_id or not request_hash:
         return False
     if approval["status"] != "approved" or approval["action"] != action:
         return False
     if approval["resource_id"] != resource_id or str(approval["task_id"]) != str(task_id):
+        return False
+    if str(approval["requested_by"]) != str(requester_id):
+        return False
+    if str(approval["decided_by_user_id"]) == str(requester_id):
+        return False
+    if approval["request_hash"] != request_hash:
         return False
     try:
         decided_at = datetime.fromisoformat(str(approval["decided_at"]).replace("Z", "+00:00"))
@@ -112,6 +123,8 @@ def evaluate_action(
     environment: str | None = None,
     approval_record: dict[str, Any] | None = None,
     task_id: str | None = None,
+    requester_id: str | None = None,
+    request_hash: str | None = None,
     now: datetime | None = None,
 ) -> PolicyResult:
     """Evaluate a requested operation. Unknown roles/actions fail closed."""
@@ -134,7 +147,8 @@ def evaluate_action(
     if action in ALWAYS_APPROVAL_ACTIONS:
         if _approval_is_valid(
             approval_record, action=action, resource_id=resource_id or "",
-            task_id=task_id, now=now,
+            task_id=task_id, requester_id=requester_id,
+            request_hash=request_hash, now=now,
         ):
             return PolicyResult(Decision.ALLOW, "task-bound, unexpired persisted approval verified", False)
         return PolicyResult(
