@@ -14,7 +14,7 @@ class JaeoPortalConsoleContractTests(unittest.TestCase):
         self.assertIn("emailRedirectTo:window.location.origin+\"/jaeo.html\"", page)
         self.assertIn("supabase.auth.signUp", page)
         self.assertIn("/functions/v1/jaeo-operator", page)
-        self.assertIn("Bearer "+session.access_token", page)
+        self.assertIn('"Bearer "+session.access_token', page)
         self.assertIn('operation:"list_approvals"', page)
         self.assertIn('operation:"decide_approval"', page)
         self.assertIn("sb_publishable_", config)
