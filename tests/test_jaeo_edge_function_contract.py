@@ -14,6 +14,8 @@ def test_jaeo_edge_function_auth_and_server_boundary():
     assert 'admin.rpc("jaeo_operator_api"' in source
     assert 'admin.schema("jarvis_private")' not in source
     assert "JAEO_ALLOWED_ORIGINS" in source
+    assert "jarvis-unified-portal.pages.dev" in source
+    assert 'operation === "list_approvals"' in source
     assert "crypto.subtle.digest" in source
 
 
