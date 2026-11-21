@@ -51,6 +51,8 @@ class MarketplaceUiContractTests(unittest.TestCase):
         self.assertIn('authorization:"Bearer "+token', page)
         self.assertIn('"/functions/v1/marketplace-orders"', page)
         self.assertIn("No payment was taken and no reward was issued", page)
+        self.assertIn("sb.auth.signInWithPassword", page)
+        self.assertIn("isolated Jarvis QA", page)
 
 
 
