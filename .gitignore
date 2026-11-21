@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 .jarvis_config.json
+apps/control_panel/jarvis-config.js
 .jarvis_mcp_token
 *.pem
 *.key
