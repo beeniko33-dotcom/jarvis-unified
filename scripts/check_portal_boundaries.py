@@ -64,7 +64,7 @@ workspace_forbidden = (
     "live brokerage",
 )
 for phrase in workspace_forbidden:
-    if re.search(rf"\\b{re.escape(phrase)}\\b", control_source):
+    if re.search(rf"\b{re.escape(phrase)}\b", control_source):
         raise SystemExit(f"public workspace contains forbidden legacy execution language: {phrase}")
 
 print("public portal and workspace product boundaries verified")
