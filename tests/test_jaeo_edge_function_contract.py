@@ -40,7 +40,7 @@ def test_jaeo_rpc_is_service_role_only_and_hardened():
 
 
 def test_jaeo_operator_admin_audit_rpc_uses_database_acl_not_legacy_claim_guc():
-    migration = (ROOT / "supabase/migrations/20261121150000_jaeo_audit_rpc_service_role_acl_fix.sql").read_text()
+    migration = (ROOT / "supabase/migrations/20261121144845_jaeo_audit_rpc_service_role_acl_fix.sql").read_text()
     assert "security definer" in migration.lower()
     assert "set search_path = ''" in migration.lower()
     assert "revoke all on function public.jaeo_record_operator_admin_event" in migration.lower()
