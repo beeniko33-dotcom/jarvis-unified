@@ -31,6 +31,18 @@ async function sha256(value: unknown): Promise<string> {
 function record(value: unknown): value is Record<string,unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
+function envApiKey(legacyName: string, modernName: string): string {
+  const modern = Deno.env.get(modernName);
+  if (modern) {
+    try {
+      const parsed: unknown = JSON.parse(modern);
+      if (record(parsed) && typeof parsed.default === "string" && parsed.default.length > 0) return parsed.default;
+    } catch {
+      if (modern.length > 0) return modern;
+    }
+  }
+  return Deno.env.get(legacyName) ?? "";
+}
 function isOperator(user: User) { return user.app_metadata?.jaeo_operator === true; }
 function mapError(error: { code?: string } | null) {
   if (error?.code === "42501") return 403;
@@ -54,8 +66,8 @@ Deno.serve(async (req: Request) => {
   if (!token) return json(401, { error: "authentication required" }, corsOrigin);
 
   const url = Deno.env.get("SUPABASE_URL");
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const anonKey = envApiKey("SUPABASE_ANON_KEY", "SUPABASE_PUBLISHABLE_KEYS");
+  const serviceKey = envApiKey("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEYS");
   if (!url || !anonKey || !serviceKey) return json(503, { error: "JAEO service is not configured" }, corsOrigin);
   const raw = await req.text();
   if (new TextEncoder().encode(raw).byteLength > MAX_BODY) return json(413, { error: "request too large" }, corsOrigin);
