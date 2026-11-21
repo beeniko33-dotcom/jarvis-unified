@@ -1,4 +1,4 @@
-import { createClient, type User } from "npm:@supabase/supabase-js@2.45.4";
+import { createClient, type User } from "npm:@supabase/supabase-js@2.119.2";
 
 const JSON_HEADERS = { "content-type": "application/json", "cache-control": "no-store" };
 const TASK_ROLES = new Set(["orchestrator","engineering","database","infrastructure","security","qa","research","release","audit"]);
