@@ -1,8 +1,18 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SECRET_KEYS = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}");
-const SERVICE_ROLE_KEY = SECRET_KEYS.default ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SERVICE_ROLE_KEY") ?? "";
+let SECRET_KEYS: Record<string, string> = {};
+try {
+  SECRET_KEYS = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}");
+} catch {
+  SECRET_KEYS = {};
+}
+const SERVICE_ROLE_KEYS = [...new Set([
+  SECRET_KEYS.default,
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"),
+  Deno.env.get("SERVICE_ROLE_KEY"),
+].filter((key): key is string => typeof key === "string" && key.length > 0))];
+const SERVICE_ROLE_KEY = SERVICE_ROLE_KEYS[0] ?? "";
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const INGEST_TOKEN = Deno.env.get("JARVIS_INGEST_TOKEN") ?? "";
 const GATE_BASE = "https://api.gateio.ws/api/v4";
@@ -139,9 +149,10 @@ Deno.serve(async (req: Request) => {
   // Machine callers use a dedicated shared collector token; the service-role
   // key fallback preserves the existing GitHub Actions scheduler. Both checks
   // are performed inside the function because gateway JWT verification is off.
+  const suppliedApiKey = req.headers.get("apikey") ?? "";
   const machineAuthorized =
     (!!INGEST_TOKEN && tokenMatches(req.headers.get("x-jarvis-ingest-token") ?? "", INGEST_TOKEN)) ||
-    tokenMatches(req.headers.get("apikey") ?? "", SERVICE_ROLE_KEY);
+    SERVICE_ROLE_KEYS.some((key) => tokenMatches(suppliedApiKey, key));
   try {
     if (!machineAuthorized) {
       const userId = await verifiedUserId(req);
