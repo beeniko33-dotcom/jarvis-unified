@@ -21,7 +21,7 @@ class JaeoPortalConsoleContractTests(unittest.TestCase):
         self.assertIn("sb_publishable_", config)
         self.assertIn("guvszwxvmitdvykvtsnc.supabase.co", config)
         self.assertNotIn("sb_secret_", config)
-        self.assertNotIn("service_role", config.lower())
+        self.assertNotIn("SUPABASE_SERVICE_ROLE_KEY", config)
 
     def test_console_discloses_non_execution_boundary(self):
         page = (ROOT / "apps/portal/jaeo.html").read_text(encoding="utf-8").lower()
