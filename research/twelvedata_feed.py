@@ -155,7 +155,9 @@ def fetch_forex_series(
         raise ValueError("Twelve Data response was not valid UTF-8 JSON") from None
     if not isinstance(payload, dict):
         raise ValueError("Twelve Data response must be a JSON object")
-    if payload.get("status") == "error" or any(k in payload for k in ("code", "message")) and "values" not in payload:
+    if payload.get("status") == "error" or ("values" not in payload and any(
+        k in payload for k in ("code", "message", "Note", "Information", "note", "information")
+    )):
         # Do not echo provider messages: some gateways can reflect request details.
         raise RuntimeError("Twelve Data returned an API error or entitlement/rate-limit response")
 
@@ -168,6 +170,9 @@ def fetch_forex_series(
         raise ValueError("Twelve Data response symbol does not match the requested pair")
     if str(meta.get("interval", "")).lower() != interval.lower():
         raise ValueError("Twelve Data response interval does not match the requested interval")
+    instrument_type = str(meta.get("type", "")).strip().lower()
+    if not instrument_type or not any(term in instrument_type for term in ("currency", "forex")):
+        raise ValueError("Twelve Data response does not identify a Forex/currency instrument")
     if len(values) < 20 or len(values) > count:
         raise ValueError("Twelve Data returned an insufficient or unexpected candle count")
 
