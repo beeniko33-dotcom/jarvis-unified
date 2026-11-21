@@ -66,10 +66,11 @@ function mapError(error: { code?: string } | null) {
 }
 
 Deno.serve(async (req: Request) => {
-  const origins = new Set((Deno.env.get("JAEO_ALLOWED_ORIGINS") ?? "").split(",").map((v) => v.trim()).filter(Boolean));
+  // Handle browser preflight before reading environment variables or initializing clients.
+  // Allow only the Jarvis Unified Pages production hostname and its branch-preview subdomains.
   const origin = req.headers.get("origin") ?? "";
   const portalOrigin = /^https:\/\/(?:[a-z0-9-]+\.)?jarvis-unified-portal\.pages\.dev$/.test(origin);
-  const corsOrigin = origins.has(origin) || portalOrigin ? origin : undefined;
+  const corsOrigin = portalOrigin ? origin : undefined;
   if (req.method === "OPTIONS") return corsOrigin
     ? new Response("ok", { status: 204, headers: { "access-control-allow-origin": origin, "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": "authorization, apikey, content-type, x-client-info", "access-control-max-age": "600", "vary": "Origin" } })
     : json(403, { error: "origin not allowed" });
