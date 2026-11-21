@@ -18,3 +18,5 @@ This is a static, informational landing page for the four-pillar Jarvis Unified 
 - Build command: none (static HTML)
 - Intended initial free hostname: `jarvis-unified-portal.pages.dev`
 - The connected Pages project is currently configured to deploy the architecture feature branch. This is an early public preview, not a production release on a custom domain.
+
+Deployment note: this project is intentionally isolated from the legacy control-panel Pages project and has no backend bindings or secrets.
