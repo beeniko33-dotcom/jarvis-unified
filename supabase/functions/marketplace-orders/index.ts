@@ -1,4 +1,4 @@
-import { createClient } from "npm:@supabase/supabase-js@2.45.4";
+import { createClient } from "npm:@supabase/supabase-js@2.119.2";
 
 const ALLOWED_ORIGINS = new Set(["https://jarvis-control-panel.pages.dev"]);
 const JSON_HEADERS = { "content-type": "application/json", "cache-control": "no-store" };
