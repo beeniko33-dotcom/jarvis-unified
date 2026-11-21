@@ -127,8 +127,8 @@ async function grantOperator(){
   setStatus("operatorAdminStatus","Granting role and recording audit event…");
   try{
     const d=await api({operation:"grant_operator",target_user_id:target});
-    setStatus("operatorAdminStatus","Operator access granted to "+(d.user.email??d.user.id)+". Audit record: "+d.audit_id+". The new operator must sign out and back in.","success");
     await loadOperatorUsers();
+    setStatus("operatorAdminStatus","Operator access granted to "+(d.user.email??d.user.id)+". Audit record: "+d.audit_id+". The new operator must sign out and back in.","success");
   }catch(e){setStatus("operatorAdminStatus",e.message,"error");}
 }
 $("loadOperatorUsers").onclick=loadOperatorUsers;
@@ -142,7 +142,21 @@ async function loadTasks(){
 async function loadApprovals(){
   $("approvals").textContent="Loading…";
   try{const d=await api({operation:"list_approvals"});const rows=d.approvals??[];
-    $("approvals").innerHTML=rows.length?rows.map(a=>'<div class="item"><strong>'+escapeHtml(a.action)+' · '+escapeHtml(displayApprovalStatus(a))+'</strong><div class="meta">Resource: '+escapeHtml(a.resource_id)+' · Expires: '+escapeHtml(new Date(a.expires_at).toLocaleString())+'</div><div class="meta">Approval ID: '+escapeHtml(a.id)+'</div><pre>'+escapeHtml(JSON.stringify(a.request,null,2))+'</pre>'+(operator&&displayApprovalStatus(a)==="pending"?'<div class="actions"><button data-approve="'+escapeHtml(a.id)+'">Approve record</button><button class="danger" data-reject="'+escapeHtml(a.id)+'">Reject</button></div>':"")+'</div>').join(""):"No approval records yet.";
+    $("approvals").innerHTML=rows.length?rows.map(a=>{
+      const requestedAt=a.requested_at?new Date(a.requested_at).toLocaleString():"Unknown";
+      const decidedAt=a.decided_at?new Date(a.decided_at).toLocaleString():"";
+      const decisionAudit=a.decided_by_user_id
+        ?'<div class="meta">Decision by: '+escapeHtml(a.decided_by_user_id)+(decidedAt?' · '+escapeHtml(decidedAt):'')+'</div>'
+          +'<div class="meta">Decision reason: '+escapeHtml(a.decision_reason||'No reason recorded')+'</div>'
+        :'';
+      return '<div class="item"><strong>'+escapeHtml(a.action)+' · '+escapeHtml(displayApprovalStatus(a))+'</strong>'
+        +'<div class="meta">Resource: '+escapeHtml(a.resource_id)+' · Expires: '+escapeHtml(new Date(a.expires_at).toLocaleString())+'</div>'
+        +'<div class="meta">Requested by: '+escapeHtml(a.requested_by)+' · '+escapeHtml(requestedAt)+'</div>'
+        +'<div class="meta">Approval ID: '+escapeHtml(a.id)+'</div>'+decisionAudit
+        +'<pre>'+escapeHtml(JSON.stringify(a.request,null,2))+'</pre>'
+        +(operator&&displayApprovalStatus(a)==="pending"?'<div class="actions"><button data-approve="'+escapeHtml(a.id)+'">Approve record</button><button class="danger" data-reject="'+escapeHtml(a.id)+'">Reject</button></div>':"")
+        +'</div>';
+    }).join(""):"No approval records yet.";
     $("approvals").querySelectorAll("[data-approve]").forEach(b=>b.onclick=()=>decide(b.dataset.approve,"approved"));
     $("approvals").querySelectorAll("[data-reject]").forEach(b=>b.onclick=()=>decide(b.dataset.reject,"rejected"));
   }catch(e){$("approvals").textContent=e.message;}

@@ -26,6 +26,11 @@ class MarketplaceScripts(HTMLParser):
 
 
 class MarketplaceUiContractTests(unittest.TestCase):
+    def test_order_function_uses_current_supabase_sdk_for_secret_key_compatibility(self):
+        source = Path("supabase/functions/marketplace-orders/index.ts").read_text(encoding="utf-8")
+        self.assertIn("npm:@supabase/supabase-js@2.119.2", source)
+        self.assertNotIn("@2.45.4", source)
+
     def test_inline_module_has_real_line_breaks(self):
         page = Path("apps/control_panel/marketplace.html").read_text(encoding="utf-8")
         parser = MarketplaceScripts()

@@ -1,0 +1,37 @@
+name: Isolated QA Browser E2E
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jarvis-isolated-qa-browser-e2e
+  cancel-in-progress: false
+
+jobs:
+  browser-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      JARVIS_SUPABASE_URL: ${{ secrets.JARVIS_SUPABASE_URL }}
+      JARVIS_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.JARVIS_SUPABASE_SERVICE_ROLE_KEY }}
+      JARVIS_E2E_PORTAL_URL: https://jarvis-unified-portal.pages.dev
+      JARVIS_E2E_CONTROL_URL: https://jarvis-control-panel.pages.dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install pinned Playwright browser runner
+        run: |
+          python -m pip install --disable-pip-version-check "playwright==1.65.2"
+          python -m playwright install --with-deps chromium
+
+      - name: Run authenticated isolated QA browser journeys
+        run: python scripts/qa_browser_e2e.py
