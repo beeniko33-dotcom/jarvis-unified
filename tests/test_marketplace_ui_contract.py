@@ -53,6 +53,7 @@ class MarketplaceUiContractTests(unittest.TestCase):
         self.assertIn("No payment was taken and no reward was issued", page)
         self.assertIn("sb.auth.signInWithPassword", page)
         self.assertIn("isolated Jarvis QA", page)
+        self.assertIn('show("signin",false)', page)
 
 
 
