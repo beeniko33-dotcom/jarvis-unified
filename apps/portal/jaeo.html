@@ -80,7 +80,7 @@ const key=String(config.supabasePublishableKey??"");
 const $=id=>document.getElementById(id);
 if(!url||!key){$("authStatus").textContent="QA frontend configuration is missing.";throw new Error("Missing public QA config");}
 const supabase=createClient(url,key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
-let session=null,operator=false,tasks=[];
+let session=null,operator=false,owner=false,tasks=[];
 const setStatus=(id,message,kind="")=>{$(id).textContent=message;$(id).className="status "+kind;};
 const escapeHtml=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 async function api(body){
