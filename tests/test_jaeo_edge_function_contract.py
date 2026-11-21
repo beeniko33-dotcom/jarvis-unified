@@ -9,6 +9,8 @@ def test_jaeo_edge_function_auth_and_server_boundary():
     assert "auth.getUser(token)" in source
     assert "user.app_metadata?.jaeo_operator === true" in source
     assert "SUPABASE_SERVICE_ROLE_KEY" in source
+    assert "SUPABASE_SECRET_KEYS" in source
+    assert "SUPABASE_PUBLISHABLE_KEYS" in source
     assert 'admin.rpc("jaeo_operator_api"' in source
     assert 'admin.schema("jarvis_private")' not in source
     assert "JAEO_ALLOWED_ORIGINS" in source
