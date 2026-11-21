@@ -50,7 +50,7 @@ class JaeoLearningTests(unittest.TestCase):
         self.assertTrue(payload["requires_human_review"])
         self.assertFalse(payload["policy_changed"])
         self.assertFalse(payload["self_modification_enabled"])
-        self.assertEqual(payload["mode"], "paper")
+        self.assertEqual(payload["mode"], "supervised")
         self.assertFalse(payload["live_trading_enabled"])
 
 
