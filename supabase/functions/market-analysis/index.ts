@@ -13,6 +13,13 @@ const SERVICE_ROLE_KEYS = [...new Set([
   Deno.env.get("SERVICE_ROLE_KEY"),
 ].filter((key): key is string => typeof key === "string" && key.length > 0))];
 const SERVICE_ROLE_KEY = SERVICE_ROLE_KEYS[0] ?? "";
+const SERVICE_ROLE_HEADERS: Record<string, string> = {
+  apikey: SERVICE_ROLE_KEY,
+  // Supabase secret API keys are not JWTs. Send them only via apikey.
+  ...(!SERVICE_ROLE_KEY.startsWith("sb_secret_")
+    ? { authorization: "Bearer " + SERVICE_ROLE_KEY }
+    : {}),
+};
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const INGEST_TOKEN = Deno.env.get("JARVIS_INGEST_TOKEN") ?? "";
 const GATE_BASE = "https://api.gateio.ws/api/v4";
@@ -72,7 +79,7 @@ async function isAllowlistedOperator(userId: string): Promise<boolean> {
   const url = SUPABASE_URL.replace(/\/$/, "") +
     "/rest/v1/operator_allowlist?user_id=eq." + encodeURIComponent(userId) + "&select=user_id&limit=1";
   const response = await fetch(url, {
-    headers: { "apikey": SERVICE_ROLE_KEY, "authorization": "Bearer " + SERVICE_ROLE_KEY },
+    headers: SERVICE_ROLE_HEADERS,
     signal: AbortSignal.timeout(5_000),
   });
   if (!response.ok) throw new Error("operator_allowlist_check_failed");
@@ -132,8 +139,7 @@ async function rpc(name: string, body: unknown): Promise<any> {
   const response = await fetch(SUPABASE_URL.replace(/\/$/, "") + "/rest/v1/rpc/" + name, {
     method: "POST",
     headers: {
-      "apikey": SERVICE_ROLE_KEY,
-      "authorization": "Bearer " + SERVICE_ROLE_KEY,
+      ...SERVICE_ROLE_HEADERS,
       "content-type": "application/json",
     },
     body: JSON.stringify(body),

@@ -75,12 +75,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          request_headers=(
+            --header "apikey: ${JARVIS_SUPABASE_SERVICE_ROLE_KEY}"
+            --header "Content-Type: application/json"
+          )
+          # New sb_secret keys are not JWTs and must not be sent as Bearer tokens.
+          if [[ "${JARVIS_SUPABASE_SERVICE_ROLE_KEY}" != sb_secret_* ]]; then
+            request_headers+=(--header "Authorization: Bearer ${JARVIS_SUPABASE_SERVICE_ROLE_KEY}")
+          fi
           curl --silent --show-error --fail-with-body \
             --connect-timeout 10 --max-time 45 \
             --request POST \
-            --header "apikey: ${JARVIS_SUPABASE_SERVICE_ROLE_KEY}" \
-            --header "Authorization: Bearer ${JARVIS_SUPABASE_SERVICE_ROLE_KEY}" \
-            --header "Content-Type: application/json" \
+            "${request_headers[@]}" \
             --data '{}' \
             --output market-analysis-response.json \
             "${JARVIS_SUPABASE_URL%/}/functions/v1/market-analysis"
