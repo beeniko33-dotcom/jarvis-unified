@@ -127,7 +127,6 @@ def fetch_forex_series(
         "order": "asc",
         "include_ohlc": "true",
         "format": "JSON",
-        "apikey": key,
     })
     request = urllib.request.Request(
         API_URL + "?" + params,
@@ -135,6 +134,7 @@ def fetch_forex_series(
             "Accept": "application/json",
             "User-Agent": "JarvisUnified-ForexResearch/0.2",
             "Cache-Control": "no-cache",
+            "Authorization": "apikey " + key,
         },
         method="GET",
     )
