@@ -182,7 +182,7 @@ Deno.serve(async (req: Request) => {
     if (Object.keys(body).some((k) => !["operation","approval_id","decision","reason"].includes(k))
       || typeof body.approval_id !== "string" || !UUID.test(body.approval_id)
       || !["approved","rejected"].includes(String(body.decision))
-      || (body.reason !== undefined && (typeof body.reason !== "string" || body.reason.length > 1000))) {
+      || typeof body.reason !== "string" || !body.reason.trim() || body.reason.length > 1000) {
       return json(400, { error: "invalid approval decision" }, corsOrigin);
     }
     payload = { approval_id: body.approval_id, decision: body.decision, reason: body.reason ?? "" };
