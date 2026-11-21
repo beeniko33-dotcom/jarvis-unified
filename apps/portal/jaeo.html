@@ -82,6 +82,7 @@ if(!url||!key){$("authStatus").textContent="QA frontend configuration is missing
 const supabase=createClient(url,key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
 let session=null,operator=false,owner=false,tasks=[];
 const setStatus=(id,message,kind="")=>{$(id).textContent=message;$(id).className="status "+kind;};
+const displayApprovalStatus=a=>a.status==="pending"&&Date.parse(a.expires_at)<=Date.now()?"expired":a.status;
 const escapeHtml=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 async function api(body){
   if(!session) throw new Error("Please sign in again.");
@@ -141,7 +142,7 @@ async function loadTasks(){
 async function loadApprovals(){
   $("approvals").textContent="Loading…";
   try{const d=await api({operation:"list_approvals"});const rows=d.approvals??[];
-    $("approvals").innerHTML=rows.length?rows.map(a=>'<div class="item"><strong>'+escapeHtml(a.action)+' · '+escapeHtml(a.status)+'</strong><div class="meta">Resource: '+escapeHtml(a.resource_id)+' · Expires: '+escapeHtml(new Date(a.expires_at).toLocaleString())+'</div><div class="meta">Approval ID: '+escapeHtml(a.id)+'</div><pre>'+escapeHtml(JSON.stringify(a.request,null,2))+'</pre>'+(operator&&a.status==="pending"?'<div class="actions"><button data-approve="'+escapeHtml(a.id)+'">Approve record</button><button class="danger" data-reject="'+escapeHtml(a.id)+'">Reject</button></div>':"")+'</div>').join(""):"No approval records yet.";
+    $("approvals").innerHTML=rows.length?rows.map(a=>'<div class="item"><strong>'+escapeHtml(a.action)+' · '+escapeHtml(displayApprovalStatus(a))+'</strong><div class="meta">Resource: '+escapeHtml(a.resource_id)+' · Expires: '+escapeHtml(new Date(a.expires_at).toLocaleString())+'</div><div class="meta">Approval ID: '+escapeHtml(a.id)+'</div><pre>'+escapeHtml(JSON.stringify(a.request,null,2))+'</pre>'+(operator&&displayApprovalStatus(a)==="pending"?'<div class="actions"><button data-approve="'+escapeHtml(a.id)+'">Approve record</button><button class="danger" data-reject="'+escapeHtml(a.id)+'">Reject</button></div>':"")+'</div>').join(""):"No approval records yet.";
     $("approvals").querySelectorAll("[data-approve]").forEach(b=>b.onclick=()=>decide(b.dataset.approve,"approved"));
     $("approvals").querySelectorAll("[data-reject]").forEach(b=>b.onclick=()=>decide(b.dataset.reject,"rejected"));
   }catch(e){$("approvals").textContent=e.message;}
