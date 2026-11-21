@@ -64,6 +64,7 @@ function show(id,on){$(id).classList.toggle("hidden",!on)}
 async function init(){
  const {data,error}=await sb.auth.getSession();$("loading").classList.add("hidden");
  if(error||!data.session){show("signin",true);return}
+ show("signin",false);
  user=data.session.user;show("app",true);
  await Promise.all([loadSellers(),loadListings()]);
  await Promise.all([loadAffiliateLinks(),loadOrders()]);
