@@ -18,6 +18,8 @@ def test_jaeo_edge_function_auth_and_server_boundary():
     assert "jarvis-unified-portal.pages.dev" in source
     assert 'operation === "list_approvals"' in source
     assert "crypto.subtle.digest" in source
+    assert "containsSensitiveMaterial" in source
+    assert "change_secret" not in source
 
 
 def test_jaeo_rpc_is_service_role_only_and_hardened():
