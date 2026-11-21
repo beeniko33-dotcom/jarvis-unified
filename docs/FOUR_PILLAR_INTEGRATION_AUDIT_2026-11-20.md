@@ -62,3 +62,11 @@ This is a source-level review of branch `feat/jarvis-four-pillar-architecture`. 
 ## Product status correction
 
 Marketplace and Career are not blank projects: their initial UI and schema work exists. They are nevertheless **early foundations, not verified working production services**. JAEO has policy/schema foundations but no verified deployed operator. Forex has a tested forecast engine but no provenance-verified feed or complete app. The public portal remains informational only.
+
+
+## Deployment follow-up — 2026-11-21
+
+- Cloudflare Pages project `jarvis-unified-portal` successfully built and deployed the latest feature-branch commit `15a4ef7224e2e3c1d92447863ca8ac403ae59e6d`. Preview: https://3fe448f3.jarvis-unified-portal.pages.dev. This is an informational static portal preview, not a four-app production release.
+- The legacy `jarvis-control-panel` Pages project also automatically built a branch preview from the same commit: https://985567a7.jarvis-control-panel.pages.dev. Its destination directory is still `apps/control_panel`, which contains the old trading-oriented workspace and the Marketplace/Career pages. This preview pipeline is still connected to all branches. Its project settings were inspected but not changed; disabling previews requires a separately approved Cloudflare configuration change.
+- Cloudflare GitHub checks for `jarvis-control-worker` and `jarvis-unified-mcp` failed because those Worker scripts no longer exist in the account. The account's Workers Builds API currently returns no triggers and no build configuration for those script tags. These stale integration checks are distinct from the passing application CI and successful Pages portal build; they need Cloudflare/GitHub integration cleanup.
+- The GitHub Actions test jobs for the new audit commit were still in progress at the time of this note. Do not treat the commit as CI-passing until those jobs complete.
