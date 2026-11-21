@@ -171,7 +171,9 @@ def fetch_forex_series(
     if str(meta.get("interval", "")).lower() != interval.lower():
         raise ValueError("Twelve Data response interval does not match the requested interval")
     instrument_type = str(meta.get("type", "")).strip().lower()
-    if not instrument_type or not any(term in instrument_type for term in ("currency", "forex")):
+    if "crypto" in instrument_type or not instrument_type or not any(
+        term in instrument_type for term in ("currency", "forex")
+    ):
         raise ValueError("Twelve Data response does not identify a Forex/currency instrument")
     if len(values) < 20 or len(values) > count:
         raise ValueError("Twelve Data returned an insufficient or unexpected candle count")
