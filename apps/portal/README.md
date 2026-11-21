@@ -9,7 +9,10 @@ This is a static, informational landing page for the four-pillar Jarvis Unified 
 - Forex is read-only research only. This portal contains no trading UI, broker integration, order placement or execution path.
 - Marketplace and Career are not represented as live services until separately implemented and verified.
 - JAEO is a supervised governance layer; the portal does not expose an operator console or admin actions.
-- No backend, secrets, user accounts or personal data are required to serve this static page.
+- The landing page itself is static. The linked JAEO QA console uses Supabase Auth and the authenticated `jaeo-operator` Edge Function.
+- `jaeo-config.js` contains only the public Supabase publishable key and isolated QA project URL. It is intentionally public; no secret/service-role key may be placed in this directory.
+- The JAEO console is for supervised task/approval records only. It does not execute code, deploy, provision resources, merge PRs, trade or perform production actions.
+- Other product pillars remain unreleased and must not be presented as live services.
 
 ## Cloudflare Pages
 
@@ -19,4 +22,18 @@ This is a static, informational landing page for the four-pillar Jarvis Unified 
 - Intended initial free hostname: `jarvis-unified-portal.pages.dev`
 - The connected Pages project is currently configured to deploy the architecture feature branch. This is an early public preview, not a production release on a custom domain.
 
-Deployment note: this project is intentionally isolated from the legacy control-panel Pages project and has no backend bindings or secrets.
+Deployment note: this project is intentionally isolated from the legacy control-panel Pages project. The JAEO page calls the isolated QA Supabase Edge Function over HTTPS; no backend secrets are stored in Cloudflare Pages.
+
+
+## One-time isolated QA Auth setup
+
+Supabase Auth URL Configuration is not exposed by the connected management tools, so add these redirect patterns in the isolated QA project before using email-confirmed sign-up:
+
+1. Open [Supabase Auth URL Configuration](https://supabase.com/dashboard/project/guvszwxvmitdvykvtsnc/auth/url-configuration).
+2. Under **Redirect URLs**, add:
+   - `https://jarvis-unified-portal.pages.dev/**`
+   - `https://**.jarvis-unified-portal.pages.dev/**`
+3. Keep the production Site URL unchanged. These entries are only for the portal and its preview deployments.
+4. If the confirmation email template hardcodes `{{ .SiteURL }}`, update its confirmation link to use `{{ .RedirectTo }}` so the emailRedirectTo supplied by the console is honored.
+
+The console passes the current page origin as `emailRedirectTo`. No production auth configuration was changed.

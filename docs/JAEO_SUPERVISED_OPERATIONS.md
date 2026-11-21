@@ -54,3 +54,30 @@ Render is not verified as connected; therefore Render workspace inspection, Cron
 7. Connect provider adapters with least privilege and audit evidence; keep production and trading controls untouched.
 
 No production deployment, paper validation, live trading, or 30-day paper-validation start is implied by this implementation.
+
+
+## Isolated QA rollout — 2026-11-21
+
+- The authenticated Edge Function `jaeo-operator` is deployed to isolated project `guvszwxvmitdvykvtsnc`, version 3, with gateway JWT verification enabled.
+- It supports task create/list, approval request/list, approval decision and append-only feedback. Operator approval queue visibility is role-gated. The Edge Function verifies the bearer token with Supabase Auth and trusts only `app_metadata.jaeo_operator`.
+- The function supports both legacy Supabase key environment variables and the current JSON-backed `SUPABASE_PUBLISHABLE_KEYS` / `SUPABASE_SECRET_KEYS` environment variables. No secret key is present in browser source.
+- The server-only RPC was extended with requester-scoped approval listing and operator-wide queue listing; migration `20261121120000_jaeo_approval_queue.sql` is applied to isolated QA.
+- The static JAEO console is available at `apps/portal/jaeo.html`, with a public publishable key for isolated QA in `apps/portal/jaeo-config.js`. It supports signup/sign-in, task creation, task listing, approval requests, and operator-only approval decisions. No operator app-metadata claim has been provisioned; no user is automatically made an operator.
+- Cloudflare Pages built the feature-branch preview successfully. The console is exposed only on the preview URL; production has not received these post-merge follow-up commits.
+- CORS is limited to the Jarvis Unified Portal Pages hostname and its preview aliases, plus any exact origins explicitly configured through `JAEO_ALLOWED_ORIGINS`.
+- Automated CI for the newest portal-console commit is still running. The preceding API/RPC test run passed all 12 workflow steps.
+- A live browser sign-up and end-to-end API call have not been performed from this environment because no human QA account/session is available. Do not claim those interactive flows are verified until a human signs in and completes the test.
+
+
+### Supabase SDK compatibility hardening
+- Updated both the Edge Function and browser console to the current pinned `@supabase/supabase-js@2.119.2`, so the new publishable/secret key model is supported without relying on the legacy `anon`/`service_role` keys.
+- Redeployed `jaeo-operator` to isolated QA as version 4 with `verify_jwt=true`.
+
+
+### Approval payload safety
+- General JAEO approval requests now reject secret-change actions. Secret rotation must use a dedicated secrets-management workflow and is not supported by this console.
+- The Edge Function rejects common credential-bearing field names and known token formats in approval payloads before hashing or storage.
+- QA SQL verification confirms the RPC rejects `change_secret` and continues to accept a non-secret `change_code` request. Test data was rolled back.
+- Edge Function version 5 is deployed to isolated QA with JWT verification enabled.
+
+- The Edge Function is now deployed as version 6 after correcting JWT-format detection in the payload guard. General secret-change requests remain disabled.

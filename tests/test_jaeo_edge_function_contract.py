@@ -6,13 +6,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_jaeo_edge_function_auth_and_server_boundary():
     source = (ROOT / "supabase/functions/jaeo-operator/index.ts").read_text()
+    assert "npm:@supabase/supabase-js@2.119.2" in source
     assert "auth.getUser(token)" in source
     assert "user.app_metadata?.jaeo_operator === true" in source
     assert "SUPABASE_SERVICE_ROLE_KEY" in source
+    assert "SUPABASE_SECRET_KEYS" in source
+    assert "SUPABASE_PUBLISHABLE_KEYS" in source
     assert 'admin.rpc("jaeo_operator_api"' in source
     assert 'admin.schema("jarvis_private")' not in source
     assert "JAEO_ALLOWED_ORIGINS" in source
+    assert "jarvis-unified-portal.pages.dev" in source
+    assert 'operation === "list_approvals"' in source
     assert "crypto.subtle.digest" in source
+    assert "containsSensitiveMaterial" in source
+    assert "change_secret" not in source
 
 
 def test_jaeo_rpc_is_service_role_only_and_hardened():

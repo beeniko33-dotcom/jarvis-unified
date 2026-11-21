@@ -1,8 +1,8 @@
-import { createClient, type User } from "npm:@supabase/supabase-js@2.45.4";
+import { createClient, type User } from "npm:@supabase/supabase-js@2.119.2";
 
 const JSON_HEADERS = { "content-type": "application/json", "cache-control": "no-store" };
 const TASK_ROLES = new Set(["orchestrator","engineering","database","infrastructure","security","qa","research","release","audit"]);
-const APPROVAL_ACTIONS = new Set(["change_code","change_schema","change_secret","provision_resource","create_cron","deploy_preview","merge_pull_request"]);
+const APPROVAL_ACTIONS = new Set(["change_code","change_schema","provision_resource","create_cron","deploy_preview","merge_pull_request"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_BODY = 12_000;
 
@@ -31,6 +31,26 @@ async function sha256(value: unknown): Promise<string> {
 function record(value: unknown): value is Record<string,unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
+function envApiKey(legacyName: string, modernName: string): string {
+  const modern = Deno.env.get(modernName);
+  if (modern) {
+    try {
+      const parsed: unknown = JSON.parse(modern);
+      if (record(parsed) && typeof parsed.default === "string" && parsed.default.length > 0) return parsed.default;
+    } catch {
+      if (modern.length > 0) return modern;
+    }
+  }
+  return Deno.env.get(legacyName) ?? "";
+}
+function containsSensitiveMaterial(value: unknown): boolean {
+  const sensitiveKey = /secret|password|token|api.?key|authorization|private.?key|credential|mnemonic|seed.?phrase/i;
+  const secretValue = /(?:sb_secret_|sb_publishable_|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{12,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9]{20,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})/;
+  if (typeof value === "string") return secretValue.test(value);
+  if (Array.isArray(value)) return value.some(containsSensitiveMaterial);
+  if (record(value)) return Object.entries(value).some(([key, child]) => sensitiveKey.test(key) || containsSensitiveMaterial(child));
+  return false;
+}
 function isOperator(user: User) { return user.app_metadata?.jaeo_operator === true; }
 function mapError(error: { code?: string } | null) {
   if (error?.code === "42501") return 403;
@@ -44,7 +64,8 @@ function mapError(error: { code?: string } | null) {
 Deno.serve(async (req: Request) => {
   const origins = new Set((Deno.env.get("JAEO_ALLOWED_ORIGINS") ?? "").split(",").map((v) => v.trim()).filter(Boolean));
   const origin = req.headers.get("origin") ?? "";
-  const corsOrigin = origins.has(origin) ? origin : undefined;
+  const portalOrigin = /^https:\/\/(?:[a-z0-9-]+\.)?jarvis-unified-portal\.pages\.dev$/.test(origin);
+  const corsOrigin = origins.has(origin) || portalOrigin ? origin : undefined;
   if (req.method === "OPTIONS") return corsOrigin
     ? new Response("ok", { status: 204, headers: { "access-control-allow-origin": origin, "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": "authorization, apikey, content-type, x-client-info", "access-control-max-age": "600", "vary": "Origin" } })
     : json(403, { error: "origin not allowed" });
@@ -54,8 +75,8 @@ Deno.serve(async (req: Request) => {
   if (!token) return json(401, { error: "authentication required" }, corsOrigin);
 
   const url = Deno.env.get("SUPABASE_URL");
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const anonKey = envApiKey("SUPABASE_ANON_KEY", "SUPABASE_PUBLISHABLE_KEYS");
+  const serviceKey = envApiKey("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEYS");
   if (!url || !anonKey || !serviceKey) return json(503, { error: "JAEO service is not configured" }, corsOrigin);
   const raw = await req.text();
   if (new TextEncoder().encode(raw).byteLength > MAX_BODY) return json(413, { error: "request too large" }, corsOrigin);
@@ -90,12 +111,15 @@ Deno.serve(async (req: Request) => {
       agent_role: body.agent_role, workspace_scope: body.workspace_scope ?? "all" };
   } else if (operation === "list_tasks") {
     if (Object.keys(body).length !== 1) return json(400, { error: "unexpected field" }, corsOrigin);
+  } else if (operation === "list_approvals") {
+    if (Object.keys(body).length !== 1) return json(400, { error: "unexpected field" }, corsOrigin);
   } else if (operation === "request_approval") {
     if (Object.keys(body).some((k) => !["operation","task_id","action","resource_id","request"].includes(k))
       || typeof body.task_id !== "string" || !UUID.test(body.task_id)
       || typeof body.action !== "string" || !APPROVAL_ACTIONS.has(body.action)
       || typeof body.resource_id !== "string" || !body.resource_id.trim() || body.resource_id.length > 256
-      || !record(body.request) || new TextEncoder().encode(canonical(body.request)).byteLength > 8192) {
+      || !record(body.request) || containsSensitiveMaterial(body.request)
+      || new TextEncoder().encode(canonical(body.request)).byteLength > 8192) {
       return json(400, { error: "invalid approval request" }, corsOrigin);
     }
     const requestHash = await sha256({ action: body.action, resource_id: body.resource_id.trim(), request: body.request });
