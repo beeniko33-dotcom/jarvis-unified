@@ -31,7 +31,7 @@ This is a source-level first-pass audit of the default branch `main` at commit `
 ### CI and verification
 - The inspected CI workflow still includes root Wrangler preview validation and a smoke test against a legacy Worker preview URL, in addition to the forecast, regression, JAEO, feed and container tests.
 - The `pull_request` workflow filter includes `main`, so a PR targeting `main` is eligible to trigger CI. The `push` filter does not include `feat/jarvis-four-pillar-architecture`, so direct pushes to that branch do not trigger the push workflow.
-- No successful CI run for the architecture PR head was verified in this audit. The Cloudflare Pages preview success is not a substitute for GitHub Actions tests.
+- GitHub Actions CI run #44874786174 completed successfully on the architecture PR head during the 2026-11-20 follow-up verification. Its single `test` job passed all steps: pinned dependency installation and `pip check`, public portal boundary check, Forex forecast tests, full repository regression suite, JAEO supervised-operations policy tests, Deriv read-only feed tests, foundation diagnostic, Docker build/smoke test, and container cleanup. This validates the tested commit only; it does not constitute a security review, app-level end-to-end validation, or production release. The Cloudflare Pages preview success is not a substitute for GitHub Actions tests.
 - The existing Worker smoke test expects a paper-mode health response from a legacy Worker URL. This is incompatible with the agreed Forex product boundary and must be retired or replaced only after the workflow and all consumers are reviewed.
 
 ## Priority implementation plan
@@ -74,3 +74,13 @@ This is a source-level first-pass audit of the default branch `main` at commit `
 - `jarvisunified.com`: available at a paid price in the latest registrar check; not purchased and not configured.
 - Production release: not approved or verified.
 - Forex execution: prohibited by product requirements; legacy source and UI still require isolation/removal work.
+
+
+## Follow-up verification — 2026-11-20
+
+- Draft PR #212 remains open, unmerged and mergeable.
+- Latest observed PR head at this check: `6c05564467854fa6b82927458b0c022106dc273b`.
+- GitHub Actions run #44874786174 completed with conclusion `success`; the `test` job and every reported step completed successfully.
+- The follow-up source review reconfirmed that `main.py` still imports `PaperBroker`, `ExecutionService`, order models and risk controls, and still exposes a paper-demo command. `core/feature_registry.py` still reports paper execution as enabled. The legacy `apps/control_panel/index.html` remains a trading workspace. These are unresolved migration blockers, not part of the new static portal.
+- The public portal is static and correctly labels Marketplace and Career as planned and JAEO as architecture in progress. No complete product application or active JAEO service was verified.
+- No new production deployment, domain purchase, Supabase restoration, or secret provisioning was performed during this follow-up.
