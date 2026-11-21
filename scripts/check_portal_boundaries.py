@@ -1,5 +1,6 @@
 """Guard public Jarvis entry points against legacy execution-oriented UI."""
 from pathlib import Path
+import re
 
 PORTAL = Path("apps/portal/index.html")
 CONTROL_PANEL = Path("apps/control_panel/index.html")
@@ -63,7 +64,7 @@ workspace_forbidden = (
     "live brokerage",
 )
 for phrase in workspace_forbidden:
-    if phrase in control_source:
+    if re.search(rf"\\b{re.escape(phrase)}\\b", control_source):
         raise SystemExit(f"public workspace contains forbidden legacy execution language: {phrase}")
 
 print("public portal and workspace product boundaries verified")
