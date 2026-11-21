@@ -17,6 +17,7 @@ class JaeoPortalConsoleContractTests(unittest.TestCase):
         self.assertIn('"Bearer "+session.access_token', page)
         self.assertIn('operation:"list_approvals"', page)
         self.assertIn('operation:"decide_approval"', page)
+        self.assertNotIn('value="change_secret"', page)
         self.assertIn("sb_publishable_", config)
         self.assertIn("guvszwxvmitdvykvtsnc.supabase.co", config)
         self.assertNotIn("sb_secret_", config)
