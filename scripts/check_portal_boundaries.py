@@ -39,7 +39,7 @@ workspace_required = (
     "jaeo",
     "read-only research",
     "order intents",
-    "does not execute actions",
+    "do not execute actions",
     "./career.html",
     "./marketplace.html",
     "https://jarvis-unified-portal.pages.dev/jaeo.html",
