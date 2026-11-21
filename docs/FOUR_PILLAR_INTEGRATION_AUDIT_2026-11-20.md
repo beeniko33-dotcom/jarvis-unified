@@ -70,3 +70,44 @@ Marketplace and Career are not blank projects: their initial UI and schema work 
 - The legacy `jarvis-control-panel` Pages project also automatically built a branch preview from the same commit: https://985567a7.jarvis-control-panel.pages.dev. Its destination directory is still `apps/control_panel`, which contains the old trading-oriented workspace and the Marketplace/Career pages. This preview pipeline is still connected to all branches. Its project settings were inspected but not changed; disabling previews requires a separately approved Cloudflare configuration change.
 - Cloudflare GitHub checks for `jarvis-control-worker` and `jarvis-unified-mcp` failed because those Worker scripts no longer exist in the account. The account's Workers Builds API currently returns no triggers and no build configuration for those script tags. These stale integration checks are distinct from the passing application CI and successful Pages portal build; they need Cloudflare/GitHub integration cleanup.
 - The GitHub Actions test jobs for the new audit commit were still in progress at the time of this note. Do not treat the commit as CI-passing until those jobs complete.
+
+
+## Isolated QA backend validation — 2026-11-21
+
+The user explicitly approved both the legacy Pages preview change and a separate isolated Supabase environment, then confirmed the quoted $0/month project cost.
+
+### Infrastructure actions
+
+- Disabled automatic preview deployments on Cloudflare Pages project `jarvis-control-panel` by setting `preview_deployment_setting=none`. Production deployments remain enabled from `main`; the canonical production deployment was not changed.
+- Created Supabase project `jarvis-unified-isolated-qa` in `eu-west-1`, project ref `guvszwxvmitdvykvtsnc`. Supabase reported `ACTIVE_HEALTHY` and quoted $0/month.
+- No production Supabase project was restored, modified, or supplied with data. No production secrets, DNS, or custom domain were changed.
+
+### Selected migration validation
+
+The QA database is a curated test target, not a claim that the entire repository migration chain is safe to apply. The following foundations were applied successfully in isolation:
+
+- Career secure foundation (`20261118193000_career_giver_secure_foundation.sql`) and private RLS-helper migration (`20261118210000_hide_career_rls_helpers.sql`).
+- Marketplace seller/listing/affiliate/order-intent foundation and service-role-only order RPC hardening.
+- JAEO supervised task/approval/append-only feedback foundation and approval expiry.
+- Public RLS auth.uid() initialization-plan optimization and a follow-up hardening migration that combines the Career application UPDATE policies, adds the eight missing foreign-key indexes found by the advisor, and revokes API-role execution on the JAEO trigger-only helper.
+
+The older Career foundation migration (`20261118190000_career_giver_foundation.sql`) was deliberately **not** applied. It conflicts with the secure foundation's table definitions. It remains in the repository pending a safe migration-history reconciliation; no previously deployed migration was rewritten.
+
+### Verification results
+
+- Supabase migration history records the selected Career, Marketplace and JAEO migrations plus the two QA hardening steps.
+- All 14 application tables created in `public` and `jarvis_private` have RLS enabled.
+- The three private JAEO tables have no client-facing RLS policies by design; they are inaccessible to `anon` and `authenticated`, and the private schema/table grants are restricted to `service_role`.
+- SQL privilege checks confirmed neither `anon` nor `authenticated` can execute either Marketplace order RPC. The service role can execute the Edge-Function-facing order RPC.
+- SQL privilege checks confirmed `authenticated` cannot use `jarvis_private` or read JAEO tasks; `service_role` can.
+- A transactional test confirmed the JAEO feedback trigger rejects both UPDATE and DELETE attempts.
+- Security advisor: no warning/error findings. The three informational `rls_enabled_no_policy` notices are the expected deny-by-default posture on private JAEO tables.
+- Performance advisor after hardening: no remaining `auth_rls_initplan`, multiple-permissive-policy, or unindexed-foreign-key findings. The remaining 23 informational unused-index notices are expected on an empty QA database with no workload.
+- Health advisor: no lints.
+
+### Still blocked / not claimed complete
+
+- The full timestamp-ordered repository migration chain has **not** been applied. It includes legacy trading/paper-oriented schema and the overlapping Career migration pair; those require a separately reviewed baseline/reconciliation plan before any production use.
+- No authenticated browser/API end-to-end test has yet exercised Career participant messaging or the Marketplace Edge Function against this QA project. No frontend environment variables or secrets have been wired to it.
+- JAEO still has no verified deployed authenticated task API/dashboard or end-to-end human approval lifecycle. Its schema foundation alone is not an operator service.
+- No production cutover, PR merge, or production deployment was performed.
