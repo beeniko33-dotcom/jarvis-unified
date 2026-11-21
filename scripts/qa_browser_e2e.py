@@ -312,7 +312,7 @@ def run_career(browser: Browser, users: dict[str, dict]) -> None:
     job_card = page.locator("#job-list article.item").filter(has_text="Jarvis E2E Remote Analyst")
     job_card.locator("button[data-apply]").click()
     page.locator("#message-status").get_by_text(re.compile("Application submitted", re.I)).wait_for()
-    page.locator("#conversation option").nth(0).wait_for()
+    page.wait_for_function("document.querySelector('#conversation')?.value !== ''")
     page.locator("#message-body").fill(candidate_message)
     page.locator("#send-message").click()
     page.locator("#message-status").get_by_text(re.compile("Message sent", re.I)).wait_for()
