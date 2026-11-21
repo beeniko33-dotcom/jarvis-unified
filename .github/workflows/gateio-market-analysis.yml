@@ -25,24 +25,68 @@ jobs:
       JARVIS_SUPABASE_URL: ${{ secrets.JARVIS_SUPABASE_URL }}
       JARVIS_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.JARVIS_SUPABASE_SERVICE_ROLE_KEY }}
     steps:
-      - name: Invoke authenticated market-analysis function
-        if: ${{ env.JARVIS_SUPABASE_URL != '' && env.JARVIS_SUPABASE_SERVICE_ROLE_KEY != '' }}
+      - name: Validate deployment credentials without exposing them
+        id: preflight
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from urllib.parse import urlsplit
+
+          raw = os.environ.get("JARVIS_SUPABASE_URL", "").strip()
+          key = os.environ.get("JARVIS_SUPABASE_SERVICE_ROLE_KEY", "")
+          parsed = urlsplit(raw)
+          valid_url = (
+              parsed.scheme == "https"
+              and bool(parsed.hostname)
+              and parsed.hostname.endswith(".supabase.co")
+              and parsed.path in ("", "/")
+              and not parsed.query
+              and not parsed.fragment
+          )
+          if not raw or not key:
+              status = "SKIPPED_NOT_CONFIGURED"
+              message = "Supabase deployment credentials are not configured."
+          elif not valid_url:
+              status = "BLOCKED_INVALID_SUPABASE_URL"
+              message = "Supabase URL must be a project HTTPS URL on the supabase.co domain."
+          else:
+              status = "READY"
+              message = "Deployment URL format validated."
+          with open("market-analysis-report.json", "w", encoding="utf-8") as report:
+              json.dump({"status": status, "evidence_credit": False, "orders": 0}, report)
+          if status != "READY":
+              print("::warning::" + message + " Market analysis was not invoked.")
+          PY
+          if grep -q '"status": "READY"' market-analysis-report.json; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Invoke authenticated read-only market-analysis function
+        if: steps.preflight.outputs.ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          curl --silent --show-error --fail-with-body \\
-            --request POST \\
-            --header "apikey: ${JARVIS_SUPABASE_SERVICE_ROLE_KEY}" \\
-            --header "Authorization: Bearer ${JARVIS_SUPABASE_SERVICE_ROLE_KEY}" \\
-            --header "Content-Type: application/json" \\
-            --data '{}' \\
-            "${JARVIS_SUPABASE_URL%/}/functions/v1/market-analysis" \\
-            | tee market-analysis-report.json
-      - name: Report missing deployment credentials
-        if: ${{ env.JARVIS_SUPABASE_URL == '' || env.JARVIS_SUPABASE_SERVICE_ROLE_KEY == '' }}
-        run: |
-          echo "::warning::Market analysis not invoked. Configure existing Supabase repository secrets."
-          echo '{"status":"SKIPPED_NOT_CONFIGURED","evidence_credit":false,"orders":0}' > market-analysis-report.json
+          curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 45 \
+            --request POST \
+            --header "apikey: ${JARVIS_SUPABASE_SERVICE_ROLE_KEY}" \
+            --header "Authorization: Bearer ${JARVIS_SUPABASE_SERVICE_ROLE_KEY}" \
+            --header "Content-Type: application/json" \
+            --data '{}' \
+            --output market-analysis-response.json \
+            "${JARVIS_SUPABASE_URL%/}/functions/v1/market-analysis"
+          python - <<'PY'
+          import json
+          with open("market-analysis-response.json", encoding="utf-8") as source:
+              response = json.load(source)
+          with open("market-analysis-report.json", "w", encoding="utf-8") as report:
+              json.dump(response, report)
+          PY
+
       - name: Preserve run report
         if: always()
         uses: actions/upload-artifact@v4
