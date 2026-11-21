@@ -118,3 +118,11 @@ The older Career foundation migration (`20261118190000_career_giver_foundation.s
 - The automatic PR preflight for the retired paper prototype attempted to connect using the existing GitHub secret scoped to project `uinibcemffkafdfuewyp`. The connection failed because that paused prototype's database tenant/user was unavailable. The secret value was withheld in logs; no database write occurred.
 - The failure was unrelated to the new QA project. The workflow was changed to manual-only so routine four-pillar PRs no longer attempt an automatic connection to the paused paper prototype. Its old project target and read-only checks remain explicitly legacy; do not use it as QA evidence.
 - The latest PR head now has a fresh CI cycle. The stale Cloudflare Workers Build checks still report missing Worker scripts; no replacement Worker was deployed.
+
+
+### JAEO product-boundary correction — 2026-11-21
+
+- Removed the legacy `paper_research` task action and replaced it with `research`; JAEO task envelopes, policy results and learning reports now label their operating mode `supervised`, not `paper`.
+- Updated the JAEO operations document to state the current product boundary: research and engineering operations only; no paper, demo or live trading, and no order execution.
+- Added and applied `20261121080000_jaeo_supervised_research_mode.sql` to the isolated QA project. Its JAEO task constraint now accepts only `mode='supervised'`; a transactional SQL test confirmed legacy `paper` mode is rejected, `supervised` mode is accepted, and append-only feedback still blocks UPDATE and DELETE after the trigger helper's API grants were revoked.
+- JAEO policy, command-routing and learning tests were updated to assert the supervised mode. CI for the resulting head is pending.
