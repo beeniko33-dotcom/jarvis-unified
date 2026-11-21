@@ -48,7 +48,7 @@ A separate static portal project has now been created:
 | Feature branch | `feat/jarvis-four-pillar-architecture` (preview only) |
 | Custom domain | None |
 
-The portal source is intentionally informational and labels product availability honestly. Its initial feature-branch deployment is being processed; do not call it live until Cloudflare reports the deploy stage successful and the public page is checked in a browser. The project is separate from the legacy control panel.
+The portal source is intentionally informational and labels product availability honestly. Cloudflare reported the first static deployment successful at `https://d12898ac.jarvis-unified-portal.pages.dev` (source commit `3397b879869a0031f89d1e2e10e5a0b2902588c3`). A later copy-only correction is queued as a feature-branch preview at `https://3dd8bfb0.jarvis-unified-portal.pages.dev` (source commit `3012dbdf6ca9db75d73754e73544de997b85ef41`). Browser rendering has not been independently verified, and the default `jarvis-unified-portal.pages.dev` production hostname is not yet backed by a main-branch release. The project is separate from the legacy control panel.
 
 ## Target public URL structure
 
