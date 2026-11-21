@@ -65,7 +65,8 @@ async function init(){
  const {data,error}=await sb.auth.getSession();$("loading").classList.add("hidden");
  if(error||!data.session){show("signin",true);return}
  user=data.session.user;show("app",true);
- await Promise.all([loadSellers(),loadListings()]);\n await Promise.all([loadAffiliateLinks(),loadOrders()]);
+ await Promise.all([loadSellers(),loadListings()]);
+ await Promise.all([loadAffiliateLinks(),loadOrders()]);
 }
 async function loadSellers(){
  const {data,error}=await sb.from("marketplace_sellers").select("id,owner_id,display_name,country_code,verification_status,description,created_at").order("created_at",{ascending:false});
@@ -86,7 +87,8 @@ async function loadListings(){
 }
 function renderListings(){
  const q=$("search").value.trim().toLowerCase();
- const targetListing=new URLSearchParams(location.search).get("listing");\n const visible=listings.filter(l=>l.status==="published"&&(!targetListing||l.id===targetListing)&&(!q||(l.title+" "+l.description+" "+(l.marketplace_sellers?.display_name||"")).toLowerCase().includes(q)));
+ const targetListing=new URLSearchParams(location.search).get("listing");
+ const visible=listings.filter(l=>l.status==="published"&&(!targetListing||l.id===targetListing)&&(!q||(l.title+" "+l.description+" "+(l.marketplace_sellers?.display_name||"")).toLowerCase().includes(q)));
  $("listing-list").innerHTML=visible.length?visible.map(l=>'<article class="listing"><h3>'+esc(l.title)+'</h3><p class="muted">'+esc(l.marketplace_sellers?.display_name||"Verified seller")+' · '+esc(l.listing_type)+'</p><p>'+esc(l.description.slice(0,320))+(l.description.length>320?"…":"")+'</p><div class="price">'+esc(money(l.price,l.currency))+'</div><div class="actions"><button data-order="'+esc(l.id)+'">Create order intent</button><button data-affiliate="'+esc(l.id)+'">Create affiliate link</button></div></article>').join(""):'<div class="muted">No matching published listings yet.</div>';
  $("listing-list").querySelectorAll("[data-order]").forEach(b=>b.addEventListener("click",()=>createOrder(b.dataset.order,b)));
  $("listing-list").querySelectorAll("[data-affiliate]").forEach(b=>b.addEventListener("click",()=>createAffiliate(b.dataset.affiliate,b)));
