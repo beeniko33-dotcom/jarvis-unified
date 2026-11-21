@@ -166,8 +166,8 @@ class SupabaseQA:
         for seller in seller_rows:
             listing_rows = self.get_rows("marketplace_listings", seller_id=f"eq.{seller['id']}", select="id")
             listing_ids = [row["id"] for row in listing_rows]
+            self.delete("marketplace_orders", seller_id=f"eq.{seller['id']}")
             if listing_ids:
-                self.delete("marketplace_orders", seller_id=f"eq.{seller['id']}")
                 self.delete("marketplace_affiliate_links", listing_id="in.(" + ",".join(listing_ids) + ")")
             self.delete("marketplace_listings", seller_id=f"eq.{seller['id']}")
             self.delete("marketplace_sellers", id=f"eq.{seller['id']}")
@@ -178,11 +178,11 @@ class SupabaseQA:
         apps = self.get_rows("career_applications", candidate_id=f"eq.{candidate}", select="id")
         app_ids = [row["id"] for row in apps]
         if app_ids:
-            self.delete("career_messages", conversation_id="in.(" + ",".join(
-                row["id"] for row in self.get_rows("career_conversations",
-                    application_id="in.(" + ",".join(app_ids) + ")", select="id")
-            ) + ")") if self.get_rows("career_conversations",
-                    application_id="in.(" + ",".join(app_ids) + ")", select="id") else None
+            conversations = self.get_rows("career_conversations",
+                application_id="in.(" + ",".join(app_ids) + ")", select="id")
+            conversation_ids = [row["id"] for row in conversations]
+            if conversation_ids:
+                self.delete("career_messages", conversation_id="in.(" + ",".join(conversation_ids) + ")")
             self.delete("career_conversations", application_id="in.(" + ",".join(app_ids) + ")")
         self.delete("career_applications", candidate_id=f"eq.{candidate}")
         self.delete("career_jobs", created_by=f"eq.{employer}")
@@ -237,6 +237,9 @@ def open_page(browser: Browser) -> Page:
 
 def control_panel_signin(page: Page, url: str, user: dict) -> None:
     page.goto(url, wait_until="domcontentloaded")
+    configured_url = page.evaluate("window.JARVIS_CONFIG?.supabaseUrl || ''")
+    if configured_url.rstrip("/") != EXPECTED_QA_URL:
+        raise RuntimeError("Control-panel page is not connected to the isolated QA project")
     page.locator("#signin").wait_for(state="visible")
     page.locator("#signin-email").fill(user["email"])
     page.locator("#signin-password").fill(user["password"])
@@ -246,6 +249,9 @@ def control_panel_signin(page: Page, url: str, user: dict) -> None:
 
 def jaeo_signin(page: Page, user: dict) -> None:
     page.goto(PORTAL_URL + "/jaeo.html", wait_until="domcontentloaded")
+    configured_url = page.evaluate("window.JARVIS_CONFIG?.supabaseUrl || ''")
+    if configured_url.rstrip("/") != EXPECTED_QA_URL:
+        raise RuntimeError("JAEO page is not connected to the isolated QA project")
     page.locator("#auth").wait_for(state="visible")
     page.locator("#email").fill(user["email"])
     page.locator("#password").fill(user["password"])
