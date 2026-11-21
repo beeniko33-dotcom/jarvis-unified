@@ -127,8 +127,8 @@ async function grantOperator(){
   setStatus("operatorAdminStatus","Granting role and recording audit event…");
   try{
     const d=await api({operation:"grant_operator",target_user_id:target});
-    setStatus("operatorAdminStatus","Operator access granted to "+(d.user.email??d.user.id)+". Audit record: "+d.audit_id+". The new operator must sign out and back in.","success");
     await loadOperatorUsers();
+    setStatus("operatorAdminStatus","Operator access granted to "+(d.user.email??d.user.id)+". Audit record: "+d.audit_id+". The new operator must sign out and back in.","success");
   }catch(e){setStatus("operatorAdminStatus",e.message,"error");}
 }
 $("loadOperatorUsers").onclick=loadOperatorUsers;
