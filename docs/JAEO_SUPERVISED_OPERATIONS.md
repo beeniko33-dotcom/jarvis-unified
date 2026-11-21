@@ -81,3 +81,9 @@ No production deployment, paper validation, live trading, or 30-day paper-valida
 - Edge Function version 5 is deployed to isolated QA with JWT verification enabled.
 
 - The Edge Function is now deployed as version 6 after correcting JWT-format detection in the payload guard. General secret-change requests remain disabled.
+
+
+### First-owner bootstrap without Dashboard metadata editing
+- The isolated QA project has one existing email-confirmed account. To remove the manual App Metadata step, the first owner is now pinned by that account's immutable Supabase Auth user UUID in the QA-only `jaeo-operator` Edge Function source and the QA console's visibility logic.
+- Server authorization is authoritative: only the pinned user UUID or an existing trusted `app_metadata.jaeo_owner === true` claim is an owner. Ordinary users cannot self-grant, and the owner can grant operator status only to another confirmed account through the audited owner-only API.
+- This is an explicit QA bootstrap allowlist, not a general production pattern. To transfer ownership, update the server allowlist through reviewed code, deploy the QA function, and test before changing the portal UI. No direct SQL write to `auth.users` is used.

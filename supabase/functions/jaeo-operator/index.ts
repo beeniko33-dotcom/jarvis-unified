@@ -51,7 +51,11 @@ function containsSensitiveMaterial(value: unknown): boolean {
   if (record(value)) return Object.entries(value).some(([key, child]) => sensitiveKey.test(key) || containsSensitiveMaterial(child));
   return false;
 }
-function isOperator(user: User) { return user.app_metadata?.jaeo_operator === true; }
+// First-owner bootstrap is pinned to the one existing, email-confirmed QA account.
+// This avoids unsafe direct writes to auth.users and avoids requiring dashboard metadata edits.
+const JAEO_BOOTSTRAP_OWNER_USER_ID = "0d27e78c-935c-4be7-8d0a-bbc7ce846bce";
+function isOwner(user: User) { return user.id === JAEO_BOOTSTRAP_OWNER_USER_ID || user.app_metadata?.jaeo_owner === true; }
+function isOperator(user: User) { return user.app_metadata?.jaeo_operator === true || isOwner(user); }
 function mapError(error: { code?: string } | null) {
   if (error?.code === "42501") return 403;
   if (error?.code === "P0002") return 404;
@@ -97,6 +101,43 @@ Deno.serve(async (req: Request) => {
   const admin = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
 
   const operation = body.operation;
+  if (operation === "list_operator_users") {
+    if (!isOwner(user) || Object.keys(body).length !== 1) return json(403, { error: "JAEO owner role required" }, corsOrigin);
+    const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 200 });
+    if (error) return json(502, { error: "Could not load QA account directory" }, corsOrigin);
+    return json(200, { users: data.users.map((entry) => ({
+      id: entry.id, email: entry.email ?? null, created_at: entry.created_at,
+      jaeo_operator: entry.app_metadata?.jaeo_operator === true,
+      email_confirmed: Boolean(entry.email_confirmed_at),
+    })) }, corsOrigin);
+  }
+  if (operation === "grant_operator") {
+    if (!isOwner(user)) return json(403, { error: "JAEO owner role required" }, corsOrigin);
+    if (Object.keys(body).some((k) => !["operation", "target_user_id"].includes(k))
+      || typeof body.target_user_id !== "string" || !UUID.test(body.target_user_id)
+      || body.target_user_id === user.id) {
+      return json(400, { error: "Choose another existing QA user; self-provisioning is not allowed" }, corsOrigin);
+    }
+    const { data: targetData, error: targetError } = await admin.auth.admin.getUserById(body.target_user_id);
+    if (targetError || !targetData.user) return json(404, { error: "QA user not found" }, corsOrigin);
+    const target = targetData.user;
+    if (!target.email_confirmed_at) return json(409, { error: "The target must confirm their email before operator access can be granted" }, corsOrigin);
+    if (target.app_metadata?.jaeo_operator === true) return json(409, { error: "This account is already a JAEO operator" }, corsOrigin);
+    const previousMetadata = { ...(target.app_metadata ?? {}) };
+    const { data: updatedData, error: updateError } = await admin.auth.admin.updateUserById(target.id, {
+      app_metadata: { ...previousMetadata, jaeo_operator: true },
+    });
+    if (updateError || !updatedData.user) return json(502, { error: "Could not update trusted operator role" }, corsOrigin);
+    const { data: auditId, error: auditError } = await admin.rpc("jaeo_record_operator_admin_event", {
+      p_actor_id: user.id, p_target_id: target.id, p_action: "grant_operator",
+      p_target_email: target.email ?? null, p_detail: { source: "jaeo_console", role: "jaeo_operator" },
+    });
+    if (auditError || !auditId) {
+      await admin.auth.admin.updateUserById(target.id, { app_metadata: previousMetadata });
+      return json(502, { error: "Operator grant was rolled back because its audit record could not be saved" }, corsOrigin);
+    }
+    return json(200, { user: { id: target.id, email: target.email ?? null, jaeo_operator: true }, audit_id: auditId }, corsOrigin);
+  }
   let payload: Record<string,unknown> = {};
   if (operation === "create_task") {
     if (Object.keys(body).some((k) => !["operation","idempotency_key","title","description","agent_role","workspace_scope"].includes(k))

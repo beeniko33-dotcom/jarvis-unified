@@ -9,6 +9,8 @@ def test_jaeo_edge_function_auth_and_server_boundary():
     assert "npm:@supabase/supabase-js@2.119.2" in source
     assert "auth.getUser(token)" in source
     assert "user.app_metadata?.jaeo_operator === true" in source
+    assert "JAEO_BOOTSTRAP_OWNER_USER_ID" in source
+    assert "isOwner(user)" in source
     assert "SUPABASE_SERVICE_ROLE_KEY" in source
     assert "SUPABASE_SECRET_KEYS" in source
     assert "SUPABASE_PUBLISHABLE_KEYS" in source
