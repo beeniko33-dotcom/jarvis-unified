@@ -111,3 +111,10 @@ The older Career foundation migration (`20261118190000_career_giver_foundation.s
 - No authenticated browser/API end-to-end test has yet exercised Career participant messaging or the Marketplace Edge Function against this QA project. No frontend environment variables or secrets have been wired to it.
 - JAEO still has no verified deployed authenticated task API/dashboard or end-to-end human approval lifecycle. Its schema foundation alone is not an operator service.
 - No production cutover, PR merge, or production deployment was performed.
+
+
+### Legacy workflow follow-up — 2026-11-21
+
+- The automatic PR preflight for the retired paper prototype attempted to connect using the existing GitHub secret scoped to project `uinibcemffkafdfuewyp`. The connection failed because that paused prototype's database tenant/user was unavailable. The secret value was withheld in logs; no database write occurred.
+- The failure was unrelated to the new QA project. The workflow was changed to manual-only so routine four-pillar PRs no longer attempt an automatic connection to the paused paper prototype. Its old project target and read-only checks remain explicitly legacy; do not use it as QA evidence.
+- The latest PR head now has a fresh CI cycle. The stale Cloudflare Workers Build checks still report missing Worker scripts; no replacement Worker was deployed.
