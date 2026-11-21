@@ -61,8 +61,10 @@ label{display:block;font-size:12px;color:#aabbd3;margin:10px 0 5px}input,textare
 </main>
 </div>
 <script type="module">
-const URL="https://zythldptlplyutphgxpg.supabase.co";
-const KEY="sb_publishable_5bXO0f6Xpc3PzWifm7AgoA_IuYaVTa-";
+const CONFIG=window.JARVIS_CONFIG??{};
+const URL=String(CONFIG.supabaseUrl??"");
+const KEY=String(CONFIG.supabasePublishableKey??"");
+if(!URL||!KEY){document.getElementById("loading").textContent="Career backend is not configured for this environment. The legacy database will not be contacted.";throw new Error("Missing JARVIS_CONFIG");}
 const {createClient}=await import("https://esm.sh/@supabase/supabase-js@2.45.4");
 const sb=createClient(URL,KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
 const $=id=>document.getElementById(id);
