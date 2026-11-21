@@ -16,7 +16,7 @@ def test_jaeo_edge_function_auth_and_server_boundary():
     assert "SUPABASE_PUBLISHABLE_KEYS" in source
     assert 'admin.rpc("jaeo_operator_api"' in source
     assert 'admin.schema("jarvis_private")' not in source
-    assert "req.method === \\"OPTIONS\\"" in source
+    assert 'req.method === "OPTIONS"' in source
     assert 'new Response(null, { status: 204' in source
     assert "Handle browser preflight before reading environment variables" in source
     assert "jarvis-unified-portal.pages.dev" in source
