@@ -71,7 +71,7 @@ begin
     v_action := p_payload->>'action';
     v_resource := btrim(p_payload->>'resource_id');
     v_hash := p_payload->>'request_hash';
-    if v_action not in ('change_code','change_schema','change_secret','provision_resource','create_cron','deploy_preview','merge_pull_request')
+    if v_action is null or v_hash is null or v_resource is null or v_action not in ('change_code','change_schema','change_secret','provision_resource','create_cron','deploy_preview','merge_pull_request')
        or v_resource = '' or length(v_resource) > 256
        or v_hash !~ '^[0-9a-f]{64}$'
        or v_resource = any(array['zythldptlplyutphgxpg','db.zythldptlplyutphgxpg.supabase.co','jarvis-control-worker','production','prod'])
