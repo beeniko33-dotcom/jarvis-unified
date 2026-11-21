@@ -1,0 +1,49 @@
+name: Twelve Data Forex provider check
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbol:
+        description: Forex pair, e.g. EUR/USD
+        required: true
+        default: EUR/USD
+        type: string
+      interval:
+        description: Intraday interval
+        required: true
+        default: 5min
+        type: choice
+        options:
+          - 1min
+          - 5min
+          - 15min
+          - 30min
+          - 1h
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jarvis-twelvedata-provider-check
+  cancel-in-progress: false
+
+jobs:
+  provider-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+      TWELVE_DATA_SYMBOL: ${{ inputs.symbol }}
+      TWELVE_DATA_INTERVAL: ${{ inputs.interval }}
+      TWELVE_DATA_OUTPUTSIZE: "50"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Validate live Forex provider response
+        run: python scripts/validate_twelvedata_provider.py
