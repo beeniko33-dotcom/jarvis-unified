@@ -11,6 +11,7 @@ class JaeoPortalConsoleContractTests(unittest.TestCase):
         config = (ROOT / "apps/portal/jaeo-config.js").read_text(encoding="utf-8")
         self.assertIn("@supabase/supabase-js@2.119.2", page)
         self.assertIn("signInWithPassword", page)
+        self.assertIn("emailRedirectTo:window.location.origin+\"/jaeo.html\"", page)
         self.assertIn("supabase.auth.signUp", page)
         self.assertIn("/functions/v1/jaeo-operator", page)
         self.assertIn("Bearer "+session.access_token", page)
