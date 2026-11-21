@@ -31,6 +31,16 @@
 
 <section id="workspace" class="hidden">
 <div class="top" style="border:0;padding:18px 0"><div><strong id="who"></strong><div id="role" class="meta"></div></div><button id="signout" class="secondary">Sign out</button></div>
+<section id="operatorAdmin" class="card hidden" style="margin:18px 0">
+<h2>Operator administration <span class="pill">OWNER-GOVERNED</span></h2>
+<p class="muted">Only an existing trusted operator can grant operator access to another confirmed QA account. Self-provisioning is blocked. Every grant is audited. To revoke access, use Supabase Dashboard Auth Users; revocation is intentionally not self-service in this QA release.</p>
+<div class="grid" style="margin:0">
+<div><label for="operatorUser">Confirmed QA account</label><select id="operatorUser"><option value="">Load accounts first</option></select></div>
+<div><label>Role</label><input value="JAEO operator" disabled></div>
+</div>
+<div class="actions"><button id="loadOperatorUsers" class="secondary">Load QA accounts</button><button id="grantOperator">Grant operator access</button></div>
+<div id="operatorAdminStatus" class="status" role="status"></div>
+</section>
 <div class="grid">
 <section class="card">
 <h2>Create a supervised task</h2>
@@ -90,12 +100,37 @@ function showSession(s){
   $("who").textContent=s.user.email??"Signed-in user";
   $("role").textContent=operator?"Trusted JAEO operator":"Requester · supervised access";
   $("operatorBadge").classList.toggle("hidden",!operator);
+  $("operatorAdmin").classList.toggle("hidden",!operator);
+  if(operator) loadOperatorUsers();
   loadTasks();loadApprovals();
 }
 async function refreshSession(){const {data}=await supabase.auth.getSession();showSession(data.session);}
 $("signin").onclick=async()=>{setStatus("authStatus","Signing in…");const {error}=await supabase.auth.signInWithPassword({email:$("email").value.trim(),password:$("password").value});setStatus("authStatus",error?.message??"Signed in.","success");if(!error)await refreshSession();};
 $("signup").onclick=async()=>{setStatus("authStatus","Creating account…");const {data,error}=await supabase.auth.signUp({email:$("email").value.trim(),password:$("password").value,options:{emailRedirectTo:window.location.origin+"/jaeo.html"}});setStatus("authStatus",error?.message??(data.session?"Account created.":"Account created. Check your email to confirm, then sign in."),error?"error":"success");if(data.session)showSession(data.session);};
 $("signout").onclick=async()=>{await supabase.auth.signOut();showSession(null);};
+async function loadOperatorUsers(){
+  if(!operator)return;
+  setStatus("operatorAdminStatus","Loading QA accounts…");
+  try{
+    const d=await api({operation:"list_operator_users"});
+    const eligible=(d.users??[]).filter(u=>!u.jaeo_operator&&u.email_confirmed);
+    $("operatorUser").innerHTML='<option value="">Choose a confirmed QA account</option>'+eligible.map(u=>'<option value="'+escapeHtml(u.id)+'">'+escapeHtml(u.email??u.id)+'</option>').join("");
+    setStatus("operatorAdminStatus",eligible.length+" eligible account(s). Existing operators are excluded.","success");
+  }catch(e){setStatus("operatorAdminStatus",e.message,"error");}
+}
+async function grantOperator(){
+  const target=$("operatorUser").value;
+  if(!target){setStatus("operatorAdminStatus","Choose an account first.","error");return;}
+  if(!confirm("Grant trusted JAEO operator access to this account? This will allow approval decisions."))return;
+  setStatus("operatorAdminStatus","Granting role and recording audit event…");
+  try{
+    const d=await api({operation:"grant_operator",target_user_id:target});
+    setStatus("operatorAdminStatus","Operator access granted to "+(d.user.email??d.user.id)+". Audit record: "+d.audit_id+". The new operator must sign out and back in.","success");
+    await loadOperatorUsers();
+  }catch(e){setStatus("operatorAdminStatus",e.message,"error");}
+}
+$("loadOperatorUsers").onclick=loadOperatorUsers;
+$("grantOperator").onclick=grantOperator;
 async function loadTasks(){
   $("tasks").textContent="Loading…";
   try{const d=await api({operation:"list_tasks"});tasks=d.tasks??[];$("tasks").innerHTML=tasks.length?tasks.map(t=>'<div class="item"><strong>'+escapeHtml(t.title)+'</strong><div class="meta">'+escapeHtml(t.status)+' · '+escapeHtml(t.agent_role)+' · '+escapeHtml(new Date(t.created_at).toLocaleString())+'</div><div class="meta">Task ID: '+escapeHtml(t.id)+'</div></div>').join(""):"No tasks yet.";
