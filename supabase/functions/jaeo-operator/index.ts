@@ -72,7 +72,7 @@ Deno.serve(async (req: Request) => {
   const portalOrigin = /^https:\/\/(?:[a-z0-9-]+\.)?jarvis-unified-portal\.pages\.dev$/.test(origin);
   const corsOrigin = portalOrigin ? origin : undefined;
   if (req.method === "OPTIONS") return corsOrigin
-    ? new Response("ok", { status: 204, headers: { "access-control-allow-origin": origin, "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": "authorization, apikey, content-type, x-client-info", "access-control-max-age": "600", "vary": "Origin" } })
+    ? new Response(null, { status: 204, headers: { "access-control-allow-origin": origin, "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": "authorization, apikey, content-type, x-client-info", "access-control-max-age": "600", "vary": "Origin" } })
     : json(403, { error: "origin not allowed" });
   if (req.method !== "POST") return json(405, { error: "method not allowed" }, corsOrigin);
   const authorization = req.headers.get("authorization") ?? "";
