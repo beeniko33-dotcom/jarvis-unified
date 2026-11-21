@@ -21,7 +21,7 @@ label{display:block;font-size:12px;color:#aabbd3;margin:10px 0 5px}input,textare
 <body><div class="wrap">
 <header><div><h1>Career Giver</h1><div class="muted">Jobs · verified employers · private application messaging</div></div><nav><a class="btn" href="/">← Jarvis workspace</a><button id="signout">Sign out</button></nav></header>
 <div id="loading" class="card">Checking your secure session…</div>
-<div id="signin" class="card hidden"><h2>Sign in to Career Giver</h2><p class="muted">Use your existing Jarvis Unified account. Your session is shared securely with the main workspace.</p><p><a href="/">Open Jarvis Unified sign-in →</a></p></div>
+<div id="signin" class="card hidden"><h2>Sign in to isolated Jarvis QA</h2><p class="muted">Use your QA account. This page connects only to the isolated QA project.</p><label for="signin-email">Email</label><input id="signin-email" type="email" autocomplete="username" required><label for="signin-password">Password</label><input id="signin-password" type="password" autocomplete="current-password" required><p><button class="primary" id="signin-submit">Sign in</button></p><p id="signin-status" class="status-line" aria-live="polite"></p></div>
 <main id="app" class="hidden">
 <div class="notice">Employer accounts start as <strong>pending verification</strong>. Publishing jobs and inviting additional staff are intentionally locked until a trusted verification and onboarding workflow is deployed. Do not treat an unverified employer as authenticated.</div>
 <div class="grid">
@@ -159,6 +159,7 @@ $("send-message").addEventListener("click",async()=>{
  $("send-message").disabled=!conversations.length;
 });
 $("refresh-jobs").addEventListener("click",loadJobs);
+$("signin-submit").addEventListener("click",async()=>{const email=$("signin-email").value.trim(),password=$("signin-password").value;if(!email||!password){say("signin-status","Enter your QA email and password.");return}const button=$("signin-submit");button.disabled=true;say("signin-status","Signing in…");const {error}=await sb.auth.signInWithPassword({email,password});if(error){say("signin-status","Sign-in failed: "+error.message);button.disabled=false;return} $("signin-password").value="";say("signin-status","Signed in. Loading your workspace…");await init();button.disabled=false});
 $("signout").addEventListener("click",async()=>{await sb.auth.signOut();location.href="/"});
 sb.auth.onAuthStateChange((event,session)=>{if(!session){show("app",false);show("signin",true)}});
 init().catch(e=>{say("loading","Could not initialize Career Giver: "+e.message)});
