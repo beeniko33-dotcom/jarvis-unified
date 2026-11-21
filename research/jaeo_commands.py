@@ -20,7 +20,7 @@ class CommandRisk(StrEnum):
 
 class CommandAction(StrEnum):
     INSPECT = "inspect"
-    RESEARCH = "paper_research"
+    RESEARCH = "research"
     TEST = "test"
     PREPARE_PR = "open_pull_request"
     DRAFT_APPLICATION = "draft_application"
@@ -117,7 +117,7 @@ def classify_command(command: str) -> CommandIntent:
 
 
 def build_task_envelope(*, command: str, actor_id: str, request_id: str) -> dict[str, object]:
-    """Create an idempotent, paper-mode task envelope; never executes it."""
+    """Create an idempotent, supervised task envelope; never executes it."""
     if not isinstance(actor_id, str) or not actor_id.strip() or len(actor_id) > 128:
         raise ValueError("actor_id must contain 1-128 characters")
     if not isinstance(request_id, str) or not request_id.strip() or len(request_id) > 128:
@@ -132,7 +132,7 @@ def build_task_envelope(*, command: str, actor_id: str, request_id: str) -> dict
         "request_id": request_id.strip(),
         "intent": asdict(intent),
         "status": "awaiting_approval" if intent.requires_human_approval else "queued",
-        "mode": "paper",
+        "mode": "supervised",
         "live_trading_enabled": False,
         "execution_started": False,
     }

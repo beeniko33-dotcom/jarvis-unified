@@ -118,6 +118,6 @@ def report_as_dict(report: LearningReport) -> dict[str, Any]:
         "requires_human_review": report.requires_human_review,
         "policy_changed": report.policy_changed,
         "self_modification_enabled": report.self_modification_enabled,
-        "mode": "paper",
+        "mode": "supervised",
         "live_trading_enabled": False,
     }

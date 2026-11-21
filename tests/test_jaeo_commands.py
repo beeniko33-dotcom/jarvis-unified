@@ -51,11 +51,11 @@ class JaeoCommandTests(unittest.TestCase):
         self.assertFalse(intent.executable_by_jaeo)
         self.assertTrue(intent.requires_human_approval)
 
-    def test_envelope_is_idempotent_and_paper_only(self):
+    def test_envelope_is_idempotent_and_supervised(self):
         first = build_task_envelope(command="research EURUSD", actor_id="user-1", request_id="req-1")
         second = build_task_envelope(command="research EURUSD", actor_id="user-1", request_id="req-1")
         self.assertEqual(first["task_idempotency_key"], second["task_idempotency_key"])
-        self.assertEqual(first["mode"], "paper")
+        self.assertEqual(first["mode"], "supervised")
         self.assertFalse(first["live_trading_enabled"])
         self.assertFalse(first["execution_started"])
 

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat/jarvis-forex-signal-only, feat/gateio-readonly-market-provider, deriv-eurusd-readonly-feed, level3-provenance-ops-readiness, feat/deriv-tls-claim-fail-closed, fix/forward-evidence-verifier-injection-closed]
+    branches: [main, feat/jarvis-four-pillar-architecture, feat/jarvis-forex-signal-only, feat/gateio-readonly-market-provider, deriv-eurusd-readonly-feed, level3-provenance-ops-readiness, feat/deriv-tls-claim-fail-closed, fix/forward-evidence-verifier-injection-closed]
   pull_request:
     branches: [main, deriv-eurusd-readonly-feed, level3-provenance-ops-readiness, feat/deriv-tls-claim-fail-closed, feat/public-rss-metadata-ingestion, feat/research-source-health-gaps]
   workflow_dispatch:
@@ -31,11 +31,8 @@ jobs:
           python -m pip install -r requirements-lock.txt
           python -m pip check
 
-      - name: Validate root Wrangler preview configuration
-        run: python scripts/check_wrangler_preview_config.py
-
-      - name: Smoke-test isolated Cloudflare Worker Preview
-        run: python scripts/verify_worker_preview.py
+      - name: Verify public portal product boundaries
+        run: python scripts/check_portal_boundaries.py
 
       - name: Run forecast-only engine tests
         run: python -m unittest tests.test_forex_forecast -v

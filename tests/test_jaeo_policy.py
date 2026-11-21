@@ -9,13 +9,15 @@ from research.jaeo_policy import (
 
 
 NOW = datetime(2026, 11, 20, 21, 0, tzinfo=timezone.utc)
+REQUEST_HASH = "a" * 64
 
 
 def approved(action, resource="isolated-prototype", task="task-1", **changes):
     value = {
         "id": "approval-123", "task_id": task, "status": "approved",
-        "action": action, "resource_id": resource, "decided_by": "operator-1",
-        "decided_at": "2026-11-20T20:00:00Z",
+        "action": action, "resource_id": resource, "requested_by": "requester-1",
+        "decided_by": "operator-1", "decided_by_user_id": "operator-1",
+        "request_hash": REQUEST_HASH, "decided_at": "2026-11-20T20:00:00Z",
         "expires_at": "2026-11-20T22:00:00Z",
     }
     value.update(changes)
@@ -27,7 +29,7 @@ class JaeoPolicyTests(unittest.TestCase):
         for action in (Action.INSPECT.value, Action.TEST.value, Action.CREATE_BRANCH.value):
             result = evaluate_action(agent="engineering", action=action, resource_id="jarvis-preview")
             self.assertEqual(result.decision, Decision.ALLOW)
-            self.assertEqual(result.mode, "paper")
+            self.assertEqual(result.mode, "supervised")
             self.assertFalse(result.live_trading_enabled)
 
     def test_mutations_require_human_approval(self):
@@ -41,7 +43,8 @@ class JaeoPolicyTests(unittest.TestCase):
     def test_explicit_approval_is_bound_to_task_action_and_resource(self):
         action = Action.CHANGE_SCHEMA.value
         result = evaluate_action(agent="database", action=action, resource_id="isolated-prototype",
-                                 task_id="task-1", approval_record=approved(action), now=NOW)
+                                 task_id="task-1", requester_id="requester-1", request_hash=REQUEST_HASH,
+                                 approval_record=approved(action), now=NOW)
         self.assertEqual(result.decision, Decision.ALLOW)
 
     def test_approval_rejects_wrong_task_action_or_resource(self):
@@ -53,6 +56,9 @@ class JaeoPolicyTests(unittest.TestCase):
             approved(action, expires_at="2026-11-20T20:59:00Z"),
             approved(action, decided_at="2026-11-20T21:01:00Z"),
             approved(action, expires_at=None),
+            approved(action, requested_by="different-requester"),
+            approved(action, decided_by_user_id="requester-1"),
+            approved(action, request_hash="b" * 64),
             {"status": "approved", "action": action, "resource_id": "isolated-prototype",
              "decided_by": "operator", "decided_at": "2026-11-20T20:00:00Z"},
         ]
@@ -60,6 +66,7 @@ class JaeoPolicyTests(unittest.TestCase):
             with self.subTest(record=record):
                 result = evaluate_action(agent="database", action=action,
                     resource_id="isolated-prototype", task_id="task-1",
+                    requester_id="requester-1", request_hash=REQUEST_HASH,
                     approval_record=record, now=NOW)
                 self.assertEqual(result.decision, Decision.APPROVAL_REQUIRED)
 
@@ -67,7 +74,8 @@ class JaeoPolicyTests(unittest.TestCase):
         action = Action.CHANGE_CODE.value
         result = evaluate_action(agent="engineering", action=action,
             resource_id="branch:feat/example", task_id="task-1",
-            approval_record=approved(action, resource="branch:feat/example"), now=NOW)
+            approval_record=approved(action, resource="branch:feat/example"),
+            requester_id="requester-1", request_hash=REQUEST_HASH, now=NOW)
         self.assertEqual(result.decision, Decision.ALLOW)
 
     def test_production_workspace_is_read_only_even_with_approval(self):
@@ -95,7 +103,7 @@ class JaeoPolicyTests(unittest.TestCase):
         self.assertEqual(task["workspace_scope"], "all")
         self.assertEqual(task["autonomy"], "supervised")
         self.assertEqual(task["feedback"], "both")
-        self.assertEqual(task["mode"], "paper")
+        self.assertEqual(task["mode"], "supervised")
         self.assertFalse(task["live_trading_enabled"])
 
     def test_task_cannot_escalate_autonomy_or_disable_feedback(self):
@@ -108,7 +116,7 @@ class JaeoPolicyTests(unittest.TestCase):
         event = feedback_event(task_id="t-1", agent="qa", status="completed",
                                evidence_urls=["https://github.com/example/pr/1"])
         self.assertEqual(event["deployment"], "not_attempted")
-        self.assertEqual(event["mode"], "paper")
+        self.assertEqual(event["mode"], "supervised")
         self.assertFalse(event["live_trading_enabled"])
         with self.assertRaises(ValueError):
             feedback_event(task_id="t-1", agent="qa", status="completed",

@@ -1,17 +1,9 @@
-name: Supabase paper-state connection preflight
+name: Legacy paper-state preflight (manual only)
 
 on:
+  # This is a legacy, read-only diagnostic for the retired paper prototype.
+  # Do not run it automatically for the read-only Forex / four-pillar release.
   workflow_dispatch:
-  push:
-    branches: [integration/supabase-paper-cycle-bridge]
-    paths:
-      - ".github/workflows/supabase-paper-preflight.yml"
-  pull_request:
-    branches: [main]
-    paths:
-      - ".github/workflows/supabase-paper-preflight.yml"
-      - "research/supabase_paper_state.py"
-      - "supabase/migrations/**"
 
 permissions:
   contents: read
@@ -22,7 +14,7 @@ concurrency:
 
 jobs:
   preflight:
-    name: Read-only authenticated database preflight
+    name: Legacy prototype read-only preflight
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
