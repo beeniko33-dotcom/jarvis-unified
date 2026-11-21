@@ -79,6 +79,9 @@ class CareerUiContractTests(unittest.TestCase):
         self.assertIn('career_conversations', page)
         self.assertIn('career_messages', page)
         self.assertIn('sender_id:user.id', page)
+        self.assertIn("sb.auth.signInWithPassword", page)
+        self.assertIn("isolated Jarvis QA", page)
+        self.assertIn('show("signin",false)', page)
 
 
 if __name__ == "__main__":
