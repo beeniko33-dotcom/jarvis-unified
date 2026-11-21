@@ -43,6 +43,9 @@ workspace_required = (
     "./career.html",
     "./marketplace.html",
     "https://jarvis-unified-portal.pages.dev/jaeo.html",
+    "getregistrations()",
+    "registration.unregister()",
+    "caches.delete(key)",
 )
 for phrase in workspace_required:
     if phrase not in control_source:
