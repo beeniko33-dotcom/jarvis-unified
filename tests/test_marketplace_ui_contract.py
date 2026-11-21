@@ -38,6 +38,11 @@ class MarketplaceUiContractTests(unittest.TestCase):
         page = Path("apps/control_panel/marketplace.html").read_text(encoding="utf-8")
         self.assertIn('./jarvis-config.js', page)
         self.assertIn("supabasePublishableKey", page)
+        config = Path("apps/control_panel/jarvis-config.js").read_text(encoding="utf-8")
+        self.assertIn("https://guvszwxvmitdvykvtsnc.supabase.co", config)
+        self.assertIn("sb_publishable_", config)
+        self.assertNotIn("service_role", config.lower())
+        self.assertNotIn("sb_secret_", config)
         self.assertNotIn("service_role", page.lower())
         self.assertNotIn("sb_secret_", page)
 
