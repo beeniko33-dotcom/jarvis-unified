@@ -67,3 +67,8 @@ No production deployment, paper validation, live trading, or 30-day paper-valida
 - CORS is limited to the Jarvis Unified Portal Pages hostname and its preview aliases, plus any exact origins explicitly configured through `JAEO_ALLOWED_ORIGINS`.
 - Automated CI for the newest portal-console commit is still running. The preceding API/RPC test run passed all 12 workflow steps.
 - A live browser sign-up and end-to-end API call have not been performed from this environment because no human QA account/session is available. Do not claim those interactive flows are verified until a human signs in and completes the test.
+
+
+### Supabase SDK compatibility hardening
+- Updated both the Edge Function and browser console to the current pinned `@supabase/supabase-js@2.119.2`, so the new publishable/secret key model is supported without relying on the legacy `anon`/`service_role` keys.
+- Redeployed `jaeo-operator` to isolated QA as version 4 with `verify_jwt=true`.
