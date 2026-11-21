@@ -4,6 +4,7 @@ import unittest
 
 
 SOURCE = Path("supabase/functions/market-analysis/index.ts").read_text(encoding="utf-8")
+WORKFLOW = Path(".github/workflows/gateio-market-analysis.yml").read_text(encoding="utf-8")
 
 
 class MarketAnalysisAuthCompatibilityTests(unittest.TestCase):
@@ -16,6 +17,15 @@ class MarketAnalysisAuthCompatibilityTests(unittest.TestCase):
     def test_machine_auth_checks_all_configured_service_keys(self):
         self.assertIn("SERVICE_ROLE_KEYS.some((key) => tokenMatches(suppliedApiKey, key))", SOURCE)
         self.assertIn('req.headers.get("x-jarvis-ingest-token")', SOURCE)
+
+    def test_new_secret_key_is_sent_only_as_apikey_for_internal_calls(self):
+        self.assertIn('SERVICE_ROLE_KEY.startsWith("sb_secret_")', SOURCE)
+        self.assertIn('headers: SERVICE_ROLE_HEADERS', SOURCE)
+        self.assertNotIn('"authorization": "Bearer " + SERVICE_ROLE_KEY },', SOURCE)
+
+    def test_workflow_omits_bearer_header_for_new_secret_keys(self):
+        self.assertIn('if [[ "${JARVIS_SUPABASE_SERVICE_ROLE_KEY}" != sb_secret_* ]]; then', WORKFLOW)
+        self.assertIn('request_headers+=(--header "Authorization: Bearer', WORKFLOW)
 
     def test_malformed_secret_key_json_fails_closed_without_crashing_module_load(self):
         self.assertIn("try {\n  SECRET_KEYS = JSON.parse", SOURCE)
