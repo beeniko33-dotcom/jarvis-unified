@@ -79,3 +79,5 @@ No production deployment, paper validation, live trading, or 30-day paper-valida
 - The Edge Function rejects common credential-bearing field names and known token formats in approval payloads before hashing or storage.
 - QA SQL verification confirms the RPC rejects `change_secret` and continues to accept a non-secret `change_code` request. Test data was rolled back.
 - Edge Function version 5 is deployed to isolated QA with JWT verification enabled.
+
+- The Edge Function is now deployed as version 6 after correcting JWT-format detection in the payload guard. General secret-change requests remain disabled.
