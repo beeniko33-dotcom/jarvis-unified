@@ -36,6 +36,20 @@ Therefore:
 - Before any public product launch, replace or retire this legacy frontend through a reviewed change and verify that the deployed output contains no execution UI or endpoints. If it must remain temporarily for internal recovery, protect it with an explicit access policy and verify that policy from an unauthenticated session.
 - A successful Pages build only confirms static deployment; it does not establish product correctness, security, or release readiness.
 
+A separate static portal project has now been created:
+
+| Field | Value |
+|---|---|
+| Project | `jarvis-unified-portal` |
+| Free hostname | `jarvis-unified-portal.pages.dev` |
+| Repository path | `apps/portal` |
+| Build command | None (static HTML) |
+| Production branch | `main` |
+| Feature branch | `feat/jarvis-four-pillar-architecture` (preview only) |
+| Custom domain | None |
+
+The portal source is intentionally informational and labels product availability honestly. Its initial feature-branch deployment is being processed; do not call it live until Cloudflare reports the deploy stage successful and the public page is checked in a browser. The project is separate from the legacy control panel.
+
 ## Target public URL structure
 
 Once a new, safe landing page and each app are independently implemented and verified, use:
