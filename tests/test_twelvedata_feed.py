@@ -90,7 +90,9 @@ class TwelveDataFeedTests(unittest.TestCase):
         self.assertEqual(query["order"], ["asc"])
         self.assertEqual(query["include_ohlc"], ["true"])
         self.assertEqual(query["symbol"], ["EUR/USD"])
-        self.assertEqual(query["apikey"], ["do-not-leak-this"])
+        self.assertNotIn("apikey", query)
+        self.assertEqual(self.captured["headers"].get("Authorization"), "apikey do-not-leak-this")
+        self.assertNotIn("do-not-leak-this", self.captured["url"])
         self.assertNotIn("do-not-leak-this", repr(result.provenance()))
 
     def test_missing_api_key_fails_before_network_request(self):
