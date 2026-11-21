@@ -27,7 +27,7 @@ class JaeoPolicyTests(unittest.TestCase):
         for action in (Action.INSPECT.value, Action.TEST.value, Action.CREATE_BRANCH.value):
             result = evaluate_action(agent="engineering", action=action, resource_id="jarvis-preview")
             self.assertEqual(result.decision, Decision.ALLOW)
-            self.assertEqual(result.mode, "paper")
+            self.assertEqual(result.mode, "supervised")
             self.assertFalse(result.live_trading_enabled)
 
     def test_mutations_require_human_approval(self):
@@ -95,7 +95,7 @@ class JaeoPolicyTests(unittest.TestCase):
         self.assertEqual(task["workspace_scope"], "all")
         self.assertEqual(task["autonomy"], "supervised")
         self.assertEqual(task["feedback"], "both")
-        self.assertEqual(task["mode"], "paper")
+        self.assertEqual(task["mode"], "supervised")
         self.assertFalse(task["live_trading_enabled"])
 
     def test_task_cannot_escalate_autonomy_or_disable_feedback(self):
@@ -108,7 +108,7 @@ class JaeoPolicyTests(unittest.TestCase):
         event = feedback_event(task_id="t-1", agent="qa", status="completed",
                                evidence_urls=["https://github.com/example/pr/1"])
         self.assertEqual(event["deployment"], "not_attempted")
-        self.assertEqual(event["mode"], "paper")
+        self.assertEqual(event["mode"], "supervised")
         self.assertFalse(event["live_trading_enabled"])
         with self.assertRaises(ValueError):
             feedback_event(task_id="t-1", agent="qa", status="completed",
