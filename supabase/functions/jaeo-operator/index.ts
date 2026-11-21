@@ -2,7 +2,7 @@ import { createClient, type User } from "npm:@supabase/supabase-js@2.119.2";
 
 const JSON_HEADERS = { "content-type": "application/json", "cache-control": "no-store" };
 const TASK_ROLES = new Set(["orchestrator","engineering","database","infrastructure","security","qa","research","release","audit"]);
-const APPROVAL_ACTIONS = new Set(["change_code","change_schema","change_secret","provision_resource","create_cron","deploy_preview","merge_pull_request"]);
+const APPROVAL_ACTIONS = new Set(["change_code","change_schema","provision_resource","create_cron","deploy_preview","merge_pull_request"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_BODY = 12_000;
 
@@ -42,6 +42,14 @@ function envApiKey(legacyName: string, modernName: string): string {
     }
   }
   return Deno.env.get(legacyName) ?? "";
+}
+function containsSensitiveMaterial(value: unknown): boolean {
+  const sensitiveKey = /secret|password|token|api.?key|authorization|private.?key|credential|mnemonic|seed.?phrase/i;
+  const secretValue = /(?:sb_secret_|sb_publishable_|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{12,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9]{20,}|eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,})/;
+  if (typeof value === "string") return secretValue.test(value);
+  if (Array.isArray(value)) return value.some(containsSensitiveMaterial);
+  if (record(value)) return Object.entries(value).some(([key, child]) => sensitiveKey.test(key) || containsSensitiveMaterial(child));
+  return false;
 }
 function isOperator(user: User) { return user.app_metadata?.jaeo_operator === true; }
 function mapError(error: { code?: string } | null) {
@@ -110,7 +118,8 @@ Deno.serve(async (req: Request) => {
       || typeof body.task_id !== "string" || !UUID.test(body.task_id)
       || typeof body.action !== "string" || !APPROVAL_ACTIONS.has(body.action)
       || typeof body.resource_id !== "string" || !body.resource_id.trim() || body.resource_id.length > 256
-      || !record(body.request) || new TextEncoder().encode(canonical(body.request)).byteLength > 8192) {
+      || !record(body.request) || containsSensitiveMaterial(body.request)
+      || new TextEncoder().encode(canonical(body.request)).byteLength > 8192) {
       return json(400, { error: "invalid approval request" }, corsOrigin);
     }
     const requestHash = await sha256({ action: body.action, resource_id: body.resource_id.trim(), request: body.request });
