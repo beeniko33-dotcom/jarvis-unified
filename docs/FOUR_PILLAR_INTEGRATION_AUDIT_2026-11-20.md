@@ -134,3 +134,10 @@ The older Career foundation migration (`20261118190000_career_giver_foundation.s
 - Added `20261121090000_jaeo_task_request_binding.sql` and applied it to isolated QA. New task inserts require a requester; approval triggers bind each approval to the task requester, require a different human approver for approve/reject decisions, validate the hash format, and prevent changing task/action/resource/request-hash bindings or revising a final decision.
 - A transactional database test verified self-approval is rejected, a distinct approver succeeds, approved bindings cannot be edited, and mismatched requesters/malformed hashes are rejected. The test transaction was rolled back.
 - The API/dashboard must still compute the canonical payload hash server-side and submit the requester/approver identities from authenticated sessions. No JAEO API or dashboard is deployed yet.
+
+
+### Career and Marketplace RLS transaction tests — 2026-11-21
+
+- Career RLS was exercised in a rolled-back transaction using three synthetic Auth users: employer, candidate and outsider. The employer created an organization and verified job; the candidate applied and exchanged private messages; the employer could read/reply and update application status; the candidate could not set employer-only status; the outsider could not read the application, conversation or messages, and an attempted message insert against a known conversation ID was rejected.
+- Marketplace was exercised in a rolled-back transaction using synthetic seller, affiliate and buyer users. The seller created a verified listing; the affiliate created an attribution link; the service-role-only order RPC created an order intent using the database price snapshot; idempotent replay returned the existing order; reusing the key with a different quantity was rejected; buyer access worked while affiliate-only access to the buyer's order was denied.
+- These were database/RLS transaction tests only. They do not establish that the browser apps or Edge Functions are deployed or connected, and all synthetic rows were rolled back.
