@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#08111f"><meta name="description" content="JAEO supervised task and approval console for Jarvis Unified QA.">
+<title>JAEO Console — Jarvis Unified</title>
+<style>
+:root{color-scheme:dark;--bg:#08111f;--panel:#101d30;--line:#263b53;--text:#eef5ff;--muted:#a4b4c9;--teal:#64e0d2;--blue:#8db7ff;--gold:#f2c77c;--red:#ff9d9d}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 80% -15%,#1a4054 0,transparent 42%),var(--bg);color:var(--text);font:15px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{width:min(1080px,calc(100% - 32px));margin:auto}.top{display:flex;justify-content:space-between;align-items:center;padding:22px 0;border-bottom:1px solid var(--line);gap:12px}.brand{font-weight:850;letter-spacing:.08em}.brand a{color:inherit;text-decoration:none}.muted{color:var(--muted)}h1{font-size:clamp(30px,5vw,48px);line-height:1.08;letter-spacing:-.04em;margin:36px 0 8px}.sub{color:var(--muted);max-width:760px}.pill{display:inline-block;border:1px solid #665537;color:var(--gold);background:#342b1b80;border-radius:99px;padding:4px 9px;font-size:11px;font-weight:750;letter-spacing:.05em}.notice{margin:20px 0;padding:14px 16px;border:1px solid #665537;background:#2d261a66;border-radius:12px;color:#e7d6b6;font-size:13px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:24px 0}.card{background:linear-gradient(145deg,#142238,#0d1929);border:1px solid var(--line);border-radius:16px;padding:20px;min-width:0}.card h2{font-size:19px;margin:0 0 14px}.wide{grid-column:1/-1}label{display:block;font-size:12px;color:var(--muted);margin:12px 0 5px}input,select,textarea{width:100%;background:#081523;border:1px solid #344b66;border-radius:9px;padding:11px;color:var(--text);font:inherit}textarea{min-height:88px;resize:vertical}button,.btn{border:0;border-radius:9px;padding:10px 14px;background:linear-gradient(120deg,var(--teal),var(--blue));color:#07121e;font-weight:800;cursor:pointer;margin-top:12px}button.secondary{background:#1b2d43;color:var(--text);border:1px solid var(--line)}button.danger{background:#48252a;color:#ffd6d6;border:1px solid #7a4248}.actions{display:flex;gap:8px;flex-wrap:wrap}.hidden{display:none!important}.status{font-size:12px;color:var(--muted);margin-top:10px;min-height:18px}.error{color:var(--red)}.success{color:var(--teal)}.item{border-top:1px solid var(--line);padding:13px 0;overflow-wrap:anywhere}.item:first-child{border-top:0}.item strong{display:block}.meta{font-size:12px;color:var(--muted)}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#081523;padding:10px;border-radius:8px;color:#c9d8e9;font-size:11px;max-height:180px;overflow:auto}.tag{display:inline-block;border:1px solid var(--line);border-radius:99px;padding:2px 7px;font-size:11px;color:var(--teal);margin:3px 4px 0 0}.foot{padding:26px 0 42px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+@media(max-width:700px){.grid{grid-template-columns:1fr}.wide{grid-column:auto}.top{align-items:flex-start;flex-direction:column}}
+</style>
+</head>
+<body>
+<header class="wrap top"><div class="brand"><a href="./index.html">JARVIS UNIFIED</a> / JAEO</div><a class="muted" href="./index.html">Back to overview</a></header>
+<main class="wrap">
+<h1>Supervised Operations Console</h1>
+<p class="sub">Create and track supervised work requests, inspect approval records and retain a clear audit trail. This QA console records requests and decisions only; it does not run code, deploy services, change production, trade or execute approved actions.</p>
+<div class="notice"><strong>QA environment only.</strong> Do not submit production credentials, private customer data, or secrets. Every approval is bound to a specific request and a separate human approver. An approval record is not an execution capability.</div>
+
+<section id="auth" class="card">
+<h2>Sign in or create a QA account</h2>
+<p class="muted">Use an email address you control. If email confirmation is enabled, confirm the message before signing in.</p>
+<div class="grid" style="margin:0">
+<div><label for="email">Email</label><input id="email" type="email" autocomplete="email" required></div>
+<div><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" minlength="8" required></div>
+</div>
+<div class="actions"><button id="signin">Sign in</button><button class="secondary" id="signup">Create account</button></div>
+<div id="authStatus" class="status" role="status"></div>
+</section>
+
+<section id="workspace" class="hidden">
+<div class="top" style="border:0;padding:18px 0"><div><strong id="who"></strong><div id="role" class="meta"></div></div><button id="signout" class="secondary">Sign out</button></div>
+<div class="grid">
+<section class="card">
+<h2>Create a supervised task</h2>
+<label for="taskTitle">Task title</label><input id="taskTitle" maxlength="200" placeholder="e.g. Review QA release checklist">
+<label for="taskDescription">Description</label><textarea id="taskDescription" maxlength="4000" placeholder="Describe the requested research or engineering task. Do not include secrets."></textarea>
+<label for="agentRole">Responsible role</label><select id="agentRole"><option>orchestrator</option><option>engineering</option><option>database</option><option>infrastructure</option><option>security</option><option>qa</option><option>research</option><option>release</option><option>audit</option></select>
+<label for="workspaceScope">Workspace scope</label><select id="workspaceScope"><option value="core">Core</option><option value="all">All non-production</option></select>
+<button id="createTask">Create task</button><div id="taskStatus" class="status" role="status"></div>
+</section>
+<section class="card">
+<h2>Request human approval</h2>
+<label for="approvalTask">Task</label><select id="approvalTask"><option value="">Load or create a task first</option></select>
+<label for="approvalAction">Requested action</label><select id="approvalAction"><option value="change_code">Change code</option><option value="change_schema">Change schema</option><option value="change_secret">Change secret</option><option value="provision_resource">Provision resource</option><option value="create_cron">Create scheduled job</option><option value="deploy_preview">Deploy preview</option><option value="merge_pull_request">Merge pull request</option></select>
+<label for="resourceId">Non-production resource identifier</label><input id="resourceId" maxlength="256" placeholder="e.g. feature/qa-task-branch">
+<label for="requestJson">Exact request details (JSON)</label><textarea id="requestJson" spellcheck="false">{
+  "summary": "Describe the precise requested change",
+  "scope": "isolated QA only"
+}</textarea>
+<button id="requestApproval">Submit approval request</button><div id="approvalStatus" class="status" role="status"></div>
+</section>
+<section class="card">
+<h2>My tasks</h2><div id="tasks" class="muted">Sign in to load tasks.</div><button id="refreshTasks" class="secondary">Refresh tasks</button>
+</section>
+<section class="card">
+<h2>Approval queue <span id="operatorBadge" class="pill hidden">OPERATOR VIEW</span></h2><div id="approvals" class="muted">Sign in to load approvals.</div><button id="refreshApprovals" class="secondary">Refresh approvals</button>
+</section>
+</div>
+</section>
+</main>
+<footer class="wrap foot">Jarvis Unified · Isolated QA · Supervised-only · No production execution · No trading</footer>
+<script src="./jaeo-config.js"></script>
+<script type="module">
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+const config=window.JARVIS_CONFIG??{};
+const url=String(config.supabaseUrl??"");
+const key=String(config.supabasePublishableKey??"");
+const $=id=>document.getElementById(id);
+if(!url||!key){$("authStatus").textContent="QA frontend configuration is missing.";throw new Error("Missing public QA config");}
+const supabase=createClient(url,key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+let session=null,operator=false,tasks=[];
+const setStatus=(id,message,kind="")=>{$(id).textContent=message;$(id).className="status "+kind;};
+const escapeHtml=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+async function api(body){
+  if(!session) throw new Error("Please sign in again.");
+  const res=await fetch(url+"/functions/v1/jaeo-operator",{method:"POST",headers:{
+    "apikey":key,"Authorization":"Bearer "+session.access_token,"Content-Type":"application/json"
+  },body:JSON.stringify(body)});
+  const data=await res.json().catch(()=>({error:"Unexpected server response"}));
+  if(!res.ok) throw new Error(data.error??("Request failed ("+res.status+")"));
+  return data;
+}
+function showSession(s){
+  session=s;operator=s?.user?.app_metadata?.jaeo_operator===true;
+  $("auth").classList.toggle("hidden",!!s);
+  $("workspace").classList.toggle("hidden",!s);
+  if(!s)return;
+  $("who").textContent=s.user.email??"Signed-in user";
+  $("role").textContent=operator?"Trusted JAEO operator":"Requester · supervised access";
+  $("operatorBadge").classList.toggle("hidden",!operator);
+  loadTasks();loadApprovals();
+}
+async function refreshSession(){const {data}=await supabase.auth.getSession();showSession(data.session);}
+$("signin").onclick=async()=>{setStatus("authStatus","Signing in…");const {error}=await supabase.auth.signInWithPassword({email:$("email").value.trim(),password:$("password").value});setStatus("authStatus",error?.message??"Signed in.","success");if(!error)await refreshSession();};
+$("signup").onclick=async()=>{setStatus("authStatus","Creating account…");const {data,error}=await supabase.auth.signUp({email:$("email").value.trim(),password:$("password").value});setStatus("authStatus",error?.message??(data.session?"Account created.":"Account created. Check your email to confirm, then sign in."),error?"error":"success");if(data.session)showSession(data.session);};
+$("signout").onclick=async()=>{await supabase.auth.signOut();showSession(null);};
+async function loadTasks(){
+  $("tasks").textContent="Loading…";
+  try{const d=await api({operation:"list_tasks"});tasks=d.tasks??[];$("tasks").innerHTML=tasks.length?tasks.map(t=>'<div class="item"><strong>'+escapeHtml(t.title)+'</strong><div class="meta">'+escapeHtml(t.status)+' · '+escapeHtml(t.agent_role)+' · '+escapeHtml(new Date(t.created_at).toLocaleString())+'</div><div class="meta">Task ID: '+escapeHtml(t.id)+'</div></div>').join(""):"No tasks yet.";
+    $("approvalTask").innerHTML='<option value="">Choose a task</option>'+tasks.map(t=>'<option value="'+escapeHtml(t.id)+'">'+escapeHtml(t.title)+'</option>').join("");
+  }catch(e){$("tasks").textContent=e.message;}
+}
+async function loadApprovals(){
+  $("approvals").textContent="Loading…";
+  try{const d=await api({operation:"list_approvals"});const rows=d.approvals??[];
+    $("approvals").innerHTML=rows.length?rows.map(a=>'<div class="item"><strong>'+escapeHtml(a.action)+' · '+escapeHtml(a.status)+'</strong><div class="meta">Resource: '+escapeHtml(a.resource_id)+' · Expires: '+escapeHtml(new Date(a.expires_at).toLocaleString())+'</div><div class="meta">Approval ID: '+escapeHtml(a.id)+'</div><pre>'+escapeHtml(JSON.stringify(a.request,null,2))+'</pre>'+(operator&&a.status==="pending"?'<div class="actions"><button data-approve="'+escapeHtml(a.id)+'">Approve record</button><button class="danger" data-reject="'+escapeHtml(a.id)+'">Reject</button></div>':"")+'</div>').join(""):"No approval records yet.";
+    $("approvals").querySelectorAll("[data-approve]").forEach(b=>b.onclick=()=>decide(b.dataset.approve,"approved"));
+    $("approvals").querySelectorAll("[data-reject]").forEach(b=>b.onclick=()=>decide(b.dataset.reject,"rejected"));
+  }catch(e){$("approvals").textContent=e.message;}
+}
+async function decide(id,decision){
+  const reason=prompt("Reason for "+decision+" (required for audit clarity):")??"";
+  if(!reason.trim()){setStatus("approvalStatus","A decision reason is required.","error");return;}
+  try{await api({operation:"decide_approval",approval_id:id,decision,reason});setStatus("approvalStatus","Decision recorded. No external action was executed.","success");await loadApprovals();}
+  catch(e){setStatus("approvalStatus",e.message,"error");}
+}
+$("createTask").onclick=async()=>{
+  setStatus("taskStatus","Creating task…");
+  try{const d=await api({operation:"create_task",idempotency_key:crypto.randomUUID(),title:$("taskTitle").value.trim(),description:$("taskDescription").value,agent_role:$("agentRole").value,workspace_scope:$("workspaceScope").value});setStatus("taskStatus","Task recorded: "+d.task.id,"success");$("taskTitle").value="";$("taskDescription").value="";await loadTasks();}
+  catch(e){setStatus("taskStatus",e.message,"error");}
+};
+$("requestApproval").onclick=async()=>{
+  setStatus("approvalStatus","Submitting approval request…");
+  try{const request=JSON.parse($("requestJson").value);const d=await api({operation:"request_approval",task_id:$("approvalTask").value,action:$("approvalAction").value,resource_id:$("resourceId").value.trim(),request});setStatus("approvalStatus","Approval request recorded: "+d.approval.id+". No action was executed.","success");await loadApprovals();}
+  catch(e){setStatus("approvalStatus",e instanceof SyntaxError?"Request details must be valid JSON.":e.message,"error");}
+};
+$("refreshTasks").onclick=loadTasks;$("refreshApprovals").onclick=loadApprovals;
+supabase.auth.onAuthStateChange((_event,s)=>{showSession(s);});
+await refreshSession();
+</script>
+</body>
+</html>
