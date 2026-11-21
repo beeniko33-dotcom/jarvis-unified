@@ -141,3 +141,24 @@ The older Career foundation migration (`20261118190000_career_giver_foundation.s
 - Career RLS was exercised in a rolled-back transaction using three synthetic Auth users: employer, candidate and outsider. The employer created an organization and verified job; the candidate applied and exchanged private messages; the employer could read/reply and update application status; the candidate could not set employer-only status; the outsider could not read the application, conversation or messages, and an attempted message insert against a known conversation ID was rejected.
 - Marketplace was exercised in a rolled-back transaction using synthetic seller, affiliate and buyer users. The seller created a verified listing; the affiliate created an attribution link; the service-role-only order RPC created an order intent using the database price snapshot; idempotent replay returned the existing order; reusing the key with a different quantity was rejected; buyer access worked while affiliate-only access to the buyer's order was denied.
 - These were database/RLS transaction tests only. They do not establish that the browser apps or Edge Functions are deployed or connected, and all synthetic rows were rolled back.
+
+
+## Follow-up implementation — 2026-11-21
+
+### JAEO API boundary
+- Added `supabase/functions/jaeo-operator/index.ts` with verified Supabase user sessions, trusted `app_metadata.jaeo_operator` authorization, server-side canonical SHA-256 request hashing, strict request allowlists, bounded payloads, and a configurable exact-origin CORS allowlist.
+- Added `20261121110000_jaeo_operator_rpc.sql`; applied as `jaeo_operator_rpc` to isolated QA only. The private schema remains unexposed. The public RPC is `SECURITY DEFINER` with an empty search path and explicit execute grants only to `service_role`.
+- QA privilege check: `service_role` can execute the RPC; `authenticated` and `anon` cannot; `authenticated` cannot use `jarvis_private`.
+- Rollback-only SQL lifecycle test passed: task create, approval request, requester self-approval rejection, and approval by a distinct operator. All test Auth users and rows were rolled back.
+- Source-level regression tests added for the auth, metadata, hashing and server-only RPC boundary.
+- The Edge Function has not been deployed. Deployment and operator app-metadata provisioning remain gated; no external action executor is implemented.
+
+### Frontend environment isolation
+- Removed the hardcoded paused-project URL and publishable key from the Career and Marketplace HTML clients.
+- Both now load an ignored local `apps/control_panel/jarvis-config.js` before initialization and fail closed with a clear message if environment configuration is absent.
+- Added `apps/control_panel/jarvis-config.example.js`; it contains placeholders only. Configure it with the isolated QA project URL and publishable key before browser E2E testing. Never put a secret/service-role key in browser code.
+- This change intentionally makes those two legacy pages unavailable until they are explicitly configured for QA; it prevents them from continuing to target the paused legacy project.
+
+### CI
+- The earlier architecture head `760e960` passed all 12 CI steps.
+- CI was triggered again after JAEO API and frontend-isolation changes; the latest run must complete before this newer head is considered verified.
