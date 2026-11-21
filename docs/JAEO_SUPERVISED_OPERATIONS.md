@@ -32,14 +32,25 @@ Read-only access is verified for the GitHub repository, the isolated Supabase QA
 
 Render is not verified as connected; therefore Render workspace inspection, Cron creation, deployment and billing checks cannot be reported as completed. No JAEO Worker or JAEO Cron has been provisioned. A configured role is not a connected integration, and each write/deploy operation remains approval-gated.
 
+## API implementation status
+
+- An authenticated Edge Function source now exists at `supabase/functions/jaeo-operator/index.ts`.
+- It verifies bearer sessions with `auth.getUser(token)`; requester identity comes only from that verified user.
+- Operator decisions require the trusted `app_metadata.jaeo_operator === true` claim. User-editable metadata is not used for authorization.
+- The function computes a canonical SHA-256 hash server-side and calls a service-role-only RPC. The private `jarvis_private` schema remains unexposed; browser roles cannot execute the RPC or use the private schema.
+- The RPC migration `20261121110000_jaeo_operator_rpc.sql` has been applied to isolated QA and verified for create-task, approval-request, self-approval rejection, distinct-operator approval, and rollback-only lifecycle behavior.
+- The API records approval decisions only. It does not execute code changes, schema changes, deployments, merges, provisioning, or any trading action.
+- The Edge Function is **not yet deployed**. Deployment requires an explicit preview/deployment approval and a configured allowlist of the intended QA portal origin(s). No operator has been granted the `jaeo_operator` app-metadata claim yet.
+- The browser dashboard and end-to-end invocation test remain pending; the current test verifies the source-level auth and RPC boundary.
+
 ## Rollout sequence
 
-1. Apply the JAEO migration to the isolated QA project only.
-2. Verify schema constraints, RLS and security advisors.
-3. Run unit tests and PR CI.
-4. Implement authenticated task/approval/feedback API and dashboard read model.
-5. Connect provider adapters with least privilege and audit evidence.
-6. Verify billing and service limits before any paid resource provisioning.
-7. Keep production and trading controls untouched throughout.
+1. Apply JAEO schema and server-only RPC migrations to isolated QA only. **Done.**
+2. Verify grants, RLS, constraints and security advisors. **Done; only the three intentional private-table no-policy informational notices remain.**
+3. Run repository regression tests and PR CI. **Earlier head passed; latest API changes are awaiting a new CI run.**
+4. Deploy the authenticated API to isolated QA only after explicit deployment approval and QA-origin allowlist configuration.
+5. Provision operator app-metadata claims only for named, authorized human operators through a separately reviewed admin process.
+6. Build the authenticated dashboard and run full browser-to-Edge-Function E2E tests, including expired approval, replay, self-approval, privilege escalation and production-resource denial.
+7. Connect provider adapters with least privilege and audit evidence; keep production and trading controls untouched.
 
 No production deployment, paper validation, live trading, or 30-day paper-validation start is implied by this implementation.
