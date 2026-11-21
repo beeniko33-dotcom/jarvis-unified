@@ -45,7 +45,7 @@ function envApiKey(legacyName: string, modernName: string): string {
 }
 function containsSensitiveMaterial(value: unknown): boolean {
   const sensitiveKey = /secret|password|token|api.?key|authorization|private.?key|credential|mnemonic|seed.?phrase/i;
-  const secretValue = /(?:sb_secret_|sb_publishable_|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{12,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9]{20,}|eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,})/;
+  const secretValue = /(?:sb_secret_|sb_publishable_|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{12,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9]{20,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})/;
   if (typeof value === "string") return secretValue.test(value);
   if (Array.isArray(value)) return value.some(containsSensitiveMaterial);
   if (record(value)) return Object.entries(value).some(([key, child]) => sensitiveKey.test(key) || containsSensitiveMaterial(child));
