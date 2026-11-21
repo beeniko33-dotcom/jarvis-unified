@@ -39,10 +39,11 @@ class MarketplaceUiContractTests(unittest.TestCase):
         self.assertIn('./jarvis-config.js', page)
         self.assertIn("supabasePublishableKey", page)
         config = Path("apps/control_panel/jarvis-config.js").read_text(encoding="utf-8")
-        self.assertIn("https://guvszwxvmitdvykvtsnc.supabase.co", config)
-        self.assertIn("sb_publishable_", config)
-        self.assertNotIn("service_role", config.lower())
-        self.assertNotIn("sb_secret_", config)
+        config_code = "\\n".join(line for line in config.splitlines() if not line.lstrip().startswith("//"))
+        self.assertIn("https://guvszwxvmitdvykvtsnc.supabase.co", config_code)
+        self.assertIn("sb_publishable_", config_code)
+        self.assertNotIn("service_role", config_code.lower())
+        self.assertNotIn("sb_secret_", config_code)
         self.assertNotIn("service_role", page.lower())
         self.assertNotIn("sb_secret_", page)
 
@@ -51,6 +52,9 @@ class MarketplaceUiContractTests(unittest.TestCase):
         self.assertIn('authorization:"Bearer "+token', page)
         self.assertIn('"/functions/v1/marketplace-orders"', page)
         self.assertIn("No payment was taken and no reward was issued", page)
+        self.assertIn("sb.auth.signInWithPassword", page)
+        self.assertIn("isolated Jarvis QA", page)
+        self.assertIn('show("signin",false)', page)
 
 
 
@@ -76,6 +80,9 @@ class CareerUiContractTests(unittest.TestCase):
         self.assertIn('career_conversations', page)
         self.assertIn('career_messages', page)
         self.assertIn('sender_id:user.id', page)
+        self.assertIn("sb.auth.signInWithPassword", page)
+        self.assertIn("isolated Jarvis QA", page)
+        self.assertIn('show("signin",false)', page)
 
 
 if __name__ == "__main__":

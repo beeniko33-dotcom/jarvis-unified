@@ -21,7 +21,7 @@ label{display:block;font-size:12px;color:#aabbd3;margin:10px 0 5px}input,textare
 <body><div class="wrap">
 <header><div><h1>Jarvis Marketplace</h1><div class="muted">Verified sellers · products and services · affiliate links · order intents</div></div><nav><a class="btn" href="/">← Jarvis workspace</a><a class="btn" href="/career.html">Career Giver</a><button id="signout">Sign out</button></nav></header>
 <div id="loading" class="card">Checking your secure Jarvis session…</div>
-<div id="signin" class="card hidden"><h2>Sign in to Marketplace</h2><p class="muted">Use your existing Jarvis Unified account. Your same-origin session is shared with the main workspace.</p><a class="btn primary" href="/">Open Jarvis sign-in</a></div>
+<div id="signin" class="card hidden"><h2>Sign in to isolated Jarvis QA</h2><p class="muted">Use your QA account. This page connects only to the isolated QA project.</p><label for="signin-email">Email</label><input id="signin-email" type="email" autocomplete="username" required><label for="signin-password">Password</label><input id="signin-password" type="password" autocomplete="current-password" required><p><button class="primary" id="signin-submit">Sign in</button></p><p id="signin-status" class="status-line" aria-live="polite"></p></div>
 <main id="app" class="hidden">
 <div class="notice"><strong>Early access foundation.</strong> Seller verification is controlled by trusted administration. Orders created here are order intents only: no payment is collected, no goods are fulfilled, and no NikoCoin rewards or affiliate commissions are issued yet.</div>
 <div class="grid">
@@ -64,6 +64,7 @@ function show(id,on){$(id).classList.toggle("hidden",!on)}
 async function init(){
  const {data,error}=await sb.auth.getSession();$("loading").classList.add("hidden");
  if(error||!data.session){show("signin",true);return}
+ show("signin",false);
  user=data.session.user;show("app",true);
  await Promise.all([loadSellers(),loadListings()]);
  await Promise.all([loadAffiliateLinks(),loadOrders()]);
@@ -143,6 +144,7 @@ $("create-listing").addEventListener("click",async()=>{
 });
 $("refresh").addEventListener("click",async()=>{await Promise.all([loadSellers(),loadListings(),loadAffiliateLinks(),loadOrders()])});
 $("search").addEventListener("input",renderListings);
+$("signin-submit").addEventListener("click",async()=>{const email=$("signin-email").value.trim(),password=$("signin-password").value;if(!email||!password){say("signin-status","Enter your QA email and password.");return}const button=$("signin-submit");button.disabled=true;say("signin-status","Signing in…");const {error}=await sb.auth.signInWithPassword({email,password});if(error){say("signin-status","Sign-in failed: "+error.message);button.disabled=false;return} $("signin-password").value="";say("signin-status","Signed in. Loading your workspace…");await init();button.disabled=false});
 $("signout").addEventListener("click",async()=>{await sb.auth.signOut();location.href="/"});
 sb.auth.onAuthStateChange((event,session)=>{if(!session){show("app",false);show("signin",true)}});
 await init();
