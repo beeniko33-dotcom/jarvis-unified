@@ -9,6 +9,7 @@ class JaeoPortalConsoleContractTests(unittest.TestCase):
     def test_console_uses_authenticated_qa_edge_function(self):
         page = (ROOT / "apps/portal/jaeo.html").read_text(encoding="utf-8")
         config = (ROOT / "apps/portal/jaeo-config.js").read_text(encoding="utf-8")
+        self.assertIn("@supabase/supabase-js@2.119.2", page)
         self.assertIn("signInWithPassword", page)
         self.assertIn("supabase.auth.signUp", page)
         self.assertIn("/functions/v1/jaeo-operator", page)
