@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
+import re
 from typing import Any
 
 
@@ -90,7 +91,7 @@ def _approval_is_valid(
     )
     if any(not approval.get(key) for key in required):
         return False
-    if not requester_id or not request_hash:
+    if not requester_id or not request_hash or not re.fullmatch(r"[0-9a-f]{64}", request_hash):
         return False
     if approval["status"] != "approved" or approval["action"] != action:
         return False
