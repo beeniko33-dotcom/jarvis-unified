@@ -134,8 +134,19 @@ Deno.serve(async (req: Request) => {
       p_target_email: target.email ?? null, p_detail: { source: "jaeo_console", role: "jaeo_operator" },
     });
     if (auditError || !auditId) {
-      await admin.auth.admin.updateUserById(target.id, { app_metadata: previousMetadata });
-      return json(502, { error: "Operator grant was rolled back because its audit record could not be saved" }, corsOrigin);
+      const { data: rollbackData, error: rollbackError } = await admin.auth.admin.updateUserById(target.id, {
+        app_metadata: previousMetadata,
+      });
+      const rollbackConfirmed = !rollbackError
+        && rollbackData.user?.app_metadata?.jaeo_operator !== true;
+      if (!rollbackConfirmed) {
+        return json(500, {
+          error: "Audit recording failed and operator-role rollback could not be confirmed; owner review is required",
+        }, corsOrigin);
+      }
+      return json(502, {
+        error: "Operator grant was rolled back because its audit record could not be saved",
+      }, corsOrigin);
     }
     return json(200, { user: { id: target.id, email: target.email ?? null, jaeo_operator: true }, audit_id: auditId }, corsOrigin);
   }
