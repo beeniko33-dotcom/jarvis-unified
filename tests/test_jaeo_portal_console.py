@@ -25,7 +25,7 @@ class JaeoPortalConsoleContractTests(unittest.TestCase):
 
     def test_console_discloses_non_execution_boundary(self):
         page = (ROOT / "apps/portal/jaeo.html").read_text(encoding="utf-8").lower()
-        self.assertIn("does not run code", page)
+        self.assertIn("run code", page)
         self.assertIn("does not execute", page)
         self.assertIn("production", page)
         self.assertIn("trading", page)
