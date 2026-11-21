@@ -34,6 +34,9 @@ jobs:
       - name: Verify public portal product boundaries
         run: python scripts/check_portal_boundaries.py
 
+      - name: Syntax-check private live provider validator
+        run: python -m py_compile scripts/validate_twelvedata_provider.py
+
       - name: Run Forex forecast and provider adapter tests
         run: python -m unittest tests.test_forex_forecast tests.test_twelvedata_feed -v
 
