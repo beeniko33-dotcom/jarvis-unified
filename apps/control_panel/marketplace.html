@@ -47,8 +47,10 @@ label{display:block;font-size:12px;color:#aabbd3;margin:10px 0 5px}input,textare
 </div>
 </main></div>
 <script type="module">
-const SUPABASE_URL="https://zythldptlplyutphgxpg.supabase.co";
-const PUBLISHABLE_KEY="sb_publishable_5bXO0f6Xpc3PzWifm7AgoA_IuYaVTa-";
+const CONFIG=window.JARVIS_CONFIG??{};
+const SUPABASE_URL=String(CONFIG.supabaseUrl??"");
+const PUBLISHABLE_KEY=String(CONFIG.supabasePublishableKey??"");
+if(!SUPABASE_URL||!PUBLISHABLE_KEY){document.getElementById("loading").textContent="Marketplace backend is not configured for this environment. The legacy database will not be contacted.";throw new Error("Missing JARVIS_CONFIG");}
 const ORDER_FUNCTION=SUPABASE_URL+"/functions/v1/marketplace-orders";
 const {createClient}=await import("https://esm.sh/@supabase/supabase-js@2.45.4");
 const sb=createClient(SUPABASE_URL,PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
