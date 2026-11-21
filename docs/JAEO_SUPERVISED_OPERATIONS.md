@@ -16,7 +16,7 @@ Orchestrator, Engineering, Database, Infrastructure, Security, QA, Research, Rel
 
 ## Permission model
 
-Low-risk inspection, research, tests, branch creation and pull-request preparation can proceed. Code changes, schema changes, secret changes, provisioning, Cron creation, preview deployments and merges require explicit human approval recorded against the exact action and resource. Production deployments, production operator-control changes and all trading actions are denied even if an approval is supplied.
+Low-risk inspection, research, tests, branch creation and pull-request preparation can proceed. Code changes, schema changes, secret changes, provisioning, Cron creation, preview deployments and merges require explicit human approval recorded against the exact task, action, resource and canonical payload hash. The requester cannot approve their own request; the approver must be a different authenticated human. Production deployments, production operator-control changes and all trading actions are denied even if an approval is supplied.
 
 Forex Signal Intelligence is read-only research. JAEO may organize observations, tests and engineering work, but it cannot create trade signals with execution instructions, orders, positions, sizing, entries, exits or broker requests. Never place credentials in task payloads or feedback.
 
@@ -24,7 +24,7 @@ Production resource identifiers are denylisted, including the production Supabas
 
 ## Task and feedback lifecycle
 
-Tasks use a durable UUID, unique idempotency key, explicit agent role, workspace scope, fixed supervised autonomy and dashboard-plus-report feedback. Feedback records capture status, inspected/changed resources, tests, deployment state, errors, evidence URLs and recommendations. Feedback is append-only. Learning reports are proposals for human review; they cannot change policy or self-modify.
+Tasks use a durable UUID, unique idempotency key, authenticated requester, explicit agent role, workspace scope, fixed supervised autonomy and dashboard-plus-report feedback. Approval rows are bound to the task requester and immutable action/resource/request hash; database triggers reject self-approval and edits after a decision. Feedback records capture status, inspected/changed resources, tests, deployment state, errors, evidence URLs and recommendations. Feedback is append-only. Learning reports are proposals for human review; they cannot change policy or self-modify.
 
 ## Integration truth
 
