@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_jaeo_edge_function_auth_and_server_boundary():
     source = (ROOT / "supabase/functions/jaeo-operator/index.ts").read_text()
+    assert "npm:@supabase/supabase-js@2.119.2" in source
     assert "auth.getUser(token)" in source
     assert "user.app_metadata?.jaeo_operator === true" in source
     assert "SUPABASE_SERVICE_ROLE_KEY" in source
