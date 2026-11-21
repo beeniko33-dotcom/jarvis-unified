@@ -33,7 +33,7 @@
 <div class="top" style="border:0;padding:18px 0"><div><strong id="who"></strong><div id="role" class="meta"></div></div><button id="signout" class="secondary">Sign out</button></div>
 <section id="operatorAdmin" class="card hidden" style="margin:18px 0">
 <h2>Operator administration <span class="pill">OWNER-GOVERNED</span></h2>
-<p class="muted">Only an existing trusted operator can grant operator access to another confirmed QA account. Self-provisioning is blocked. Every grant is audited. To revoke access, use Supabase Dashboard Auth Users; revocation is intentionally not self-service in this QA release.</p>
+<p class="muted">Only the bootstrapped JAEO owner can grant operator access to another confirmed QA account. Self-provisioning is blocked. Every grant is audited. To revoke access, use Supabase Dashboard Auth Users; revocation is intentionally not self-service in this QA release.</p>
 <div class="grid" style="margin:0">
 <div><label for="operatorUser">Confirmed QA account</label><select id="operatorUser"><option value="">Load accounts first</option></select></div>
 <div><label>Role</label><input value="JAEO operator" disabled></div>
@@ -93,15 +93,15 @@ async function api(body){
   return data;
 }
 function showSession(s){
-  session=s;operator=s?.user?.app_metadata?.jaeo_operator===true;
+  session=s;operator=s?.user?.app_metadata?.jaeo_operator===true||s?.user?.app_metadata?.jaeo_owner===true;owner=s?.user?.app_metadata?.jaeo_owner===true;
   $("auth").classList.toggle("hidden",!!s);
   $("workspace").classList.toggle("hidden",!s);
   if(!s)return;
   $("who").textContent=s.user.email??"Signed-in user";
   $("role").textContent=operator?"Trusted JAEO operator":"Requester · supervised access";
   $("operatorBadge").classList.toggle("hidden",!operator);
-  $("operatorAdmin").classList.toggle("hidden",!operator);
-  if(operator) loadOperatorUsers();
+  $("operatorAdmin").classList.toggle("hidden",!owner);
+  if(owner) loadOperatorUsers();
   loadTasks();loadApprovals();
 }
 async function refreshSession(){const {data}=await supabase.auth.getSession();showSession(data.session);}
