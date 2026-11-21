@@ -414,6 +414,7 @@ def main() -> int:
     qa = SupabaseQA()
     run_password = secrets.token_urlsafe(32)
     users_raw = qa.list_users()
+    roles: dict[str, dict] = {}
     roles = {
         "owner": qa.ensure_user(users_raw, OWNER_EMAIL, run_password, owner=True),
         "operator": qa.ensure_user(users_raw, OPERATOR_EMAIL, run_password, reset_operator=True),
@@ -453,6 +454,8 @@ def main() -> int:
         # These short-lived test credentials are discarded after the run.
         # Remove elevated test-only claims even if a browser assertion fails.
         for role in ("owner", "operator"):
+            if role not in roles:
+                continue
             try:
                 qa.set_roles(roles[role], owner=False, operator=False)
             except Exception as cleanup_error:
