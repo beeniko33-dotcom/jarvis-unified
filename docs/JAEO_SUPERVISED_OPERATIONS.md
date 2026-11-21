@@ -72,3 +72,10 @@ No production deployment, paper validation, live trading, or 30-day paper-valida
 ### Supabase SDK compatibility hardening
 - Updated both the Edge Function and browser console to the current pinned `@supabase/supabase-js@2.119.2`, so the new publishable/secret key model is supported without relying on the legacy `anon`/`service_role` keys.
 - Redeployed `jaeo-operator` to isolated QA as version 4 with `verify_jwt=true`.
+
+
+### Approval payload safety
+- General JAEO approval requests now reject secret-change actions. Secret rotation must use a dedicated secrets-management workflow and is not supported by this console.
+- The Edge Function rejects common credential-bearing field names and known token formats in approval payloads before hashing or storage.
+- QA SQL verification confirms the RPC rejects `change_secret` and continues to accept a non-secret `change_code` request. Test data was rolled back.
+- Edge Function version 5 is deployed to isolated QA with JWT verification enabled.
