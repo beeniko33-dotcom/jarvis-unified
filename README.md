@@ -1,31 +1,69 @@
-# Jarvis Unified — Forex Signal & Forecast Intelligence
+# Jarvis Unified
 
-Jarvis Unified is being refocused as a Forex market-analysis, directional-forecast and alerting system. It observes market data and produces transparent bullish, bearish or neutral research forecasts. It does not place trades.
+Jarvis Unified is a single branded ecosystem with three separate applications coordinated by a shared supervised intelligence and governance layer:
 
-## Product scope
-- FX market-data collection with source, timestamp, freshness and quality metadata.
-- Multi-timeframe trend and momentum analysis.
-- Directional forecasts with an explainable strength score and explicit data-quality status.
-- Forecast history, signal-change tracking and configurable alerts.
-- Research dashboards, watchlists and market-session context.
-- Historical forecast evaluation and calibration reporting when sufficient verified data exists.
+- **Forex Signal Intelligence** — read-only FX market research, directional forecasts, signal history and alerts. No live, demo or paper trading and no order execution.
+- **Marketplace** — a hybrid discovery marketplace for jobs, affiliate opportunities, AI tools and digital products, with buyer/seller expansion planned separately.
+- **Career** — a dedicated career application for job discovery, skills, CV tools, application tracking and user-approved application assistance.
+- **JAEO (Jarvis AI Executive Operator)** — the supervised command, task-routing, notification, human-support, approval and audit layer across the ecosystem.
 
-## Explicitly out of scope
-- Live trading, demo trading and paper trading.
-- Broker order APIs, order routing, execution adapters and trade lifecycle management.
-- Positions, balances, portfolios, leverage, lot sizing and position sizing.
-- Entry prices, stop-losses, take-profits and execution plans.
-- Trading kill switches, entry pauses and paper-mode gates.
+The three applications remain independently scoped. JAEO coordinates them through authenticated, least-privilege interfaces and cannot bypass application permissions or approval requirements.
 
-No forecast is a trade instruction or a promise of future performance. The forecast strength score is a heuristic, not a calibrated probability. Forecasts must show source and freshness; stale, malformed or future-dated observations are rejected.
+## Product boundaries
 
-## Quick start
+### Forex Signal Intelligence
+- Collect market observations with source, timestamp, freshness and quality metadata.
+- Analyze multi-timeframe trends and momentum.
+- Produce explainable bullish, bearish or neutral research forecasts.
+- Maintain forecast history, watchlists and configurable alerts.
+- Evaluate historical forecast quality only when verified data is sufficient.
+
+**Strictly research-only:** no live trading, demo trading, paper trading, broker order APIs, execution adapters, positions, balances, leverage, sizing, or trade lifecycle management. Forecasts are not trade instructions. Strength scores are heuristic unless independently calibrated and clearly labelled.
+
+Gate.io, if used, remains a separate crypto integration and must not be conflated with conventional Forex data or execution.
+
+### Marketplace
+- Discover curated jobs and freelance opportunities.
+- Browse affiliate offers with clear disclosure.
+- Discover AI tools and digital products.
+- Support search, categories, saved items and freshness-aware alerts.
+- Keep buyer/seller expansion as a separately governed phase.
+
+External listings must retain provenance and last-checked metadata. Collection must respect source terms, robots rules, rate limits and privacy requirements.
+
+### Career
+- Job search, filters, saved opportunities and alerts.
+- Career guidance and skills resources.
+- CV/resume creation and role-tailoring tools.
+- Application tracking and reminders.
+- Application assistance only with explicit user review and approval before submission.
+
+Career documents and personal data require private, least-privilege access.
+
+### JAEO
+- Authenticated natural-language command intake and intent routing.
+- Governed task orchestration across Forex, Marketplace and Career.
+- Explicit approval queues for consequential actions and external submissions.
+- Human administrator/customer-support handoff.
+- Notifications, system monitoring and task status.
+- Auditable records of actor, action, target, approval, timestamp and outcome.
+
+JAEO must deny by default, enforce authorization server-side, separate user/support/admin/service roles, bind approvals to exact actions and payloads, and never self-elevate privileges or treat model output as authorization.
+
+## Development
+
+Run the Forex forecast tests:
 
     python -m unittest tests.test_forex_forecast -v
-    python scripts/forex_forecast.py candles.json --instrument EURUSD --timeframe M5
+
+Run the full Python test suite:
+
     python -m unittest discover -s tests -v
 
-The JSON input is an array of ordered OHLC candles. Each candle contains an ISO-8601 timezone-aware timestamp and positive open, high, low and close values. At least 20 fresh candles are required.
+For the detailed target architecture, boundaries, governance requirements and delivery sequence, see [docs/JARVIS_UNIFIED_ARCHITECTURE.md](docs/JARVIS_UNIFIED_ARCHITECTURE.md).
 
-## Migration note
-The forecast engine is being added on a dedicated feature branch. Legacy trading and paper-trading modules remain in the repository pending a separately tested removal of imports, routes, schemas, workflows and deployment references. They must not be exposed by the signal-only product. Production services have not been changed.
+## Migration and release status
+
+The repository has been refocused recently toward Forex forecasts. Legacy trading and paper-execution modules may still exist and require a separately tested inventory, isolation and removal; they must never be exposed by the Forex Signal Intelligence product. The older prototype must remain recoverable outside active application routing and deployment.
+
+This README describes the target ecosystem and product boundaries. It does not claim that all four pillars are fully implemented or deployed. Do not merge or deploy until repository-wide implementation, security, integration and release checks have been completed and the required human/JAEO approvals are recorded.
