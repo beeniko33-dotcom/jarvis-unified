@@ -23,7 +23,7 @@ This is a source-level first-pass audit of the default branch `main` at commit `
 - The related Cloudflare Workers were removed in the recent infrastructure cleanup. Therefore these files and associated workflows/docs are stale deployment artefacts and must not be redeployed unchanged.
 - Supabase production and prototype projects were paused, not permanently deleted. Their previous URLs/configuration must not be treated as active services.
 - The connected Cloudflare account has a legacy Pages project, `jarvis-control-panel`, at `jarvis-control-panel.pages.dev`. It is linked to this repository, builds directly from `apps/control_panel`, and uses `main` as its production branch. A separate `jarvis-unified-portal` Pages project has been created for `apps/portal`, with `main` as production branch and feature-branch previews enabled.
-- Cloudflare reported a successful static deployment of the first `jarvis-unified-portal` snapshot at `https://d12898ac.jarvis-unified-portal.pages.dev`. A later copy-only correction is queued at `https://3dd8bfb0.jarvis-unified-portal.pages.dev`; its deployment and browser rendering remain pending verification. The legacy `jarvis-control-panel` feature preview is also reported successful, but remains the old trading UI and is not a safe product launch.
+- Cloudflare reported a successful static deployment of the first `jarvis-unified-portal` snapshot at `https://d12898ac.jarvis-unified-portal.pages.dev`. The latest copy-corrected preview at `https://02b6723e.jarvis-unified-portal.pages.dev` has successful Cloudflare build and deploy stages; browser rendering remains unverified. The legacy `jarvis-control-panel` feature preview is also reported successful, but remains the old trading UI and is not a safe product launch.
 - The existing production Pages deployment is based on the `main` branch. Do not attach the proposed `jarvisunified.com` domain or product subdomains to this legacy project.
 - Cloudflare's authoritative registrar check returned `jarvisunified.com` as registrable at USD 11.17 registration and USD 11.17 renewal. The user chose a free-only domain preference, so no purchase was made. No `jarvisunified.com` zone exists in the connected Cloudflare account.
 - The Cloudflare account cleanup removed the identified Jarvis Workers; it did not authorize deleting unrelated account resources or the entire Cloudflare account.
@@ -68,7 +68,7 @@ This is a source-level first-pass audit of the default branch `main` at commit `
 - Architecture docs: proposed on a draft PR.
 - Product applications: not yet verified as complete.
 - JAEO runtime: not verified as deployed.
-- Cloudflare Pages: one legacy control-panel project exists and must not be reused; a separate free-first `jarvis-unified-portal` project has been created. Cloudflare reported the first static portal snapshot deployed successfully; the latest copy correction is still queued, and browser verification is pending.
+- Cloudflare Pages: one legacy control-panel project exists and must not be reused; a separate free-first `jarvis-unified-portal` project has been created. Cloudflare reported the first static portal snapshot deployed successfully; the latest copy-corrected preview has successful Cloudflare build/deploy stages, while browser verification is pending.
 - Cloudflare Workers: identified Jarvis Workers removed in prior cleanup.
 - Supabase: projects paused; permanent deletion not verified.
 - `jarvisunified.com`: available at a paid price in the latest registrar check; not purchased and not configured.
