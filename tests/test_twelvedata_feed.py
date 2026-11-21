@@ -107,6 +107,12 @@ class TwelveDataFeedTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "API error"):
                     fetch_forex_series(api_key="test-key", opener=self.opener(body), now=self.now)
 
+    def test_rejects_non_forex_instrument_metadata(self):
+        wrong_type = payload()
+        wrong_type["meta"]["type"] = "Cryptocurrency"
+        with self.assertRaisesRegex(ValueError, "Forex/currency"):
+            fetch_forex_series(api_key="test-key", opener=self.opener(wrong_type), now=self.now)
+
     def test_rejects_wrong_symbol_or_interval(self):
         with self.assertRaisesRegex(ValueError, "symbol"):
             fetch_forex_series(api_key="test-key", opener=self.opener(payload(symbol="GBP/USD")), now=self.now)
