@@ -18,7 +18,8 @@ function json(status: number, body: unknown, origin?: string) {
   return new Response(JSON.stringify(body), { status, headers });
 }
 function canonical(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (value === undefined) return "null";
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
   if (Array.isArray(value)) return "[" + value.map(canonical).join(",") + "]";
   const obj = value as Record<string,unknown>;
   return "{" + Object.keys(obj).sort().map((key) => JSON.stringify(key) + ":" + canonical(obj[key])).join(",") + "}";
