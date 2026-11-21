@@ -44,7 +44,7 @@ class Action(StrEnum):
     MERGE_PULL_REQUEST = "merge_pull_request"
     CHANGE_OPERATOR_CONTROLS = "change_operator_controls"
     LIVE_TRADE = "live_trade"
-    PAPER_RESEARCH = "paper_research"
+    RESEARCH = "research"
 
 
 PRODUCTION_RESOURCE_IDS = frozenset({
@@ -57,7 +57,7 @@ PRODUCTION_RESOURCE_IDS = frozenset({
 ALLOWED_AGENTS = frozenset(role.value for role in AgentRole)
 SAFE_AUTONOMOUS_ACTIONS = frozenset({
     Action.INSPECT.value, Action.TEST.value, Action.CREATE_BRANCH.value,
-    Action.OPEN_PULL_REQUEST.value, Action.PAPER_RESEARCH.value,
+    Action.OPEN_PULL_REQUEST.value, Action.RESEARCH.value,
 })
 ALWAYS_APPROVAL_ACTIONS = frozenset({
     Action.CHANGE_CODE.value, Action.CHANGE_SCHEMA.value,
@@ -73,7 +73,7 @@ class PolicyResult:
     decision: Decision
     reason: str
     requires_human_approval: bool
-    mode: str = "paper"
+    mode: str = "supervised"
     live_trading_enabled: bool = False
 
 
@@ -173,7 +173,7 @@ def validate_task(task: dict[str, Any]) -> dict[str, Any]:
         "workspace_scope": scope,
         "autonomy": autonomy,
         "feedback": feedback,
-        "mode": "paper",
+        "mode": "supervised",
         "live_trading_enabled": False,
     }
 
@@ -205,5 +205,5 @@ def feedback_event(
         "tests": (tests or [])[:50], "deployment": deployment,
         "errors": (errors or [])[:20], "evidence_urls": urls[:50],
         "recommendations": (recommendations or [])[:20],
-        "mode": "paper", "live_trading_enabled": False,
+        "mode": "supervised", "live_trading_enabled": False,
     }
