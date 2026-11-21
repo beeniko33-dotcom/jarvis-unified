@@ -29,6 +29,7 @@ class JaeoPortalConsoleContractTests(unittest.TestCase):
         self.assertIn("does not execute", page)
         self.assertIn("production", page)
         self.assertIn("trading", page)
+        self.assertNotIn("change_secret", page)
 
 
 if __name__ == "__main__":
