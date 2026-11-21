@@ -51,7 +51,8 @@ function containsSensitiveMaterial(value: unknown): boolean {
   if (record(value)) return Object.entries(value).some(([key, child]) => sensitiveKey.test(key) || containsSensitiveMaterial(child));
   return false;
 }
-function isOperator(user: User) { return user.app_metadata?.jaeo_operator === true; }
+function isOperator(user: User) { return user.app_metadata?.jaeo_operator === true || user.app_metadata?.jaeo_owner === true; }
+function isOwner(user: User) { return user.app_metadata?.jaeo_owner === true; }
 function mapError(error: { code?: string } | null) {
   if (error?.code === "42501") return 403;
   if (error?.code === "P0002") return 404;
@@ -98,7 +99,7 @@ Deno.serve(async (req: Request) => {
 
   const operation = body.operation;
   if (operation === "list_operator_users") {
-    if (!isOperator(user) || Object.keys(body).length !== 1) return json(403, { error: "JAEO operator role required" }, corsOrigin);
+    if (!isOwner(user) || Object.keys(body).length !== 1) return json(403, { error: "JAEO owner role required" }, corsOrigin);
     const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 200 });
     if (error) return json(502, { error: "Could not load QA account directory" }, corsOrigin);
     return json(200, { users: data.users.map((entry) => ({
@@ -108,7 +109,7 @@ Deno.serve(async (req: Request) => {
     })) }, corsOrigin);
   }
   if (operation === "grant_operator") {
-    if (!isOperator(user)) return json(403, { error: "JAEO operator role required" }, corsOrigin);
+    if (!isOwner(user)) return json(403, { error: "JAEO owner role required" }, corsOrigin);
     if (Object.keys(body).some((k) => !["operation", "target_user_id"].includes(k))
       || typeof body.target_user_id !== "string" || !UUID.test(body.target_user_id)
       || body.target_user_id === user.id) {
