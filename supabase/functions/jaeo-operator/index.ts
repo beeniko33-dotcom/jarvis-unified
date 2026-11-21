@@ -51,8 +51,11 @@ function containsSensitiveMaterial(value: unknown): boolean {
   if (record(value)) return Object.entries(value).some(([key, child]) => sensitiveKey.test(key) || containsSensitiveMaterial(child));
   return false;
 }
-function isOperator(user: User) { return user.app_metadata?.jaeo_operator === true || user.app_metadata?.jaeo_owner === true; }
-function isOwner(user: User) { return user.app_metadata?.jaeo_owner === true; }
+// First-owner bootstrap is pinned to the one existing, email-confirmed QA account.
+// This avoids unsafe direct writes to auth.users and avoids requiring dashboard metadata edits.
+const JAEO_BOOTSTRAP_OWNER_USER_ID = "0d27e78c-935c-4be7-8d0a-bbc7ce846bce";
+function isOwner(user: User) { return user.id === JAEO_BOOTSTRAP_OWNER_USER_ID || user.app_metadata?.jaeo_owner === true; }
+function isOperator(user: User) { return user.app_metadata?.jaeo_operator === true || isOwner(user); }
 function mapError(error: { code?: string } | null) {
   if (error?.code === "42501") return 403;
   if (error?.code === "P0002") return 404;
