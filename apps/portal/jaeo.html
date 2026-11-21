@@ -92,8 +92,9 @@ async function api(body){
   if(!res.ok) throw new Error(data.error??("Request failed ("+res.status+")"));
   return data;
 }
+const JAEO_BOOTSTRAP_OWNER_USER_ID="0d27e78c-935c-4be7-8d0a-bbc7ce846bce";
 function showSession(s){
-  session=s;operator=s?.user?.app_metadata?.jaeo_operator===true||s?.user?.app_metadata?.jaeo_owner===true;owner=s?.user?.app_metadata?.jaeo_owner===true;
+  session=s;owner=s?.user?.id===JAEO_BOOTSTRAP_OWNER_USER_ID||s?.user?.app_metadata?.jaeo_owner===true;operator=s?.user?.app_metadata?.jaeo_operator===true||owner;
   $("auth").classList.toggle("hidden",!!s);
   $("workspace").classList.toggle("hidden",!s);
   if(!s)return;
